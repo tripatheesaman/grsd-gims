@@ -75,19 +75,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-# Non-root
 RUN useradd -m -u 1001 appuser
 
-# Copy standalone output
-COPY --from=build /app/.next/standalone ./
+# ✅ Copy standalone server to /app
+COPY --from=build /app/.next/standalone/ ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 
-# (optional) if you use next/image optimization or runtime cache
 RUN mkdir -p .next/cache && chown -R appuser:appuser /app
-
 USER appuser
-EXPOSE 3000
 
+EXPOSE 3000
 CMD ["node", "server.js"]
