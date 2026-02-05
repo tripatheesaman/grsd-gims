@@ -1,0 +1,60 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: grsd-gims-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - /srv/grsd-gims/db:/var/lib/mysql
+    networks: [gims-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  backend:
+    image: ${DOCKERHUB_USER}/gims-backend:${GIMS_TAG}
+    container_name: grsd-gims-backend
+    restart: unless-stopped
+    env_file:
+      - ./.env.backend
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks: [gims-net]
+    ports:
+      - "127.0.0.1:5100:5000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    volumes:
+      - /srv/grsd-gims/logs:/app/dist/logs:rw
+
+
+  frontend:
+    image: ${DOCKERHUB_USER}/gims-frontend:${GIMS_TAG}
+    container_name: grsd-gims-frontend
+    restart: unless-stopped
+    env_file:
+      - ./.env.frontend
+    depends_on:
+      - backend
+    networks: [gims-net]
+    ports:
+      - "127.0.0.1:3100:3000"
+    volumes:
+      - /srv/grsd-gims/uploads:/app/public/images:rw
+
+networks:
+  gims-net:
+    driver: bridge

@@ -1,0 +1,17 @@
+import express from 'express';
+import { createFuelRecord, updateFuelRecord, deleteFuelRecord, approveFuelRecord, getFuelConfig, receiveFuel, getLastReceive } from '../controllers/fuelController';
+import { checkFlightCount, generateWeeklyDieselReport, generateWeeklyPetrolReport, generateOilConsumptionReport, getWeeklyDieselSummary, } from '../controllers/reportController';
+const router = express.Router();
+router.get('/config/:type', getFuelConfig);
+router.post('/create', createFuelRecord);
+router.put('/:id', updateFuelRecord);
+router.delete('/:id', deleteFuelRecord);
+router.post('/:id/approve', approveFuelRecord);
+router.post('/receive', receiveFuel);
+router.get('/last-receive', getLastReceive);
+router.get('/reports/diesel/weekly/check', checkFlightCount);
+router.get('/reports/diesel/weekly', generateWeeklyDieselReport);
+router.get('/reports/diesel/weekly/summary', getWeeklyDieselSummary);
+router.get('/reports/petrol/weekly', generateWeeklyPetrolReport);
+router.get('/reports/oil/consumption', generateOilConsumptionReport);
+export default router;

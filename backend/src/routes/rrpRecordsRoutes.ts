@@ -1,0 +1,13 @@
+import express from 'express';
+import { getAllRRPRecords, getRRPRecordById, createRRPRecord, updateRRPRecord, deleteRRPRecord, getRRPRecordFilters, getConfiguredSuppliers, updateRRPStatus } from '../controllers/rrpRecordsController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, getAllRRPRecords);
+router.get('/:id', verifyJWT, getRRPRecordById);
+router.post('/', verifyJWT, createRRPRecord);
+router.put('/:id', verifyJWT, updateRRPRecord);
+router.patch('/:id/status', verifyJWT, updateRRPStatus);
+router.delete('/:id', verifyJWT, deleteRRPRecord);
+router.get('/filters/options', verifyJWT, getRRPRecordFilters);
+router.get('/suppliers/list', verifyJWT, getConfiguredSuppliers);
+export default router;

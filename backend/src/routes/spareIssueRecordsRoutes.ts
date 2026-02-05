@@ -1,0 +1,11 @@
+import express from 'express';
+import { getAllSpareIssueRecords, getSpareIssueRecordById, createSpareIssueRecord, updateSpareIssueRecord, deleteSpareIssueRecord, getSpareIssueRecordFilters } from '../controllers/spareIssueRecordsController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, getAllSpareIssueRecords);
+router.get('/:id', verifyJWT, getSpareIssueRecordById);
+router.get('/filters/options', verifyJWT, getSpareIssueRecordFilters);
+router.post('/', verifyJWT, createSpareIssueRecord);
+router.put('/:id', verifyJWT, updateSpareIssueRecord);
+router.delete('/:id', verifyJWT, deleteSpareIssueRecord);
+export default router;

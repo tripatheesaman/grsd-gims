@@ -1,0 +1,11 @@
+import express from 'express';
+import * as nacUnitsController from '../controllers/nacUnitsController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, nacUnitsController.getAllNacUnits);
+router.get('/nac/:nacCode', verifyJWT, nacUnitsController.getUnitsForNac);
+router.get('/nac-codes/search', verifyJWT, nacUnitsController.searchNacCodes);
+router.post('/', verifyJWT, nacUnitsController.createNacUnit);
+router.put('/:id', verifyJWT, nacUnitsController.updateNacUnit);
+router.delete('/:id', verifyJWT, nacUnitsController.deleteNacUnit);
+export default router;

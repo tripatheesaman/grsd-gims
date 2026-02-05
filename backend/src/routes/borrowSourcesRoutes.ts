@@ -1,0 +1,10 @@
+import express from 'express';
+import * as borrowSourcesController from '../controllers/borrowSourcesController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, borrowSourcesController.getAllBorrowSources);
+router.get('/:id', verifyJWT, borrowSourcesController.getBorrowSource);
+router.post('/', verifyJWT, borrowSourcesController.createBorrowSource);
+router.put('/:id', verifyJWT, borrowSourcesController.updateBorrowSource);
+router.delete('/:id', verifyJWT, borrowSourcesController.deleteBorrowSource);
+export default router;

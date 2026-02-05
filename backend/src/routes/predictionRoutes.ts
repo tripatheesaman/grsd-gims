@@ -1,0 +1,10 @@
+import express from 'express';
+import verifyJWT from '../middlewares/verifyJWT';
+import { checkPermissions } from '../middlewares/auth';
+import { getPredictionByNacCode, getPredictionsBatch, listPredictions, refreshPredictions } from '../controllers/predictionController';
+const router = express.Router();
+router.get('/', verifyJWT, checkPermissions(['can_access_predictive_analysis']), listPredictions);
+router.post('/refresh', verifyJWT, checkPermissions(['can_access_predictive_analysis']), refreshPredictions);
+router.post('/batch', verifyJWT, checkPermissions(['can_access_predictive_analysis']), getPredictionsBatch);
+router.get('/:nacCode', verifyJWT, getPredictionByNacCode);
+export default router;

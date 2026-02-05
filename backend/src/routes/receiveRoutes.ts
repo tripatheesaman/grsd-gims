@@ -1,0 +1,17 @@
+import express from 'express';
+import * as receiveController from '../controllers/receiveController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/pending', verifyJWT, receiveController.getPendingReceives);
+router.get('/search/receivables', verifyJWT, receiveController.searchReceivables);
+router.post('/', verifyJWT, receiveController.createReceive);
+router.get('/:receiveId/details', verifyJWT, receiveController.getReceiveDetails);
+router.put('/:receiveId/update', verifyJWT, receiveController.updateReceive);
+router.put('/:receiveId/update-images', verifyJWT, receiveController.updateReceiveImages);
+router.put('/:receiveId/approve', verifyJWT, receiveController.approveReceive);
+router.put('/:receiveId/approve-and-close', verifyJWT, receiveController.approveReceiveAndClose);
+router.put('/:receiveId/reject', verifyJWT, receiveController.rejectReceive);
+router.get('/unit-conversion', verifyJWT, receiveController.getUnitConversion);
+router.post('/unit-conversion', verifyJWT, receiveController.saveUnitConversion);
+router.get('/previous-image', verifyJWT, receiveController.getPreviousImage);
+export default router;

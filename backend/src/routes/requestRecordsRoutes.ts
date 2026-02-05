@@ -1,0 +1,11 @@
+import express from 'express';
+import { getAllRequestRecords, getRequestRecordById, createRequestRecord, updateRequestRecord, deleteRequestRecord, getRequestRecordFilters } from '../controllers/requestRecordsController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, getAllRequestRecords);
+router.get('/:id', verifyJWT, getRequestRecordById);
+router.get('/filters/options', verifyJWT, getRequestRecordFilters);
+router.post('/', verifyJWT, createRequestRecord);
+router.put('/:id', verifyJWT, updateRequestRecord);
+router.delete('/:id', verifyJWT, deleteRequestRecord);
+export default router;

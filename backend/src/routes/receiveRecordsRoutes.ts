@@ -1,0 +1,11 @@
+import express from 'express';
+import { getAllReceiveRecords, getReceiveRecordById, createReceiveRecord, updateReceiveRecord, deleteReceiveRecord, getReceiveRecordFilters } from '../controllers/receiveRecordsController';
+import verifyJWT from '../middlewares/verifyJWT';
+const router = express.Router();
+router.get('/', verifyJWT, getAllReceiveRecords);
+router.get('/:id', verifyJWT, getReceiveRecordById);
+router.post('/', verifyJWT, createReceiveRecord);
+router.put('/:id', verifyJWT, updateReceiveRecord);
+router.delete('/:id', verifyJWT, deleteReceiveRecord);
+router.get('/filters/options', verifyJWT, getReceiveRecordFilters);
+export default router;
