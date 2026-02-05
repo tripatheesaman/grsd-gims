@@ -1,24 +1,25 @@
-import path from "path";
-import type { NextConfig } from "next";
+const path = require("path");
 
-const nextConfig: NextConfig = {
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
+/** @type {import("next").NextConfig} */
+const nextConfig = {
+  basePath: BASE_PATH,
+  assetPrefix: BASE_PATH ? `${BASE_PATH}/` : undefined,
+
   webpack: (config, { isServer }) => {
-    config.resolve.alias = {
-      ...(config.resolve.alias || {}),
-      "@": path.resolve(__dirname, "src"),
-    };
+    config.resolve.alias["@"] = path.resolve(__dirname, "src");
 
     if (isServer) {
       config.externals = config.externals || [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (config.externals as any[]).push("canvas", "chartjs-node-canvas");
+      config.externals.push("canvas", "chartjs-node-canvas");
     }
 
     return config;
   },
+
   serverExternalPackages: ["canvas", "chartjs-node-canvas"],
-  experimental: {},
   outputFileTracingRoot: path.join(__dirname, "../"),
 };
 
-export default nextConfig;
+module.exports = nextConfig;
