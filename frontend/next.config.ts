@@ -1,18 +1,21 @@
-const path = require("path");
+import path from "path";
+import type { NextConfig } from "next";
+import type { Configuration } from "webpack";
 
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
-/** @type {import("next").NextConfig} */
-const nextConfig = {
+const nextConfig: NextConfig = {
   basePath: BASE_PATH,
   assetPrefix: BASE_PATH ? `${BASE_PATH}/` : undefined,
 
-  webpack: (config, { isServer }) => {
-    config.resolve.alias["@"] = path.resolve(__dirname, "src");
+  webpack: (config: Configuration, { isServer }) => {
+    config.resolve = config.resolve || {};
+    config.resolve.alias = config.resolve.alias || {};
+    (config.resolve.alias as Record<string, string>)["@"] = path.resolve(__dirname, "src");
 
     if (isServer) {
       config.externals = config.externals || [];
-      config.externals.push("canvas", "chartjs-node-canvas");
+      (config.externals as any[]).push("canvas", "chartjs-node-canvas");
     }
 
     return config;
@@ -22,4 +25,4 @@ const nextConfig = {
   outputFileTracingRoot: path.join(__dirname, "../"),
 };
 
-module.exports = nextConfig;
+export default nextConfig;
