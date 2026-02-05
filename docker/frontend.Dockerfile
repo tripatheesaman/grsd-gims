@@ -80,13 +80,29 @@ ENV HOSTNAME=0.0.0.0
 
 RUN useradd -m -u 1001 appuser
 
-# ✅ Copy standalone server to /app
-COPY --from=build /app/.next/standalone/ ./
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
+# Put standalone output in its own directory
+COPY --from=build /app/.next/standalone /app/standalone
+COPY --from=build /app/.next/static /app/standalone/.next/static
+COPY --from=build /app/public /app/standalone/public
 
-RUN mkdir -p .next/cache && chown -R appuser:appuser /app
+# Small, robust start script (handles both layouts: server.js OR app/server.js)
+RUN printf '%s\n' \
+  '#!/bin/sh' \
+  'set -e' \
+  'if [ -f /app/standalone/server.js ]; then' \
+  '  exec node /app/standalone/server.js' \
+  'elif [ -f /app/standalone/app/server.js ]; then' \
+  '  exec node /app/standalone/app/server.js' \
+  'else' \
+  '  echo "ERROR: standalone server.js not found";' \
+  '  find /app/standalone -maxdepth 3 -name server.js -print || true;' \
+  '  ls -la /app/standalone | head -n 200 || true;' \
+  '  exit 1;' \
+  'fi' \
+  > /usr/local/bin/start.sh \
+  && chmod +x /usr/local/bin/start.sh \
+  && chown -R appuser:appuser /app
+
 USER appuser
-
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["/usr/local/bin/start.sh"]
