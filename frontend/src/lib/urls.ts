@@ -104,7 +104,7 @@ export const resolveImageUrl = (
     return imagePath;
   }
   if (imagePath.startsWith("/images/") || imagePath.startsWith("/uploads/")) {
-    return withBasePath(imagePath);
+    return withImageBaseUrl(imagePath);
   }
   if (imagePath.startsWith("/api/")) {
     return apiUrl(imagePath);
