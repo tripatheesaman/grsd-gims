@@ -12,6 +12,7 @@ import { useCustomToast } from '@/components/ui/custom-toast';
 import { API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Image from 'next/image';
+import { resolveImageUrl } from '@/lib/urls';
 interface ReceiveItemFormProps {
     isOpen: boolean;
     onClose: () => void;
@@ -420,13 +421,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
             {(formData.imagePath || formData.image) && (<div className="relative w-full h-40 rounded-md bg-white border border-dashed border-[#002a6e]/20 flex items-center justify-center overflow-hidden">
                 <Image src={formData.image
                 ? URL.createObjectURL(formData.image)
-                : formData.imagePath
-                    ? formData.imagePath.startsWith('http')
-                        ? formData.imagePath
-                        : formData.imagePath.startsWith('/images/')
-                            ? `/api${formData.imagePath}`
-                            : `/api/images/${formData.imagePath.replace(/^\//, '')}`
-                    : '/images/nepal_airlines_logo.jpeg'} alt="Item image" fill className="object-contain" unoptimized onError={() => {
+                : resolveImageUrl(formData.imagePath, '/images/nepal_airlines_logo.jpeg')} alt="Item image" fill className="object-contain" unoptimized onError={() => {
                 setPreviousImagePath(null);
                 setFormData(prev => ({ ...prev, imagePath: undefined }));
             }}/>

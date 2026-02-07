@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { FileText, Eye, X, Pencil, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTrigger, } from '@/components/ui/modal';
-import { IMAGE_BASE_URL } from '@/constants/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +14,7 @@ import { useCustomToast } from '@/components/ui/custom-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
 import Image from 'next/image';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 interface PendingRequest {
     requestId: number;
     nacCode: string;
@@ -132,7 +132,7 @@ export function PendingRequestsCount() {
         }
     };
     const handleImageClick = (imageUrl: string) => {
-        setSelectedImage(imageUrl.startsWith('http') ? imageUrl : `${IMAGE_BASE_URL}${imageUrl.replace(/^\//, '')}`);
+        setSelectedImage(resolveImageUrl(imageUrl, '/images/nepal_airlines_logo.png'));
         setIsImagePreviewOpen(true);
     };
     const handleEditClick = () => {
@@ -434,15 +434,9 @@ export function PendingRequestsCount() {
                       <td className="p-4 text-gray-900">{item.unit || '-'}</td>
                       <td className="p-4 text-gray-900">{item.specifications || '-'}</td>
                       <td className="p-4">
-                        <Image src={item.imageUrl
-                ? item.imageUrl.startsWith('http')
-                    ? item.imageUrl
-                    : item.imageUrl.startsWith('/images/')
-                        ? `/api${item.imageUrl}`
-                        : item.imageUrl
-                : '/images/nepal_airlines_logo.png'} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => item.imageUrl && handleImageClick(item.imageUrl)} onError={(e) => {
+                        <Image src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => item.imageUrl && handleImageClick(item.imageUrl)} onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = '/images/nepal_airlines_logo.png';
+                target.src = withBasePath('/images/nepal_airlines_logo.png');
             }} unoptimized/>
                       </td>
                     </tr>))}
@@ -570,7 +564,7 @@ export function PendingRequestsCount() {
                     <div className="space-y-2">
                       <Label className="text-[#003594] font-medium">Image</Label>
                       <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-                        {item.imageUrl && (<Image src={item.imageUrl.startsWith('http') ? item.imageUrl : `${IMAGE_BASE_URL}${item.imageUrl.replace(/^\//, '')}`} alt={item.itemName} width={96} height={96} className="w-24 h-24 object-cover rounded-lg border border-[#002a6e]/10 hover:opacity-80 transition-opacity" unoptimized={item.imageUrl.startsWith('http')}/>)}
+                        {item.imageUrl && (<Image src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')} alt={item.itemName} width={96} height={96} className="w-24 h-24 object-cover rounded-lg border border-[#002a6e]/10 hover:opacity-80 transition-opacity" unoptimized={item.imageUrl.startsWith('http')}/>)}
                         <div className="flex-1 w-full">
                           <Input type="file" accept="image/*" onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -613,13 +607,7 @@ export function PendingRequestsCount() {
             <Button variant="ghost" size="icon" className="absolute right-2 top-2 z-10 hover:bg-[#003594]/5 transition-colors" onClick={() => setIsImagePreviewOpen(false)}>
               <X className="h-4 w-4 text-[#003594]"/>
             </Button>
-            <Image src={selectedImage
-            ? selectedImage.startsWith('http')
-                ? selectedImage
-                : selectedImage.startsWith('/images/')
-                    ? `/api${selectedImage}`
-                    : selectedImage
-            : '/images/nepal_airlines_logo.png'} alt="Preview" width={800} height={600} className="w-full h-auto max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
+            <Image src={selectedImage || withBasePath('/images/nepal_airlines_logo.png')} alt="Preview" width={800} height={600} className="w-full h-auto max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
           </div>
         </ModalContent>
       </Modal>

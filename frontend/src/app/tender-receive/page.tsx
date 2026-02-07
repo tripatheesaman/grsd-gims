@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { TenderReceiveCartItem } from '@/types/tender-receive';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api';
+import { withBasePath } from '@/lib/urls';
 import { SearchResult } from '@/types/search';
 const SearchResults = lazy(() => import('@/components/search/SearchResults').then(module => ({ default: module.SearchResults })));
 const TenderReceiveCart = lazy(() => import('@/components/tender-receive/TenderReceiveCart').then(module => ({ default: module.TenderReceiveCart })));
@@ -139,7 +140,7 @@ export default function TenderReceivePage() {
                         const formData = new FormData();
                         formData.append('file', item.image);
                         formData.append('folder', 'request');
-                        const uploadResponse = await fetch('/api/upload', {
+                        const uploadResponse = await fetch(withBasePath('/api/upload'), {
                             method: 'POST',
                             body: formData,
                         });

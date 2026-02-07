@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { format } from 'date-fns';
 import { cn } from '@/utils/utils';
 import Image from 'next/image';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 interface PrintReceivePreviewModalProps {
     receive: {
         receiveNumber: string;
@@ -29,6 +30,7 @@ interface PrintReceivePreviewModalProps {
 export function PrintReceivePreviewModal({ receive, isOpen, onClose }: PrintReceivePreviewModalProps) {
     if (!receive)
         return null;
+    const fallbackImage = withBasePath('/images/nepal_airlines_logo.png');
     return (<Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl bg-white rounded-lg shadow-xl border-[#002a6e]/10">
         <DialogHeader className="pb-4 border-b border-[#002a6e]/10">
@@ -80,15 +82,9 @@ export function PrintReceivePreviewModal({ receive, isOpen, onClose }: PrintRece
                       <td className="px-6 py-4 whitespace-nowrap">{item.location}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{item.cardNumber}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <Image src={item.imageUrl
-                ? item.imageUrl.startsWith('http')
-                    ? item.imageUrl
-                    : item.imageUrl.startsWith('/images/')
-                        ? `/api${item.imageUrl}`
-                        : item.imageUrl
-                : '/images/nepal_airlines_logo.png'} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10" onError={(e) => {
+                        <Image src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10" onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = '/images/nepal_airlines_logo.png';
+                target.src = fallbackImage;
             }} unoptimized/>
                       </td>
                     </tr>))}

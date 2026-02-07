@@ -39,25 +39,42 @@ import locationPhrasesRoutes from './routes/locationPhrasesRoutes';
 import { startRequestReminderWorker } from './services/requestReminderService';
 const app = express();
 const PORT = process.env.PORT || 3500;
+const truthyValues = new Set(["1", "true", "yes", "on"]);
+const trustProxy = truthyValues.has((process.env.TRUST_PROXY || "").toLowerCase());
+if (trustProxy) {
+    app.set("trust proxy", 1);
+}
 app.use(logger);
-app.use(cors({
+const defaultOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://192.168.1.254',
+];
+const envOrigins = [
+    process.env.CORS_ORIGIN,
+    ...(process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : []),
+]
+    .map((origin) => origin?.trim())
+    .filter(Boolean);
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
+const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
         if (!origin)
             return callback(null, true);
-        const allowedOrigins = [
-            'http://localhost:3000',
-            'http://192.168.1.39:3000',
-            process.env.CORS_ORIGIN
-        ].filter(Boolean);
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         }
         else {
-            callback(new Error('Not allowed by CORS'));
+            const error = new Error('Not allowed by CORS');
+            (error as Error & { status?: number }).status = 403;
+            callback(error);
         }
     },
-    credentials: true
-}));
+    credentials: true,
+    optionsSuccessStatus: 204
+};
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json());
 app.use("/", express.static(path.join(__dirname, "../", "public")));
@@ -90,12 +107,25 @@ app.use('/api/location-phrases', verifyJWT, locationPhrasesRoutes);
 app.use('/api/predictions', predictionRoutes);
 app.use('/api/asset-types', verifyJWT, assetTypeRoutes);
 app.use('/api/assets', verifyJWT, assetRoutes);
-app.get('/health', (req: Request, res: Response) => {
-    res.status(200).json({
-        status: 'ok',
-        timestamp: new Date().toISOString()
-    });
-});
+const healthHandler = async (req: Request, res: Response) => {
+    try {
+        await pool.query("SELECT 1");
+        res.status(200).json({
+            status: 'ok',
+            db: 'ok',
+            timestamp: new Date().toISOString()
+        });
+    }
+    catch {
+        res.status(503).json({
+            status: 'error',
+            db: 'error',
+            timestamp: new Date().toISOString()
+        });
+    }
+};
+app.get('/api/health', healthHandler);
+app.get('/health', healthHandler);
 app.use((req: Request, res: Response) => {
     logEvents(`404 - Route not found: ${req.method} ${req.originalUrl}`, "serverLog.log");
     if (req.path.startsWith('/api/')) {

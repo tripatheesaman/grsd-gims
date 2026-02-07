@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 import { API } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
+import { withBasePath } from '@/lib/urls';
 export default function ResetPasswordPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -73,7 +74,7 @@ export default function ResetPasswordPage() {
     return (<main className="flex min-h-screen items-center justify-center bg-gray-100 px-4 py-12">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl p-8">
         <div className="flex justify-center mb-6">
-          <Image src="/images/nepal_airlines_logo.jpeg" alt="Nepal Airlines Logo" width={150} height={150} className="h-auto w-auto" priority/>
+          <Image src={withBasePath("/images/nepal_airlines_logo.jpeg")} alt="Nepal Airlines Logo" width={150} height={150} className="h-auto w-auto" priority/>
         </div>
 
         <h1 className="text-2xl font-bold text-center text-[#003594] mb-6">

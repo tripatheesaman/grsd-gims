@@ -1,5 +1,5 @@
 import axios, { AxiosRequestHeaders } from "axios";
-import { API_BASE_URL } from "@/constants/api";
+import { getApiBaseUrl } from "@/lib/urls";
 const isBrowser = typeof window !== 'undefined';
 const getToken = () => {
     if (!isBrowser)
@@ -7,10 +7,21 @@ const getToken = () => {
     return localStorage.getItem('token');
 };
 export const API = axios.create({
-    baseURL: API_BASE_URL,
+    baseURL: getApiBaseUrl(),
     withCredentials: true,
 });
+
+const normalizeApiPath = (url?: string) => {
+    if (!url || /^https?:\/\//i.test(url)) {
+        return url;
+    }
+    return url.replace(/^\/?api(\/|$)/, "/");
+};
+
 API.interceptors.request.use((config) => {
+    if (config.url) {
+        config.url = normalizeApiPath(config.url);
+    }
     const token = getToken();
     if (token) {
         if (!config.headers) {

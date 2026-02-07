@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { embedDieselWeeklyCharts, type DieselWeeklyChartsRequest } from '@/lib/reports/dieselWeeklyExcelWithCharts';
+import { getApiBaseUrl } from '@/lib/urls';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function POST(req: Request): Promise<Response> {
@@ -37,9 +38,8 @@ export async function POST(req: Request): Promise<Response> {
             return Response.json({ message: 'Missing auth token. Please ensure you are logged in.' }, { status: 401 });
         }
         const baseUrl = process.env.INTERNAL_API_BASE_URL ||
-            process.env.NEXT_PUBLIC_API_BASE_URL ||
             process.env.API_BASE_URL ||
-            'http://localhost:5000';
+            getApiBaseUrl();
         let summary: DieselWeeklyChartsRequest;
         let reportArrayBuffer: ArrayBuffer;
         if (body.reportBase64) {

@@ -4,11 +4,12 @@ import DashboardLayoutContent from '@/components/layout/DashboardLayoutContent';
 import { AuthContextProvider } from '@/context/AuthContext';
 import { Toaster } from "@/components/ui/toaster";
 import { NotificationProvider } from '@/context/NotificationContext';
+import { withBasePath } from '@/lib/urls';
 export const metadata: Metadata = {
     title: 'GIMS',
     description: 'Inventory Management System',
     icons: {
-        icon: '/images/nac_icon.png',
+        icon: withBasePath('/images/nac_icon.png'),
     },
 };
 interface LayoutProps {

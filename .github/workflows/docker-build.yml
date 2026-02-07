@@ -19,6 +19,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Guardrail: fail fast if required public vars are missing/empty
+      - name: Verify required public build vars are set
+        run: |
+          test -n "${{ vars.NEXT_PUBLIC_BASE_PATH }}" || (echo "Missing var: NEXT_PUBLIC_BASE_PATH" && exit 1)
+          test -n "${{ vars.NEXT_PUBLIC_API_BASE_URL }}" || (echo "Missing var: NEXT_PUBLIC_API_BASE_URL" && exit 1)
+          test -n "${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}" || (echo "Missing var: NEXT_PUBLIC_IMAGE_BASE_URL" && exit 1)
+          echo "NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}"
+          echo "NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}"
+          echo "NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}"
+
       - name: Build & push frontend (latest)
         if: github.ref_type == 'branch'
         uses: docker/build-push-action@v6
@@ -28,6 +38,10 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/gims-frontend:latest
+          build-args: |
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+            NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -52,6 +66,10 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/gims-frontend:${{ github.ref_name }}
+          build-args: |
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+            NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

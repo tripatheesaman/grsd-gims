@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/utils/utils';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import Image from 'next/image';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 interface PendingReceive {
     id: number;
     nacCode: string;
@@ -152,25 +153,7 @@ export function PendingReceivesCount() {
         }
     };
     const handleImageClick = (imageUrl: string) => {
-        let processedImageUrl = imageUrl;
-        if (imageUrl && imageUrl !== 'N/A' && imageUrl !== '') {
-            if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-                processedImageUrl = imageUrl;
-            }
-            else if (imageUrl.startsWith('/images/')) {
-                processedImageUrl = `/api${imageUrl}`;
-            }
-            else if (!imageUrl.startsWith('/')) {
-                processedImageUrl = `/api/images/${imageUrl}`;
-            }
-            else {
-                processedImageUrl = `/api${imageUrl}`;
-            }
-        }
-        else {
-            processedImageUrl = FALLBACK_IMAGE;
-        }
-        setSelectedImage(processedImageUrl);
+        setSelectedImage(resolveImageUrl(imageUrl, FALLBACK_IMAGE));
         setIsImagePreviewOpen(true);
     };
     const validateNacCode = (code: string): boolean => {
@@ -209,7 +192,7 @@ export function PendingReceivesCount() {
                     const formData = new FormData();
                     formData.append('file', editData.newRequestedImage);
                     formData.append('folder', 'request');
-                    const uploadResponse = await fetch('/api/upload', {
+                    const uploadResponse = await fetch(withBasePath('/api/upload'), {
                         method: 'POST',
                         body: formData,
                     });
@@ -229,7 +212,7 @@ export function PendingReceivesCount() {
                     const formData = new FormData();
                     formData.append('file', editData.newReceivedImage);
                     formData.append('folder', 'receive');
-                    const uploadResponse = await fetch('/api/upload', {
+                    const uploadResponse = await fetch(withBasePath('/api/upload'), {
                         method: 'POST',
                         body: formData,
                     });
@@ -651,13 +634,7 @@ export function PendingReceivesCount() {
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-[#003594]">Image</p>
                     <div className="mt-2">
-                      <Image src={selectedReceive?.requestedImage
-            ? selectedReceive.requestedImage.startsWith('http')
-                ? selectedReceive.requestedImage
-                : selectedReceive.requestedImage.startsWith('/images/')
-                    ? `/api${selectedReceive.requestedImage}`
-                    : selectedReceive.requestedImage
-            : FALLBACK_IMAGE} alt={selectedReceive?.receiveSource === 'tender' ? 'Tender Item' : 'Requested Item'} width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.requestedImage && handleImageClick(selectedReceive.requestedImage)} unoptimized/>
+                      <Image src={resolveImageUrl(selectedReceive?.requestedImage, FALLBACK_IMAGE)} alt={selectedReceive?.receiveSource === 'tender' ? 'Tender Item' : 'Requested Item'} width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.requestedImage && handleImageClick(selectedReceive.requestedImage)} unoptimized/>
                     </div>
                   </div>
                 </div>
@@ -713,13 +690,7 @@ export function PendingReceivesCount() {
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-[#003594]">Image</p>
                     <div className="mt-2">
-                      <Image src={selectedReceive?.receivedImage
-            ? selectedReceive.receivedImage.startsWith('http')
-                ? selectedReceive.receivedImage
-                : selectedReceive.receivedImage.startsWith('/images/')
-                    ? `/api${selectedReceive.receivedImage}`
-                    : selectedReceive.receivedImage
-            : FALLBACK_IMAGE} alt="Received Item" width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.receivedImage && handleImageClick(selectedReceive.receivedImage)} unoptimized/>
+                      <Image src={resolveImageUrl(selectedReceive?.receivedImage, FALLBACK_IMAGE)} alt="Received Item" width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.receivedImage && handleImageClick(selectedReceive.receivedImage)} unoptimized/>
                     </div>
                   </div>
                 </div>
@@ -765,13 +736,9 @@ export function PendingReceivesCount() {
                 <Label className="text-[#003594] font-medium">Requested Image</Label>
                 <div className="flex items-center gap-4">
                   {selectedReceive?.requestedImage && (<div className="relative">
-                      <Image src={selectedReceive.requestedImage.startsWith('http')
-                ? selectedReceive.requestedImage
-                : selectedReceive.requestedImage.startsWith('/images/')
-                    ? `/api${selectedReceive.requestedImage}`
-                    : `/api/images/${selectedReceive.requestedImage}`} alt="Current Requested Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
+                      <Image src={resolveImageUrl(selectedReceive.requestedImage, FALLBACK_IMAGE)} alt="Current Requested Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = FALLBACK_IMAGE;
+                target.src = withBasePath(FALLBACK_IMAGE);
             }}/>
                       <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                         Current
@@ -795,13 +762,9 @@ export function PendingReceivesCount() {
                 <Label className="text-[#003594] font-medium">Received Image</Label>
                 <div className="flex items-center gap-4">
                   {selectedReceive?.receivedImage && (<div className="relative">
-                      <Image src={selectedReceive.receivedImage.startsWith('http')
-                ? selectedReceive.receivedImage
-                : selectedReceive.receivedImage.startsWith('/images/')
-                    ? `/api${selectedReceive.receivedImage}`
-                    : `/api/images/${selectedReceive.receivedImage}`} alt="Current Received Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
+                      <Image src={resolveImageUrl(selectedReceive.receivedImage, FALLBACK_IMAGE)} alt="Current Received Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = FALLBACK_IMAGE;
+                target.src = withBasePath(FALLBACK_IMAGE);
             }}/>
                       <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
                         Current
@@ -869,13 +832,7 @@ export function PendingReceivesCount() {
             <ModalTitle className="text-xl font-semibold text-[#003594]">Image Preview</ModalTitle>
           </ModalHeader>
           <div className="p-6 flex justify-center">
-            <Image src={selectedImage
-            ? selectedImage.startsWith('http')
-                ? selectedImage
-                : selectedImage.startsWith('/images/')
-                    ? `/api${selectedImage}`
-                    : selectedImage
-            : FALLBACK_IMAGE} alt="Preview" width={400} height={400} className="max-w-full max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
+            <Image src={selectedImage || withBasePath(FALLBACK_IMAGE)} alt="Preview" width={400} height={400} className="max-w-full max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
           </div>
         </ModalContent>
       </Modal>

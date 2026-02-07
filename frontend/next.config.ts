@@ -1,12 +1,22 @@
 import path from "path";
 import type { NextConfig } from "next";
 
-const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const normalizeBasePath = (value?: string) => {
+  if (!value || value === "/") {
+    return "";
+  }
+  const withLeadingSlash = value.startsWith("/") ? value : `/${value}`;
+  return withLeadingSlash.replace(/\/+$/, "");
+};
+
+const BASE_PATH = normalizeBasePath(
+  process.env.NEXT_PUBLIC_BASE_PATH || "/inventory"
+);
 
 const nextConfig: NextConfig = {
   output: "standalone",
   basePath: BASE_PATH,
-  assetPrefix: BASE_PATH ? `${BASE_PATH}/` : undefined,
+  assetPrefix: BASE_PATH || undefined,
 
   webpack: (config, { isServer }) => {
     config.resolve = config.resolve || {};

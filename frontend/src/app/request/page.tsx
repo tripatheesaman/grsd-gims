@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api';
+import { withBasePath } from '@/lib/urls';
 import { SearchResult } from '@/types/search';
 import { usePrediction } from '@/hooks/usePrediction';
 import { PredictionSummaryCard } from '@/components/prediction/PredictionSummaryCard';
@@ -340,7 +341,7 @@ export default function RequestPage() {
                         const formData = new FormData();
                         formData.append('file', item.image);
                         formData.append('folder', 'request');
-                        const uploadResponse = await fetch('/api/upload', {
+                        const uploadResponse = await fetch(withBasePath('/api/upload'), {
                             method: 'POST',
                             body: formData,
                         });

@@ -4,6 +4,7 @@ import { Fragment } from 'react';
 import { X, Maximize2 } from 'lucide-react';
 import { ItemDetails } from '@/types/item';
 import Image from 'next/image';
+import { resolveImageUrl } from '@/lib/urls';
 interface ItemDetailsModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -12,13 +13,7 @@ interface ItemDetailsModalProps {
 export const ItemDetailsModal = ({ isOpen, onClose, item }: ItemDetailsModalProps) => {
     if (!item)
         return null;
-    const imageUrl = item.imageUrl
-        ? item.imageUrl.startsWith('http')
-            ? item.imageUrl
-            : item.imageUrl.startsWith('/images/')
-                ? `/api${item.imageUrl}`
-                : item.imageUrl
-        : '/images/nepal_airlines_logo.png';
+    const imageUrl = resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png');
     const imageAlt = item.itemName || 'Item Image';
     const handleImageClick = () => {
         window.open(imageUrl, '_blank');
