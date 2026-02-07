@@ -83,7 +83,9 @@ RUN useradd -m -u 1001 appuser
 # Put standalone output in its own directory
 COPY --from=build /app/.next/standalone /app/standalone
 COPY --from=build /app/.next/static /app/standalone/.next/static
+COPY --from=build /app/.next/static /app/standalone/app/.next/static
 COPY --from=build /app/public /app/standalone/public
+COPY --from=build /app/public /app/standalone/app/public
 
 # Small, robust start script (handles both layouts: server.js OR app/server.js)
 RUN printf '%s\n' \
