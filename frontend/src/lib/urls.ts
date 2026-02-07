@@ -77,9 +77,14 @@ export const withImageBaseUrl = (path: string): string => {
   }
   const baseWithoutSlash = base.replace(/\/+$/, "");
   const baseEndsWithImages = baseWithoutSlash.endsWith("/images");
-  const cleanedPath = baseEndsWithImages
-    ? normalizedPath.replace(/^\/images(\/|$)/, "/")
-    : normalizedPath;
+  const baseEndsWithUploads = baseWithoutSlash.endsWith("/uploads");
+  let cleanedPath = normalizedPath;
+  if (baseEndsWithImages) {
+    cleanedPath = cleanedPath.replace(/^\/images(\/|$)/, "/");
+  }
+  if (baseEndsWithUploads) {
+    cleanedPath = cleanedPath.replace(/^\/(images|uploads)(\/|$)/, "/");
+  }
   return joinPaths(baseWithoutSlash, cleanedPath);
 };
 
