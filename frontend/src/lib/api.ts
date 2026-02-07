@@ -6,13 +6,18 @@ const getToken = () => {
         return null;
     return localStorage.getItem('token');
 };
+const apiBaseUrl = getApiBaseUrl();
+const shouldStripApiPrefix = apiBaseUrl.endsWith("/api");
 export const API = axios.create({
-    baseURL: getApiBaseUrl(),
+    baseURL: apiBaseUrl,
     withCredentials: true,
 });
 
 const normalizeApiPath = (url?: string) => {
     if (!url || /^https?:\/\//i.test(url)) {
+        return url;
+    }
+    if (!shouldStripApiPrefix) {
         return url;
     }
     return url.replace(/^\/?api(\/|$)/, "/");
