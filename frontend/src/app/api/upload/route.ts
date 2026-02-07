@@ -19,8 +19,8 @@ export async function POST(request: NextRequest) {
         else {
             filename = `${uuidv4()}.${fileExtension}`;
         }
-        const publicDir = path.join(process.cwd(), 'public');
-        const targetDir = path.join(publicDir, 'images', folder);
+        const uploadsRoot = process.env.UPLOADS_DIR || path.join(process.cwd(), 'public', 'images');
+        const targetDir = path.join(uploadsRoot, folder);
         if (!fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }
