@@ -4,8 +4,14 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-export async function GET(_req: NextRequest, context: any) {
-  const segments = (context as { params: { path: string[] } }).params.path;
+type ImageRouteContext = {
+  params: {
+    path: string[];
+  };
+};
+
+export async function GET(_req: NextRequest, context: ImageRouteContext) {
+  const segments = context.params.path;
   const filePath = path.join(process.cwd(), 'public', 'images', ...segments);
   if (!fs.existsSync(filePath)) {
     return new NextResponse('Not found', { status: 404 });
