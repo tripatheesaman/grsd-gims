@@ -371,10 +371,10 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             subtitle: requestNumber,
             body: bodyLines,
             buttonLabel: 'View Request',
-            buttonUrl: (process.env.NEXTAUTH_URL || process.env.APP_BASE_URL || 'http://192.168.1.254:3000') + `/request/${requestNumber}`,
+            buttonUrl: (process.env.NEXTAUTH_URL || process.env.APP_BASE_URL || 'http:
         });
 
-        // Determine subject based on status
+        
         let emailSubject = '';
         if (totalReceived === 0) {
             emailSubject = `Request Force Closed: ${requestNumber}`;
@@ -917,12 +917,12 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                         finalRequestedBy = `${authority.name}${authority.designation ? ` (${authority.designation})` : ''}`;
                     }
                 } else if (!finalRequestedBy && existingItem) {
-                    // Preserve existing requested_by if not provided and no requested_by_id
+                    
                     finalRequestedBy = existingItem.requested_by || '';
                     finalRequestedById = existingItem.requested_by_id ?? null;
                     finalRequestedByEmail = existingItem.requested_by_email ?? null;
                 } else {
-                    // Use provided requestedBy or empty string
+                    
                     finalRequestedBy = finalRequestedBy || '';
                 }
 

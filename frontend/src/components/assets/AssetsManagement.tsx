@@ -38,7 +38,6 @@ export function AssetsManagement() {
             }
         }
         catch (error: unknown) {
-            console.error('Error fetching asset types:', error);
             const errorMessage = (error as {
                 response?: {
                     data?: {

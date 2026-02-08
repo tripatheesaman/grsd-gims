@@ -22,7 +22,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Guardrail: fail fast if required public vars are missing/empty
       - name: Verify required public build vars are set
         run: |
           test -n "${{ vars.NEXT_PUBLIC_BASE_PATH }}" || (echo "Missing var: NEXT_PUBLIC_BASE_PATH" && exit 1)

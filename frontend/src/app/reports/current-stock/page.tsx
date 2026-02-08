@@ -694,8 +694,7 @@ export default function CurrentStockReportPage() {
                 filtered = [];
             }
         }
-        catch (error) {
-            console.error('Error filtering records by date:', error);
+        catch {
             filtered = [];
         }
         setFilteredRecords(filtered);

@@ -45,8 +45,7 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
             const response = await API.get<AssetTypeWithProperties>(`/api/asset-types/${typeId}`);
             setSelectedAssetType(response.data);
         }
-        catch (error) {
-            console.error('Failed to load asset type:', error);
+        catch {
         }
         finally {
             setIsLoadingType(false);

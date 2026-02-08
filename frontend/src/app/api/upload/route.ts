@@ -33,9 +33,7 @@ export async function POST(request: NextRequest) {
             path: `/images/${folder}/${filename}`
         });
     }
-    catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error('Upload failed:', message);
+    catch {
         return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
     }
 }
