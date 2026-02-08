@@ -14,7 +14,7 @@ export const API = axios.create({
 });
 
 const normalizeApiPath = (url?: string) => {
-    if (!url || /^https?:\/\
+    if (!url || /^https?:\/\//i.test(url)) {
         return url;
     }
     if (!shouldStripApiPrefix) {

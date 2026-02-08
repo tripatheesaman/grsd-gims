@@ -126,7 +126,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
                 return '';
             if (dateString.includes('T'))
                 return dateString.split('T')[0];
-            return dateString.replace(/\
+            return dateString.split(' ')[0];
         };
         const initialEditData = {
             ...rrpData,
