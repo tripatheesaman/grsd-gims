@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
@@ -32,7 +33,9 @@ export async function POST(request: NextRequest) {
             path: `/images/${folder}/${filename}`
         });
     }
-    catch {
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        console.error('Upload failed:', message);
         return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
     }
 }
