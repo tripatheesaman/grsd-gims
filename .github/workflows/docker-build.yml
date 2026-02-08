@@ -2,19 +2,25 @@ name: Build & Push GIMS (prod)
 
 on:
   push:
-    branches: [ "main" ]
-  tags:
-    - "v*.*.*"
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
 
 jobs:
   build:
+    name: Build & Push Images (prod)
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -29,7 +35,7 @@ jobs:
           echo "NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}"
 
       - name: Build & push frontend (latest)
-        if: github.ref_type == 'branch'
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -45,7 +51,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build & push backend (latest)
-        if: github.ref_type == 'branch'
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -57,7 +63,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build & push frontend (version tag)
-        if: github.ref_type == 'tag'
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,7 +79,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build & push backend (version tag)
-        if: github.ref_type == 'tag'
+        if: startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .

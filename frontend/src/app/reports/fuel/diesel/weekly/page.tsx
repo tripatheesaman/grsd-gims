@@ -250,19 +250,19 @@ export default function WeeklyDieselReportPage() {
     };
     const generateReportWithCharts = async (flightCount?: number) => {
         try {
+            const reportRes = await API.get('/api/fuel/reports/diesel/weekly', {
+                params: {
+                  start_date: format(startDate, 'yyyy-MM-dd'),
+                  end_date: format(endDate, 'yyyy-MM-dd'),
+                  flight_count: flightCount,
+                },
+                responseType: 'arraybuffer',
+              });
             const summaryRes = await API.get('/api/fuel/reports/diesel/weekly/summary', {
                 params: {
                     start_date: format(startDate, 'yyyy-MM-dd'),
                     end_date: format(endDate, 'yyyy-MM-dd'),
                 },
-            });
-            const reportRes = await API.get('/api/fuel/reports/diesel/weekly', {
-                params: {
-                    start_date: format(startDate, 'yyyy-MM-dd'),
-                    end_date: format(endDate, 'yyyy-MM-dd'),
-                    flight_count: flightCount,
-                },
-                responseType: 'arraybuffer',
             });
             const reportBytes = new Uint8Array(reportRes.data as ArrayBuffer);
             let binary = '';
