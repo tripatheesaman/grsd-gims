@@ -371,7 +371,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             subtitle: requestNumber,
             body: bodyLines,
             buttonLabel: 'View Request',
-            buttonUrl: (process.env.NEXTAUTH_URL || process.env.APP_BASE_URL || 'http:
+            buttonUrl: (process.env.NEXTAUTH_URL || process.env.APP_BASE_URL || 'http://192.168.1.254:3000') + `/request/${requestNumber}`,
         });
 
         
