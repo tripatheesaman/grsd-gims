@@ -2,14 +2,14 @@ name: Build & Push GIMS (prod)
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - "v*.*.*"
+    branches: ["main"]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: ["main"]
 
 jobs:
   build:
-    name: Build & Push Images (prod)
+    name: CI - Docker build (prod)
     runs-on: ubuntu-latest
 
     steps:
@@ -19,7 +19,8 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to Docker Hub (push only)
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -30,12 +31,35 @@ jobs:
           test -n "${{ vars.NEXT_PUBLIC_BASE_PATH }}" || (echo "Missing var: NEXT_PUBLIC_BASE_PATH" && exit 1)
           test -n "${{ vars.NEXT_PUBLIC_API_BASE_URL }}" || (echo "Missing var: NEXT_PUBLIC_API_BASE_URL" && exit 1)
           test -n "${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}" || (echo "Missing var: NEXT_PUBLIC_IMAGE_BASE_URL" && exit 1)
-          echo "NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}"
-          echo "NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}"
-          echo "NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}"
 
-      - name: Build & push frontend (latest)
-        if: github.ref == 'refs/heads/main'
+      # PR to main: build-only (no push)
+      - name: Build frontend (PR build only)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/frontend.Dockerfile
+          push: false
+          build-args: |
+            NEXT_PUBLIC_BASE_PATH=${{ vars.NEXT_PUBLIC_BASE_PATH }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+            NEXT_PUBLIC_IMAGE_BASE_URL=${{ vars.NEXT_PUBLIC_IMAGE_BASE_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build backend (PR build only)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Push to main: publish :latest
+      - name: Build & push frontend (:latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -50,8 +74,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push backend (latest)
-        if: github.ref == 'refs/heads/main'
+      - name: Build & push backend (:latest)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,8 +86,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Tag vX.Y.Z: publish versioned tag
       - name: Build & push frontend (version tag)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -79,7 +104,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build & push backend (version tag)
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: docker/build-push-action@v6
         with:
           context: .
