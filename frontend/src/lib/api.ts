@@ -23,13 +23,36 @@ const isAbsoluteUrl = (value?: string) => {
     }
     return /^https?:\/\//i.test(value.trim());
 };
+const normalizeAbsoluteUrl = (value?: string) => {
+    if (!value) {
+        return value;
+    }
+    let normalized = value.trim();
+    if (normalized.startsWith("/http")) {
+        normalized = normalized.replace(/^\/+/, "");
+    }
+    normalized = normalized.replace(/^(https?:)\/(?!\/)/, "$1//");
+    return normalized;
+};
+const isAbsoluteLikeUrl = (value?: string) => {
+    if (!value) {
+        return false;
+    }
+    return /^\/?https?:/i.test(value.trim());
+};
+const isAbsoluteUrl = (value?: string) => {
+    if (!value) {
+        return false;
+    }
+    return /^https?:\/\//i.test(value.trim());
+};
 const isBrowser = typeof window !== 'undefined';
 const getToken = () => {
     if (!isBrowser)
         return null;
     return localStorage.getItem('token');
 };
-const apiBaseUrl = normalizeAbsoluteUrl(getApiBaseUrl());
+const apiBaseUrl = getApiBaseUrl();
 const shouldStripApiPrefix = apiBaseUrl.endsWith("/api");
 export const API = axios.create({
     baseURL: apiBaseUrl,
