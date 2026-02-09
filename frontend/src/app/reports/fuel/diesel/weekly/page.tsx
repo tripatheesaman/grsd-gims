@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { API } from '@/lib/api';
+import { withBasePath } from '@/lib/urls';
 import { useToast } from '@/components/ui/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -249,19 +250,19 @@ export default function WeeklyDieselReportPage() {
     };
     const generateReportWithCharts = async (flightCount?: number) => {
         try {
+            const reportRes = await API.get('/api/fuel/reports/diesel/weekly', {
+                params: {
+                  start_date: format(startDate, 'yyyy-MM-dd'),
+                  end_date: format(endDate, 'yyyy-MM-dd'),
+                  flight_count: flightCount,
+                },
+                responseType: 'arraybuffer',
+              });
             const summaryRes = await API.get('/api/fuel/reports/diesel/weekly/summary', {
                 params: {
                     start_date: format(startDate, 'yyyy-MM-dd'),
                     end_date: format(endDate, 'yyyy-MM-dd'),
                 },
-            });
-            const reportRes = await API.get('/api/fuel/reports/diesel/weekly', {
-                params: {
-                    start_date: format(startDate, 'yyyy-MM-dd'),
-                    end_date: format(endDate, 'yyyy-MM-dd'),
-                    flight_count: flightCount,
-                },
-                responseType: 'arraybuffer',
             });
             const reportBytes = new Uint8Array(reportRes.data as ArrayBuffer);
             let binary = '';
@@ -273,7 +274,7 @@ export default function WeeklyDieselReportPage() {
             if (!token) {
                 throw new Error('Authentication token not found. Please log in again.');
             }
-            const response = await fetch('/api/reports/fuel/diesel/weekly/excel-with-charts', {
+            const response = await fetch(withBasePath('/api/reports/fuel/diesel/weekly/excel-with-charts'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

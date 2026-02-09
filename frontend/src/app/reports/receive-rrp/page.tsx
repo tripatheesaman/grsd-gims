@@ -77,8 +77,7 @@ export default function ReceiveRRPReportPage() {
             setTotalPages(response.data.pagination.totalPages);
             setTotal(response.data.pagination.total);
         }
-        catch (error) {
-            console.error('Error fetching report:', error);
+        catch {
             showErrorToast({
                 title: 'Error',
                 message: 'Failed to fetch receive and RRP report',

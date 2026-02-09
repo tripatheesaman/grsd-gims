@@ -5,6 +5,7 @@ import { useAuthContext } from "@/context/AuthContext";
 import Image from "next/image";
 import { Eye, EyeOff } from "lucide-react";
 import { API } from "@/lib/api";
+import { withBasePath } from "@/lib/urls";
 const LoginPage = () => {
     const { login } = useAuthContext();
     const router = useRouter();
@@ -50,7 +51,7 @@ const LoginPage = () => {
     return (<main className="flex min-h-screen items-center justify-center bg-gray-100 px-4 py-12">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl p-8">
         <div className="flex justify-center mb-6">
-          <Image src="/images/nepal_airlines_logo.jpeg" alt="Nepal Airlines Logo" width={150} height={150} className="h-auto w-auto" priority/>
+          <Image src={withBasePath("/images/nepal_airlines_logo.jpeg")} alt="Nepal Airlines Logo" width={150} height={150} className="h-auto w-auto" priority/>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

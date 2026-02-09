@@ -10,6 +10,7 @@ import { API } from '@/lib/api';
 import Image from 'next/image';
 import { useRequestSearch } from '@/hooks/useRequestSearch';
 import { useAuthContext } from '@/context/AuthContext';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 export default function PrintRequestPage() {
     const { permissions } = useAuthContext();
     const canUploadRefDoc = permissions?.includes('can_upload_reference_documents');
@@ -55,7 +56,7 @@ export default function PrintRequestPage() {
             formData.append('file', file);
             formData.append('folder', 'request');
             formData.append('customName', `request-reference-${request.requestNumber}`);
-            const uploadResponse = await fetch('/api/upload', {
+            const uploadResponse = await fetch(withBasePath('/api/upload'), {
                 method: 'POST',
                 body: formData,
             });
@@ -97,9 +98,7 @@ export default function PrintRequestPage() {
     };
     const handlePreviewReferenceDoc = (request: RequestSearchResult) => {
         if (request.referenceDoc) {
-            const imagePath = request.referenceDoc.startsWith('http')
-                ? request.referenceDoc
-                : request.referenceDoc.replace(/^\/?images\//, '/api/images/');
+            const imagePath = resolveImageUrl(request.referenceDoc, '/images/nepal_airlines_logo.png');
             setReferenceDocPreview({ request, imagePath });
         }
     };

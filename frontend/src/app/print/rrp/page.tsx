@@ -10,6 +10,7 @@ import Image from 'next/image';
 import { useRRPSearch } from '@/hooks/useRRPSearch';
 import { RRPSearchResult } from '@/types/rrp';
 import { useAuthContext } from '@/context/AuthContext';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 export default function PrintRRPPage() {
     const { permissions } = useAuthContext();
     const [previewRRP, setPreviewRRP] = useState<RRPSearchResult | null>(null);
@@ -55,7 +56,7 @@ export default function PrintRRPPage() {
             formData.append('file', file);
             formData.append('folder', 'rrp');
             formData.append('customName', `rrp-reference-${rrp.rrpNumber}`);
-            const uploadResponse = await fetch('/api/upload', {
+            const uploadResponse = await fetch(withBasePath('/api/upload'), {
                 method: 'POST',
                 body: formData,
             });
@@ -97,9 +98,7 @@ export default function PrintRRPPage() {
     };
     const handlePreviewReferenceDoc = (rrp: RRPSearchResult) => {
         if (rrp.referenceDoc) {
-            const imagePath = rrp.referenceDoc.startsWith('http')
-                ? rrp.referenceDoc
-                : rrp.referenceDoc.replace(/^\/?images\//, '/api/images/');
+            const imagePath = resolveImageUrl(rrp.referenceDoc, '/images/nepal_airlines_logo.png');
             setReferenceDocPreview({ rrp, imagePath });
         }
     };

@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { embedDieselWeeklyCharts, type DieselWeeklyChartsRequest } from '@/lib/reports/dieselWeeklyExcelWithCharts';
+import { getApiBaseUrl } from '@/lib/urls';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function POST(req: Request): Promise<Response> {
@@ -13,8 +14,7 @@ export async function POST(req: Request): Promise<Response> {
     try {
         body = (await req.json()) as DieselWeeklyChartsRequest;
     }
-    catch (err) {
-        console.error('Failed to parse JSON body:', err);
+    catch {
         return Response.json({ message: 'Invalid JSON body' }, { status: 400 });
     }
     try {
@@ -33,13 +33,11 @@ export async function POST(req: Request): Promise<Response> {
                 : `Bearer ${tokenFromBody}`;
         }
         if (!normalizedAuth) {
-            console.error('Auth token missing');
             return Response.json({ message: 'Missing auth token. Please ensure you are logged in.' }, { status: 401 });
         }
         const baseUrl = process.env.INTERNAL_API_BASE_URL ||
-            process.env.NEXT_PUBLIC_API_BASE_URL ||
             process.env.API_BASE_URL ||
-            'http://localhost:5000';
+            getApiBaseUrl();
         let summary: DieselWeeklyChartsRequest;
         let reportArrayBuffer: ArrayBuffer;
         if (body.reportBase64) {
@@ -120,7 +118,6 @@ export async function POST(req: Request): Promise<Response> {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to generate Excel';
-        console.error('Diesel weekly charts export failed:', err);
         return Response.json({ message }, { status: 500 });
     }
 }

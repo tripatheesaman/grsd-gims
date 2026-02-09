@@ -32,7 +32,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
   try {
     await connection.beginTransaction();
 
-    // Get current FY from app_config
+    
     const [configRows] = await connection.query<RowDataPacket[]>(
       'SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?',
       ['rrp', 'current_fy']
@@ -44,7 +44,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
 
     const currentFY = configRows[0].config_value;
 
-    // Get the first record date in current FY to determine week 1 start
+    
     const [firstRecordResult] = await connection.query<RowDataPacket[]>(
       `SELECT MIN(i.issue_date) as first_date
        FROM fuel_records f
@@ -55,55 +55,55 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
 
     let weekNumber = 1;
     const currentDate = new Date(payload.issue_date);
-    // Normalize current date to midnight for accurate comparison
+    
     currentDate.setHours(0, 0, 0, 0);
 
     if (firstRecordResult[0]?.first_date) {
       const firstDate = new Date(firstRecordResult[0].first_date);
-      // Normalize first date to midnight
+      
       firstDate.setHours(0, 0, 0, 0);
       
-      // Calculate week number based on Sunday-to-Saturday weeks
-      // Week 1 starts from the first date of FY and ends on the following Saturday
-      const firstDateDay = firstDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
       
-      // Find the Saturday of the first week (end of week 1)
-      const daysToFirstSaturday = (6 - firstDateDay) % 7; // Days from first date to Saturday
+      
+      const firstDateDay = firstDate.getDay(); 
+      
+      
+      const daysToFirstSaturday = (6 - firstDateDay) % 7; 
       const firstWeekEndSaturday = new Date(firstDate);
       firstWeekEndSaturday.setDate(firstDate.getDate() + daysToFirstSaturday);
       firstWeekEndSaturday.setHours(0, 0, 0, 0);
       
-      // Calculate the start of week 2 (Sunday after first week's Saturday)
+      
       const firstWeek2Start = new Date(firstWeekEndSaturday);
-      firstWeek2Start.setDate(firstWeekEndSaturday.getDate() + 1); // Sunday
+      firstWeek2Start.setDate(firstWeekEndSaturday.getDate() + 1); 
       firstWeek2Start.setHours(0, 0, 0, 0);
       
-      // If current date is within the first week (from first date to first Saturday inclusive)
+      
       if (currentDate <= firstWeekEndSaturday) {
         weekNumber = 1;
       } else {
-        // Calculate days since the start of week 2
-        // Sunday (week 2 start) = day 0 → week 2
-        // Monday = day 1 → week 2
-        // ...
-        // Saturday = day 6 → week 2
-        // Next Sunday = day 7 → week 3
+        
+        
+        
+        
+        
+        
         const daysSinceWeek2Start = Math.floor((currentDate.getTime() - firstWeek2Start.getTime()) / (1000 * 60 * 60 * 24));
-        // Formula: weekNumber = floor(daysSinceWeek2Start / 7) + 2
-        // This ensures: days 0-6 = week 2, days 7-13 = week 3, etc.
+        
+        
         weekNumber = Math.floor(daysSinceWeek2Start / 7) + 2;
       }
     } else {
-      // If this is the first record in the FY, determine week number based on the day of the week
-      const currentDateDay = currentDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
       
-      // If it's Sunday (0), it's the start of a new week
-      // If it's Monday-Saturday, we need to find which week it belongs to
-      // For simplicity, if it's the first record, it's always week 1
+      const currentDateDay = currentDate.getDay(); 
+      
+      
+      
+      
       weekNumber = 1;
     }
 
-    // Get the correct NAC code based on fuel type
+    
     const getNacCode = (fuelType: string) => {
       switch (fuelType.toLowerCase()) {
         case 'diesel':

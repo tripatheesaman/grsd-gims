@@ -22,14 +22,13 @@ export const useRequestingAuthorities = () => {
                 const authorities = Array.isArray(res.data) ? res.data : (res.data?.data || res.data || []);
                 setData(authorities);
                 if (authorities.length === 0) {
-                    console.warn('No requesting authorities found. Please add authorities in Settings.');
+                    return;
                 }
             }
         }
         catch (e) {
             const errorMessage = e instanceof Error ? e.message : 'Failed to load authorities';
             setError(errorMessage);
-            console.error('Error fetching requesting authorities:', e);
         }
         finally {
             setIsLoading(false);

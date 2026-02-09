@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
+export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
     try {
         const formData = await request.formData();
@@ -19,8 +20,8 @@ export async function POST(request: NextRequest) {
         else {
             filename = `${uuidv4()}.${fileExtension}`;
         }
-        const publicDir = path.join(process.cwd(), 'public');
-        const targetDir = path.join(publicDir, 'images', folder);
+        const uploadsRoot = process.env.UPLOADS_DIR || path.join(process.cwd(), 'public', 'images');
+        const targetDir = path.join(uploadsRoot, folder);
         if (!fs.existsSync(targetDir)) {
             fs.mkdirSync(targetDir, { recursive: true });
         }

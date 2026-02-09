@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import Image from 'next/image';
 import { API } from '@/lib/api';
+import { withBasePath } from '@/lib/urls';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { Plus, Edit, Trash2 } from 'lucide-react';
 interface ReceiveRecord {
@@ -251,7 +252,7 @@ export default function ReceiveRecordsPage() {
                 const uploadFormData = new FormData();
                 uploadFormData.append('file', selectedImage);
                 uploadFormData.append('folder', 'receive');
-                const uploadResponse = await fetch('/api/upload', {
+                const uploadResponse = await fetch(withBasePath('/api/upload'), {
                     method: 'POST',
                     body: uploadFormData,
                 });
@@ -308,7 +309,7 @@ export default function ReceiveRecordsPage() {
                 const uploadFormData = new FormData();
                 uploadFormData.append('file', selectedImage);
                 uploadFormData.append('folder', 'receive');
-                const uploadResponse = await fetch('/api/upload', {
+                const uploadResponse = await fetch(withBasePath('/api/upload'), {
                     method: 'POST',
                     body: uploadFormData,
                 });

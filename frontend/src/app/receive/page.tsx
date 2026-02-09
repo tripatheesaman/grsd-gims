@@ -8,6 +8,7 @@ import { ReceiveCart } from '@/components/receive/ReceiveCart';
 import { ReceiveItemForm } from '@/components/receive/ReceiveItemForm';
 import { ReceivePreviewModal } from '@/components/receive/ReceivePreviewModal';
 import { API } from '@/lib/api';
+import { withBasePath } from '@/lib/urls';
 import { ReceiveSearchResult } from '@/types/search';
 import { useAuthContext } from '@/context/AuthContext';
 import { useCustomToast } from "@/components/ui/custom-toast";
@@ -114,7 +115,7 @@ export default function ReceivePage() {
                         const formData = new FormData();
                         formData.append('file', item.image);
                         formData.append('folder', 'receive');
-                        const uploadResponse = await fetch('/api/upload', {
+                        const uploadResponse = await fetch(withBasePath('/api/upload'), {
                             method: 'POST',
                             body: formData,
                         });

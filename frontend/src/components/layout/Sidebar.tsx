@@ -9,6 +9,7 @@ import { ChevronDown } from "lucide-react";
 import { sidebarLinks } from "./sidebarConfig";
 import { SidebarIcon } from "./SidebarIcon";
 import { useApprovalCountsContext } from "@/context/ApprovalCountsContext";
+import { withBasePath } from "@/lib/urls";
 interface SidebarProps {
     collapsed: boolean;
     mobileOpen: boolean;
@@ -55,7 +56,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
             <div className="absolute -bottom-10 -left-10 h-28 w-28 rounded-full bg-[#d2293b]/20 blur-2xl"/>
             <div className={cn("relative z-10 flex items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white via-white/80 to-white/50 p-2 ring-1 ring-white/40 shadow-[0_16px_40px_rgba(0,0,0,0.28)] backdrop-blur-sm transition-all duration-300", !isExpanded && "p-1")}>
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(210,41,59,0.15),transparent_60%)]" aria-hidden/>
-              <Image src="/images/nepal_airlines_logo.jpeg" alt="Nepal Airlines Logo" width={isExpanded ? 132 : 40} height={isExpanded ? 132 : 40} className={cn("relative z-10 h-auto max-h-24 w-full rounded-xl object-contain", !isExpanded && "max-h-12")} priority/>
+              <Image src={withBasePath("/images/nepal_airlines_logo.jpeg")} alt="Nepal Airlines Logo" width={isExpanded ? 132 : 40} height={isExpanded ? 132 : 40} className={cn("relative z-10 h-auto max-h-24 w-full rounded-xl object-contain", !isExpanded && "max-h-12")} priority/>
             </div>
             {isExpanded && (<span className="relative z-10 mt-3 block text-center text-[11px] font-semibold uppercase tracking-[0.35em] text-white/80">
                 GIMS

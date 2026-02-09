@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/utils/utils';
 import { format } from 'date-fns';
+import { resolveImageUrl } from '@/lib/urls';
 interface RequestReceiveData {
     requestId: number;
     requestNumber: string;
@@ -228,19 +229,7 @@ export default function RequestReceiveReportPage() {
         }
     }, [isDetailsOpen, selectedItem]);
     const getImageSrc = (imagePath: string | null | undefined): string => {
-        if (!imagePath || imagePath === 'N/A' || imagePath === '') {
-            return FALLBACK_IMAGE;
-        }
-        if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
-            return imagePath;
-        }
-        if (imagePath.startsWith('/images/')) {
-            return `/api${imagePath}`;
-        }
-        if (!imagePath.startsWith('/')) {
-            return `/api/images/${imagePath}`;
-        }
-        return `/api${imagePath}`;
+        return resolveImageUrl(imagePath, FALLBACK_IMAGE);
     };
     if (!canAccess) {
         return null;

@@ -1,16 +1,32 @@
 import axios, { AxiosRequestHeaders } from "axios";
-import { API_BASE_URL } from "@/constants/api";
+import { getApiBaseUrl } from "@/lib/urls";
 const isBrowser = typeof window !== 'undefined';
 const getToken = () => {
     if (!isBrowser)
         return null;
     return localStorage.getItem('token');
 };
+const apiBaseUrl = getApiBaseUrl();
+const shouldStripApiPrefix = apiBaseUrl.endsWith("/api");
 export const API = axios.create({
-    baseURL: API_BASE_URL,
+    baseURL: apiBaseUrl,
     withCredentials: true,
 });
+
+const normalizeApiPath = (url?: string) => {
+    if (!url || /^https?:\/\//i.test(url)) {
+        return url;
+    }
+    if (!shouldStripApiPrefix) {
+        return url;
+    }
+    return url.replace(/^\/?api(\/|$)/, "/");
+};
+
 API.interceptors.request.use((config) => {
+    if (config.url) {
+        config.url = normalizeApiPath(config.url);
+    }
     const token = getToken();
     if (token) {
         if (!config.headers) {
