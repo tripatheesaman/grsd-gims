@@ -165,7 +165,7 @@ export default function RequestReceiveReportPage() {
             setLoading(false);
             fetchingRef.current = false;
         }
-    }, [canAccess, universal, equipmentNumber, partNumber, itemName, nacCode, page, pageSize, receiveStatus]);
+    }, [canAccess, universal, equipmentNumber, partNumber, itemName, nacCode, page, pageSize, receiveStatus, showErrorToast]);
     useEffect(() => {
         fetchDataRef.current = fetchData;
     }, [fetchData]);

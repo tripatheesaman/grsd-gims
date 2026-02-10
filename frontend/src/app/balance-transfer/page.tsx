@@ -239,7 +239,7 @@ export default function BalanceTransferPage() {
         finally {
             setIsTransferring(false);
         }
-    }, [formData, validateForm, user?.UserInfo?.username, handleModalClose, fetchData]);
+    }, [formData, validateForm, user?.UserInfo?.username, showSuccessToast, showErrorToast, handleModalClose, fetchData]);
     const handleRefresh = useCallback(() => {
         fetchData();
     }, [fetchData]);

@@ -61,7 +61,7 @@ export default function FuelSettingsPage() {
             }
         };
         fetchSettings();
-    }, []);
+    }, [showErrorToast]);
     const handleAuthorityChange = (id: number, field: string, value: string) => {
         setFuelData((prev: FuelData | null) => {
             if (!prev)

@@ -60,7 +60,7 @@ export default function UsersPage() {
         finally {
             setIsLoading(false);
         }
-    }, [user?.UserInfo.username]);
+    }, [showErrorToast, user?.UserInfo.username]);
     useEffect(() => {
         fetchUsers();
     }, [fetchUsers]);

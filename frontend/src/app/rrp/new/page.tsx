@@ -121,7 +121,7 @@ export default function NewRRPPage() {
             });
             setDateError(null);
         }
-    }, [dateError]);
+    }, [dateError, showErrorToast]);
     const handleDateChange = (field: keyof RRPDates, date: Date | null) => {
         setDates(prev => {
             const newDates = { ...prev, [field]: date };

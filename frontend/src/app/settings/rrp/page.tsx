@@ -95,7 +95,7 @@ export default function RRPSettingsPage() {
             }
         };
         fetchData();
-    }, [supplierPage, supplierPageSize]);
+    }, [showErrorToast, supplierPage, supplierPageSize]);
     const refetchSuppliers = async (nextPage?: number) => {
         try {
             const pageToFetch = nextPage ?? supplierPage;

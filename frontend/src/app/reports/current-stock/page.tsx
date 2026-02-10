@@ -367,7 +367,7 @@ export default function CurrentStockReportPage() {
         finally {
             setIsLoading(false);
         }
-    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page]);
+    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page, toast]);
     useEffect(() => {
         if (fromDate && toDate) {
             fetchReport();

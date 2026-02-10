@@ -83,7 +83,7 @@ export default function RequestSettingsPage() {
             }
         };
         fetchAuthorityDetails();
-    }, []);
+    }, [showErrorToast]);
     useEffect(() => {
         const timer = window.setTimeout(() => {
             setDebouncedUnitsSearch(unitsSearchTerm.trim());
@@ -129,7 +129,7 @@ export default function RequestSettingsPage() {
             }
         };
         fetchUnits();
-    }, [debouncedUnitsSearch, onlyDefaultUnits, unitsCurrentPage, unitsPageSize]);
+    }, [debouncedUnitsSearch, onlyDefaultUnits, unitsCurrentPage, unitsPageSize, showErrorToast]);
     const nacSearchAbortRef = useRef<AbortController | null>(null);
     const nacSearchTimeoutRef = useRef<number | null>(null);
     const handleSearchTermChange = useCallback((value: string) => {
@@ -182,7 +182,7 @@ export default function RequestSettingsPage() {
                 }
             }
         }, 600);
-    }, []);
+    }, [showErrorToast]);
     useEffect(() => {
         return () => {
             if (nacSearchTimeoutRef.current !== null) {
@@ -192,7 +192,7 @@ export default function RequestSettingsPage() {
                 nacSearchAbortRef.current.abort();
             }
         };
-    }, []);
+    }, [showErrorToast]);
     const handleSave = async () => {
         if (!permissions?.includes('can_edit_request_authority_details')) {
             showErrorToast({

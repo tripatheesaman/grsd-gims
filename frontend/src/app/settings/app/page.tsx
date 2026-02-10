@@ -47,7 +47,7 @@ export default function AppSettingsPage() {
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => {
         showErrorToastRef.current = showErrorToast;
-    }, []);
+    }, [showErrorToast]);
     useEffect(() => {
         const fetchFiscalYear = async () => {
             try {
@@ -65,7 +65,7 @@ export default function AppSettingsPage() {
             }
         };
         fetchFiscalYear();
-    }, []);
+    }, [showErrorToast]);
     useEffect(() => {
         const fetchEmailConfig = async () => {
             try {
@@ -98,7 +98,7 @@ export default function AppSettingsPage() {
             }
         };
         fetchEmailConfig();
-    }, []);
+    }, [showErrorToast]);
     const handleSave = async () => {
         if (!canEditFiscalYear) {
             showErrorToast({

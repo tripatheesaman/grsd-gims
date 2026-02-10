@@ -54,7 +54,7 @@ export default function PrintReceivePage() {
                 variant: 'destructive',
             });
         }
-    }, []);
+    }, [toast]);
     useEffect(() => {
         if (debouncedUniversal || debouncedEquipment || debouncedPart) {
             const params = {

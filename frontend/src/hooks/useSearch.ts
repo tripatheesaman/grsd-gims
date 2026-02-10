@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, SetStateAction } from 'react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSearchQuery } from '@/hooks/api/useSearch';
 import { SearchResult } from '@/types/search';
@@ -81,7 +81,7 @@ export const useSearch = () => {
         setCurrentPage(1);
     }, []);
 
-    const setResults = useCallback((newResults: SearchResult[] | null) => {
+    const setResults = useCallback((nextResults: SetStateAction<SearchResult[] | null>) => {
         const queryKey = queryKeys.search.stock({
             universal: debouncedUniversal || undefined,
             equipmentNumber: debouncedEquipmentNumber || undefined,
@@ -89,22 +89,27 @@ export const useSearch = () => {
             page: currentPage,
             pageSize,
         });
-        
+
+        const currentResults = results;
+        const resolvedResults = typeof nextResults === 'function'
+            ? (nextResults as (prev: SearchResult[] | null) => SearchResult[] | null)(currentResults)
+            : nextResults;
+
         if (response) {
             queryClient.setQueryData(queryKey, {
                 ...response,
                 data: {
-                    data: newResults || [],
+                    data: resolvedResults || [],
                     pagination: {
                         currentPage,
                         pageSize,
-                        totalCount: newResults?.length || 0,
-                        totalPages: Math.ceil((newResults?.length || 0) / pageSize),
+                        totalCount: resolvedResults?.length || 0,
+                        totalPages: Math.ceil((resolvedResults?.length || 0) / pageSize),
                     },
                 },
             });
         }
-    }, [response, queryClient, debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, currentPage, pageSize]);
+    }, [response, results, queryClient, debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, currentPage, pageSize]);
 
     return {
         searchParams,
