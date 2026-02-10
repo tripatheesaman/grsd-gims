@@ -22,6 +22,22 @@ const isExternalUrl = (value: string): boolean => {
   return /^(https?:|data:|blob:)/i.test(value);
 };
 
+const normalizeBaseOrUrl = (value: string | undefined, fallback = ""): string => {
+  const rawValue = (value ?? fallback).trim();
+  if (!rawValue) {
+    return "";
+  }
+  let raw = rawValue;
+  if (raw.startsWith("/http")) {
+    raw = raw.replace(/^\/+/, "");
+  }
+  raw = raw.replace(/^(https?:)\/(?!\/)/, "$1//");
+  if (isExternalUrl(raw)) {
+    return raw.replace(/\/+$/, "");
+  }
+  return normalizeBasePath(raw, "");
+};
+
 export const getBasePath = (): string => {
   return normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH, DEFAULT_BASE_PATH);
 };
@@ -43,7 +59,7 @@ export const withBasePath = (path: string): string => {
 
 export const getApiBaseUrl = (): string => {
   const fallback = joinPaths(getBasePath(), "/backend");
-  return normalizeBasePath(process.env.NEXT_PUBLIC_API_BASE_URL, fallback);
+  return normalizeBaseOrUrl(process.env.NEXT_PUBLIC_API_BASE_URL, fallback);
 };
 
 export const apiUrl = (path: string): string => {
@@ -60,7 +76,7 @@ export const apiUrl = (path: string): string => {
 
 export const getImageBaseUrl = (): string => {
   const fallback = joinPaths(getApiBaseUrl(), "/images");
-  return normalizeBasePath(process.env.NEXT_PUBLIC_IMAGE_BASE_URL, fallback);
+  return normalizeBaseOrUrl(process.env.NEXT_PUBLIC_IMAGE_BASE_URL, fallback);
 };
 
 export const withImageBaseUrl = (path: string): string => {
