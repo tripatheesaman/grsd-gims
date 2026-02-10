@@ -85,7 +85,7 @@ export default function RRPSettingsPage() {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to fetch data",
                     duration: 3000,
                 });
@@ -116,7 +116,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch suppliers",
                 duration: 3000,
             });
@@ -131,7 +131,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch inspection users",
                 duration: 3000,
             });
@@ -140,7 +140,7 @@ export default function RRPSettingsPage() {
     const handleSave = async () => {
         if (!permissions?.includes('can_edit_rrp_authority_details')) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to edit authority details",
                 duration: 3000,
             });
@@ -153,7 +153,7 @@ export default function RRPSettingsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Authority details updated successfully",
                     duration: 3000,
                 });
@@ -161,7 +161,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update authority details",
                 duration: 3000,
             });
@@ -176,7 +176,7 @@ export default function RRPSettingsPage() {
     const handleAddSupplier = async () => {
         if (!newSupplierName.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Supplier name cannot be empty",
                 duration: 3000,
             });
@@ -192,7 +192,7 @@ export default function RRPSettingsPage() {
                 setNewSupplierName('');
                 await refetchSuppliers(1);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Supplier added successfully",
                     duration: 3000,
                 });
@@ -200,7 +200,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to add supplier",
                 duration: 3000,
             });
@@ -220,7 +220,7 @@ export default function RRPSettingsPage() {
                 setEditingSupplier(null);
                 await refetchSuppliers(supplierPage);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Supplier updated successfully",
                     duration: 3000,
                 });
@@ -228,7 +228,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update supplier",
                 duration: 5000,
             });
@@ -253,7 +253,7 @@ export default function RRPSettingsPage() {
             if (response.status === 200) {
                 await refetchSuppliers(supplierPage);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Supplier deleted successfully",
                     duration: 3000,
                 });
@@ -261,7 +261,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to delete supplier",
                 duration: 5000,
             });
@@ -273,7 +273,7 @@ export default function RRPSettingsPage() {
     const handleAddInspectionUser = async () => {
         if (!newInspectionUserName.trim() || !newInspectionUserDesignation.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Name and designation cannot be empty",
                 duration: 3000,
             });
@@ -296,7 +296,7 @@ export default function RRPSettingsPage() {
                 setNewInspectionUserSectionName('');
                 setNewInspectionUserEmail('');
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Inspection user added successfully",
                     duration: 3000,
                 });
@@ -304,7 +304,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to add inspection user",
                 duration: 5000,
             });
@@ -319,7 +319,7 @@ export default function RRPSettingsPage() {
         const user = editingInspectionUser;
         if (!user.name.trim() || !user.designation.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Name and designation cannot be empty",
                 duration: 3000,
             });
@@ -338,7 +338,7 @@ export default function RRPSettingsPage() {
                 await refetchInspectionUsers();
                 setEditingInspectionUser(null);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Inspection user updated successfully",
                     duration: 3000,
                 });
@@ -346,7 +346,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update inspection user",
                 duration: 5000,
             });
@@ -362,7 +362,7 @@ export default function RRPSettingsPage() {
             if (response.status === 200) {
                 await refetchInspectionUsers();
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Inspection user deleted successfully",
                     duration: 3000,
                 });
@@ -370,7 +370,7 @@ export default function RRPSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to delete inspection user",
                 duration: 5000,
             });

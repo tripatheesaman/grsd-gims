@@ -128,7 +128,7 @@ export default function BorrowHistoryReportPage() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.reports.all });
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Item return submitted successfully. Awaiting approval.",
                 duration: 3000,
             });
@@ -145,7 +145,7 @@ export default function BorrowHistoryReportPage() {
                 };
             };
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: err?.response?.data?.message || 'Failed to return item',
                 duration: 3000,
             });
@@ -193,7 +193,7 @@ export default function BorrowHistoryReportPage() {
     const handleReturnItem = () => {
         if (!selectedReturnItem || !returnDate || !user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a return date",
                 duration: 3000,
             });

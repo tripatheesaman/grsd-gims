@@ -105,7 +105,7 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
         e.preventDefault();
         if (!validateForm()) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please fill in all required fields",
                 duration: 3000,
             });
@@ -124,7 +124,7 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
                     const exists = results.some((it) => (it.nacCode || '').toLowerCase() === formData.nacCode.trim().toLowerCase());
                     if (exists) {
                         showErrorToast({
-                            title: 'Duplicate NAC Code',
+                            title: 'Error',
                             message: `NAC Code ${formData.nacCode.trim()} already exists. Please choose a new NAC Code.`,
                             duration: 4000,
                         });
@@ -134,7 +134,7 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
                 }
                 catch {
                     showErrorToast({
-                        title: 'Validation Error',
+                        title: 'Error',
                         message: 'Could not verify NAC Code uniqueness. Please try again.',
                         duration: 4000,
                     });

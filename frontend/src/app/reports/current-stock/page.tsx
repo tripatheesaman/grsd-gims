@@ -2,7 +2,8 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -136,25 +137,6 @@ interface ExportPayload {
     createdDateFrom?: string;
     createdDateTo?: string;
 }
-interface ApiErrorResponse {
-    response?: {
-        data?: {
-            message?: string;
-        };
-    };
-}
-const getErrorMessage = (error: unknown, fallback: string): string => {
-    if (typeof error === 'object' && error !== null) {
-        const apiError = error as ApiErrorResponse;
-        if (apiError.response?.data?.message) {
-            return apiError.response.data.message;
-        }
-    }
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return fallback;
-};
 type ChartPoint = {
     date: string;
     value: number;
@@ -163,7 +145,7 @@ export default function CurrentStockReportPage() {
     const { permissions } = useAuthContext();
     const canAccessReport = permissions?.includes('can_generate_current_stock_report');
     const canSeeStockHistory = permissions?.includes('can_see_stock_history');
-    const { toast } = useToast();
+    const { showErrorToast, showSuccessToast } = useCustomToast();
     const [data, setData] = useState<StockReportItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [page, setPage] = useState(1);
@@ -357,17 +339,16 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to fetch report');
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description,
-                variant: 'destructive',
+                message: description,
                 duration: 3000,
             });
         }
         finally {
             setIsLoading(false);
         }
-    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page, toast]);
+    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page, showErrorToast]);
     useEffect(() => {
         if (fromDate && toDate) {
             fetchReport();
@@ -391,11 +372,10 @@ export default function CurrentStockReportPage() {
     };
     const handleExport = async () => {
         if (exportType === 'dateRange' && (!exportFromDate || !exportToDate)) {
-            toast({
-                title: 'Error',
-                description: 'Please select both from and to dates for date range export',
-                variant: 'destructive',
-                duration: 3000,
+                showErrorToast({
+                    title: 'Error',
+                    message: 'Please select both from and to dates for date range export',
+                    duration: 3000,
             });
             return;
         }
@@ -443,9 +423,9 @@ export default function CurrentStockReportPage() {
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Report exported successfully',
+                    message: 'Report exported successfully',
                     duration: 3000,
                 });
                 setIsExportModalOpen(false);
@@ -456,10 +436,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to export report. Please try again.');
-            toast({
-                title: 'Export Failed',
-                description,
-                variant: 'destructive',
+            showErrorToast({
+                title: 'Error',
+                message: description,
                 duration: 5000,
             });
         }
@@ -490,10 +469,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to fetch stock history');
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description,
-                variant: 'destructive',
+                message: description,
                 duration: 3000,
             });
         }
@@ -523,9 +501,9 @@ export default function CurrentStockReportPage() {
                 a.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Stock history exported successfully',
+                    message: 'Stock history exported successfully',
                     duration: 3000,
                 });
             }
@@ -535,10 +513,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to export stock history. Please try again.');
-            toast({
-                title: 'Export Failed',
-                description,
-                variant: 'destructive',
+            showErrorToast({
+                title: 'Error',
+                message: description,
                 duration: 5000,
             });
         }
@@ -565,10 +542,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to fetch purchase details');
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description,
-                variant: 'destructive',
+                message: description,
                 duration: 3000,
             });
         }
@@ -599,10 +575,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to fetch issue details');
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description,
-                variant: 'destructive',
+                message: description,
                 duration: 3000,
             });
         }
@@ -629,10 +604,9 @@ export default function CurrentStockReportPage() {
         }
         catch (error: unknown) {
             const description = getErrorMessage(error, 'Failed to fetch receive details');
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description,
-                variant: 'destructive',
+                message: description,
                 duration: 3000,
             });
         }

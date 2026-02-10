@@ -269,7 +269,7 @@ export default function ReceiveRecordsPage() {
             });
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive record created successfully",
                     duration: 3000,
                 });
@@ -289,7 +289,7 @@ export default function ReceiveRecordsPage() {
             };
             const errorMessage = errorResponse?.response?.data?.message || errorResponse?.response?.data?.error || 'Failed to create receive record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -326,7 +326,7 @@ export default function ReceiveRecordsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive record updated successfully",
                     duration: 3000,
                 });
@@ -353,7 +353,7 @@ export default function ReceiveRecordsPage() {
                 setFormErrors({ received_quantity: errorResponse.response.data.message });
             }
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -370,7 +370,7 @@ export default function ReceiveRecordsPage() {
             const response = await API.delete(`/api/receive-records/${deletingRecord.id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive record deleted successfully",
                     duration: 3000,
                 });
@@ -390,7 +390,7 @@ export default function ReceiveRecordsPage() {
             };
             const errorMessage = errorResponse?.response?.data?.message || errorResponse?.response?.data?.error || 'Failed to delete receive record';
             showErrorToast({
-                title: "Cannot Delete",
+                title: 'Error',
                 message: errorMessage,
                 duration: 5000,
             });

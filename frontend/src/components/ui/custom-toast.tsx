@@ -1,46 +1,30 @@
 'use client';
-import { useCallback } from "react";
-import { useToast } from "@/components/ui/use-toast";
+import { useCallback } from 'react';
+import {
+    showErrorToast as fireErrorToast,
+    showInfoToast as fireInfoToast,
+    showSuccessToast as fireSuccessToast,
+    showWarningToast as fireWarningToast,
+} from '@/lib/appToast';
+
 interface ToastProps {
-    title: string;
+    title?: string;
     message: string;
     duration?: number;
 }
 export function useCustomToast() {
-    const { toast } = useToast();
     const showSuccessToast = useCallback(({ title, message, duration = 5000 }: ToastProps) => {
-        toast({
-            title,
-            description: message,
-            className: "bg-green-600 text-white border-none",
-            duration,
-        });
-    }, [toast]);
+        fireSuccessToast({ title, message, duration });
+    }, []);
     const showErrorToast = useCallback(({ title, message, duration = 5000 }: ToastProps) => {
-        toast({
-            title,
-            description: message,
-            variant: "destructive",
-            className: "bg-red-600 text-white border-none",
-            duration,
-        });
-    }, [toast]);
+        fireErrorToast({ title, message, duration });
+    }, []);
     const showInfoToast = useCallback(({ title, message, duration = 5000 }: ToastProps) => {
-        toast({
-            title,
-            description: message,
-            className: "bg-blue-600 text-white border-none",
-            duration,
-        });
-    }, [toast]);
+        fireInfoToast({ title, message, duration });
+    }, []);
     const showWarningToast = useCallback(({ title, message, duration = 5000 }: ToastProps) => {
-        toast({
-            title,
-            description: message,
-            className: "bg-yellow-600 text-white border-none",
-            duration,
-        });
-    }, [toast]);
+        fireWarningToast({ title, message, duration });
+    }, []);
     return {
         showSuccessToast,
         showErrorToast,

@@ -181,7 +181,7 @@ export default function ReceiveRRPReportPage() {
         }
         catch {
             showErrorToast({
-                title: 'Export Failed',
+                title: 'Error',
                 message: 'Failed to export report. Please try again.',
                 duration: 5000,
             });

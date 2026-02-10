@@ -86,7 +86,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
     const handleReturnItem = async () => {
         if (!selectedBorrow || !returnDate || !user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a return date",
                 duration: 3000,
             });
@@ -101,7 +101,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
             });
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Item return submitted successfully. Awaiting approval.",
                     duration: 3000,
                 });
@@ -120,7 +120,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
                 };
             };
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: err?.response?.data?.message || 'Failed to return item',
                 duration: 3000,
             });

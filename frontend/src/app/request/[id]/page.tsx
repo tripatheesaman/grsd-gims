@@ -90,7 +90,7 @@ export default function RequestDetailsPage({ params }: {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to fetch request details",
                     duration: 3000,
                 });
@@ -111,7 +111,7 @@ export default function RequestDetailsPage({ params }: {
     const handleConfirmSubmit = async () => {
         if (!date) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a request date",
                 duration: 3000,
             });
@@ -119,7 +119,7 @@ export default function RequestDetailsPage({ params }: {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -164,7 +164,7 @@ export default function RequestDetailsPage({ params }: {
                     }
                 }
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Request updated successfully",
                     duration: 3000,
                 });
@@ -176,7 +176,7 @@ export default function RequestDetailsPage({ params }: {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to update request",
                 duration: 5000,
             });

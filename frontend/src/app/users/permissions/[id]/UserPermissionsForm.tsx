@@ -58,7 +58,7 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch permissions",
                 duration: 3000,
             });
@@ -98,7 +98,7 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "User permissions updated successfully",
                     duration: 3000,
                 });
@@ -107,7 +107,7 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update user permissions",
                 duration: 3000,
             });

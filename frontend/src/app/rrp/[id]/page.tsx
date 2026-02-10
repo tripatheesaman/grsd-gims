@@ -152,7 +152,7 @@ export default function RRPDetailsPage({ params }: {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to fetch RRP details",
                     duration: 3000,
                 });
@@ -207,7 +207,7 @@ export default function RRPDetailsPage({ params }: {
                     window.history.replaceState({}, '', newUrl);
                 }
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "RRP updated successfully",
                     duration: 3000,
                 });
@@ -219,7 +219,7 @@ export default function RRPDetailsPage({ params }: {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update RRP",
                 duration: 3000,
             });

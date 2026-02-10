@@ -115,7 +115,7 @@ export function PendingRequestsCount() {
             queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
             queryClient.invalidateQueries({ queryKey: queryKeys.request.items(selectedRequestNumber!) });
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Request updated successfully",
                 duration: 3000,
             });
@@ -126,7 +126,7 @@ export function PendingRequestsCount() {
         },
         onError: (error: unknown) => {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to update request",
                 duration: 5000,
             });
@@ -137,7 +137,7 @@ export function PendingRequestsCount() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Request approved successfully",
                 duration: 3000,
             });
@@ -145,7 +145,7 @@ export function PendingRequestsCount() {
         },
         onError: (error: unknown) => {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve request",
                 duration: 5000,
             });
@@ -156,7 +156,7 @@ export function PendingRequestsCount() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Request rejected successfully",
                 duration: 3000,
             });
@@ -166,7 +166,7 @@ export function PendingRequestsCount() {
         },
         onError: (error: unknown) => {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to reject request",
                 duration: 5000,
             });
@@ -249,7 +249,7 @@ export function PendingRequestsCount() {
     const handleRejectRequest = useCallback(() => {
         if (!selectedRequestNumber || !rejectionReason.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please provide a reason for rejection",
                 duration: 3000,
             });

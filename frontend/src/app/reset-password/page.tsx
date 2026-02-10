@@ -4,12 +4,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 import { API } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
 import { withBasePath } from '@/lib/urls';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 export default function ResetPasswordPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { toast } = useToast();
+    const { showSuccessToast, showErrorToast } = useCustomToast();
     const [email, setEmail] = useState<string>('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -49,21 +50,19 @@ export default function ResetPasswordPage() {
                 email,
                 newPassword
             });
-            toast({
-                title: "Success",
-                description: "Password has been reset successfully",
-                className: "bg-green-500 text-white border-none",
+            showSuccessToast({
+                title: 'Success',
+                message: 'Password has been reset successfully',
                 duration: 3000,
             });
             router.push('/login');
         }
         catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to reset password');
-            toast({
-                title: "Error",
-                description: err instanceof Error ? err.message : 'Failed to reset password',
-                variant: "destructive",
-                className: "bg-red-500 text-white border-none",
+            const message = getErrorMessage(err, 'Failed to reset password');
+            setError(message);
+            showErrorToast({
+                title: 'Error',
+                message,
                 duration: 3000,
             });
         }

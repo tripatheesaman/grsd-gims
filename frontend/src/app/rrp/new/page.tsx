@@ -115,7 +115,7 @@ export default function NewRRPPage() {
     useEffect(() => {
         if (dateError) {
             showErrorToast({
-                title: "Invalid Date",
+                title: 'Error',
                 message: dateError,
                 duration: 3000,
             });
@@ -151,7 +151,7 @@ export default function NewRRPPage() {
     const handleNext = async () => {
         if (!dates.rrpDate || !dates.invoiceDate || !selectedSupplier || !invoiceNumber || !selectedInspectionUser || !rrpNumber || !freightCharge) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please fill in all required fields",
                 duration: 3000,
             });
@@ -159,7 +159,7 @@ export default function NewRRPPage() {
         }
         if (!rrpNumber || !rrpNumber.match(/^[LF]\d{3}(T\d+)?$/)) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Invalid RRP number format. Must be in format L001 or L001T1",
                 duration: 3000,
             });
@@ -167,7 +167,7 @@ export default function NewRRPPage() {
         }
         if (rrpType === 'foreign' && (!poNumber || !airwayBillNumber || !selectedCurrency || !forexRate || !customsNumber || !dates.customsDate || !freightCharge)) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please fill in all required fields for foreign RRP",
                 duration: 3000,
             });
@@ -177,7 +177,7 @@ export default function NewRRPPage() {
             const response = await API.get(`/api/rrp/verifyRRPNumber/${rrpNumber}?date=${toUTCDateString(dates.rrpDate)}`);
             if (response.status === 400) {
                 showErrorToast({
-                    title: "Validation Error",
+                    title: 'Error',
                     message: response.data.message || "Invalid RRP number or date",
                     duration: 3000,
                 });
@@ -185,7 +185,7 @@ export default function NewRRPPage() {
             }
             if (response.status === 500) {
                 showErrorToast({
-                    title: "Server Error",
+                    title: 'Error',
                     message: response.data.message || "An error occurred while verifying RRP number",
                     duration: 3000,
                 });
@@ -273,7 +273,7 @@ export default function NewRRPPage() {
                 errorMessage = error.message;
             }
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });

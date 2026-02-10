@@ -4,6 +4,7 @@ import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
 import { RRPSearchResult, RRPSearchParams } from '../types/rrp';
 import { useQueryClient } from '@tanstack/react-query';
+import { getErrorMessage } from '@/lib/errorHandling';
 
 interface BackendResponse {
     data: RRPSearchResult[];
@@ -93,7 +94,7 @@ export function useRRPSearch() {
     return {
         results,
         isLoading,
-        error: error ? 'An error occurred while searching' : null,
+        error: error ? getErrorMessage(error, 'An error occurred while searching') : null,
         currentPage,
         pageSize,
         totalCount,

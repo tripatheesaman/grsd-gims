@@ -102,7 +102,7 @@ export function PendingIssuesCount() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Issue approved successfully",
                     duration: 3000,
                 });
@@ -115,7 +115,7 @@ export function PendingIssuesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve issue",
                 duration: 5000,
             });
@@ -135,7 +135,7 @@ export function PendingIssuesCount() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Issue rejected successfully",
                     duration: 3000,
                 });
@@ -149,7 +149,7 @@ export function PendingIssuesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to reject issue",
                 duration: 5000,
             });
@@ -167,7 +167,7 @@ export function PendingIssuesCount() {
             const response = await API.delete(`/api/issue/item/${itemId}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Item deleted successfully",
                     duration: 3000,
                 });
@@ -176,7 +176,7 @@ export function PendingIssuesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to delete item",
                 duration: 5000,
             });
@@ -188,7 +188,7 @@ export function PendingIssuesCount() {
         const newQuantity = parseInt(editQuantity);
         if (isNaN(newQuantity) || newQuantity <= 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please enter a valid quantity",
                 duration: 3000,
             });
@@ -200,7 +200,7 @@ export function PendingIssuesCount() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Quantity updated successfully",
                     duration: 3000,
                 });
@@ -212,7 +212,7 @@ export function PendingIssuesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to update quantity",
                 duration: 5000,
             });

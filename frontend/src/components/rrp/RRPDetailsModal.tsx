@@ -200,7 +200,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to save RRP changes",
                 duration: 3000,
             });
@@ -223,7 +223,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to approve RRP",
                 duration: 3000,
             });
@@ -234,7 +234,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
             return;
         if (!rejectionReason.trim()) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please provide a reason for rejection",
                 duration: 3000,
             });
@@ -252,7 +252,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to reject RRP",
                 duration: 3000,
             });
@@ -325,7 +325,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to calculate totals",
                 duration: 3000,
             });

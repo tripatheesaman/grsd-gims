@@ -8,9 +8,10 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CalendarIcon } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
-import { useToast } from '@/components/ui/use-toast';
 import { API } from '@/lib/api';
 import { useAuthContext } from '@/context/AuthContext';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 interface LastReceiveData {
     last_receive_date: string;
     last_receive_quantity: number;
@@ -20,7 +21,7 @@ export default function FuelReceivePage() {
     const [quantity, setQuantity] = useState<number>(0);
     const [lastReceive, setLastReceive] = useState<LastReceiveData | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const { toast } = useToast();
+    const { showErrorToast, showSuccessToast } = useCustomToast();
     const { user } = useAuthContext();
     useEffect(() => {
         const fetchLastReceive = async () => {
@@ -28,30 +29,27 @@ export default function FuelReceivePage() {
                 const response = await API.get('/api/fuel/last-receive');
                 setLastReceive(response.data);
             }
-            catch {
-                toast({
+            catch (error) {
+                showErrorToast({
                     title: 'Error',
-                    description: 'Failed to load last receive data',
-                    variant: 'destructive',
+                    message: getErrorMessage(error, 'Failed to load last receive data'),
                 });
             }
         };
         fetchLastReceive();
-    }, [toast]);
+    }, [showErrorToast]);
     const handleSubmit = async () => {
         if (!user?.UserInfo?.username) {
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'User not authenticated',
-                variant: 'destructive',
+                message: 'User not authenticated',
             });
             return;
         }
         if (quantity <= 0) {
-            toast({
-                title: 'Validation Error',
-                description: 'Please enter a valid quantity',
-                variant: 'destructive',
+            showErrorToast({
+                title: 'Error',
+                message: 'Please enter a valid quantity',
             });
             return;
         }
@@ -65,67 +63,25 @@ export default function FuelReceivePage() {
             };
             const response = await API.post('/api/fuel/receive', payload);
             if (response.status === 200 || response.status === 201) {
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Fuel received successfully',
+                    message: 'Fuel received successfully',
                 });
                 setQuantity(0);
                 setDate(new Date());
             }
             else {
                 const errorMessage = response.data?.message || 'Failed to receive fuel';
-                toast({
+                showErrorToast({
                     title: 'Error',
-                    description: errorMessage,
-                    variant: 'destructive',
+                    message: errorMessage,
                 });
             }
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to receive fuel';
-            if (error &&
-                typeof error === 'object' &&
-                'response' in error &&
-                typeof (error as {
-                    response?: unknown;
-                }).response === 'object' &&
-                (error as {
-                    response?: unknown;
-                }).response !== null) {
-                const response = (error as {
-                    response?: unknown;
-                }).response;
-                if (typeof response === 'object' &&
-                    response !== null &&
-                    'data' in response &&
-                    typeof (response as {
-                        data?: unknown;
-                    }).data === 'object' &&
-                    (response as {
-                        data?: unknown;
-                    }).data !== null) {
-                    const data = (response as {
-                        data?: unknown;
-                    }).data;
-                    if (typeof data === 'object' &&
-                        data !== null &&
-                        'message' in data &&
-                        typeof (data as {
-                            message?: unknown;
-                        }).message === 'string') {
-                        errorMessage = (data as {
-                            message: string;
-                        }).message;
-                    }
-                }
-            }
-            else if (error instanceof Error && error.message) {
-                errorMessage = error.message;
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to receive fuel'),
             });
         }
         finally {
