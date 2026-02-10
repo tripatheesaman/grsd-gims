@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, SetStateAction } from 'react';
 import { useDebounce } from './useDebounce';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
 import { RRPSearchResult, RRPSearchParams } from '../types/rrp';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface BackendResponse {
     data: RRPSearchResult[];
@@ -15,6 +16,7 @@ interface BackendResponse {
 }
 
 export function useRRPSearch() {
+    const queryClient = useQueryClient();
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
     const [searchParams, setSearchParams] = useState<RRPSearchParams>({
@@ -61,6 +63,29 @@ export function useRRPSearch() {
         setPageSize(newPageSize);
         setCurrentPage(1);
     }, []);
+
+    const setResults = useCallback((nextResults: SetStateAction<RRPSearchResult[] | null>) => {
+        const queryKey = queryKeys.rrp.all;
+        const currentResults = results ?? null;
+        const resolvedResults = typeof nextResults === 'function'
+            ? (nextResults as (prev: RRPSearchResult[] | null) => RRPSearchResult[] | null)(currentResults)
+            : nextResults;
+
+        if (response) {
+            queryClient.setQueryData(queryKey, {
+                ...response,
+                data: {
+                    data: resolvedResults || [],
+                    pagination: {
+                        currentPage,
+                        pageSize,
+                        totalCount: resolvedResults?.length || 0,
+                        totalPages: Math.ceil((resolvedResults?.length || 0) / pageSize),
+                    },
+                },
+            });
+        }
+    }, [response, results, queryClient, currentPage, pageSize]);
     
     return {
         results,
@@ -74,6 +99,6 @@ export function useRRPSearch() {
         handleSearch,
         handlePageChange,
         handlePageSizeChange,
-        setResults: () => {},
+        setResults,
     };
 }

@@ -83,7 +83,7 @@ export default function RequestSettingsPage() {
             }
         };
         fetchAuthorityDetails();
-    }, []);
+    }, [showErrorToast]);
     useEffect(() => {
         const timer = window.setTimeout(() => {
             setDebouncedUnitsSearch(unitsSearchTerm.trim());
