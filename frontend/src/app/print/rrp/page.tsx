@@ -76,7 +76,7 @@ export default function PrintRRPPage() {
                     description: 'Reference document uploaded successfully.',
                     className: 'bg-green-600 text-white border-none',
                 });
-                setResults(prevResults => prevResults?.map(result => result.rrpNumber === rrp.rrpNumber
+                setResults((prevResults: RRPSearchResult[] | null) => prevResults?.map(result => result.rrpNumber === rrp.rrpNumber
                     ? { ...result, referenceDoc: imagePath }
                     : result) ?? null);
             }
