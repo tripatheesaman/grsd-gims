@@ -88,7 +88,7 @@ export default function ReceiveRRPReportPage() {
         finally {
             setIsLoading(false);
         }
-    }, [canAccessReport, page, fromDate, toDate, itemName, partNumber, nacCode, equipmentNumber, supplierName, hasRRP, showErrorToast]);
+    }, [canAccessReport, page, fromDate, toDate, itemName, partNumber, nacCode, equipmentNumber, supplierName, hasRRP]);
     useEffect(() => {
         fetchReport();
     }, [page, fromDate, toDate, itemName, partNumber, nacCode, equipmentNumber, supplierName, hasRRP, fetchReport]);

@@ -180,7 +180,7 @@ const FuelIssueRecordsPage = () => {
                 setLoading(false);
             }
         }
-    }, [sortBy, sortOrder, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber, showErrorToast]);
+    }, [sortBy, sortOrder, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const [{ data: fuelData }, { data: nacData }] = await Promise.all([

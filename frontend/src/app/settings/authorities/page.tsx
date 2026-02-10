@@ -49,7 +49,7 @@ export default function AuthoritiesPage() {
         finally {
             setIsLoading(false);
         }
-    }, [showErrorToast]);
+    }, []);
     useEffect(() => {
         fetchAuthorities();
     }, [fetchAuthorities]);

@@ -98,7 +98,7 @@ export default function RequestDetailsPage({ params }: {
             }
         };
         fetchRequestDetails();
-    }, [resolvedParams.id, showErrorToast]);
+    }, [resolvedParams.id]);
     const handleUpdateCartItem = (itemId: string, updates: Partial<RequestCartItem>) => {
         setCart(prev => prev.map(item => item.id === itemId ? { ...item, ...updates } : item));
     };

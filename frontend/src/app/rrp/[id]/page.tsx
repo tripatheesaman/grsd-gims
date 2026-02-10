@@ -160,7 +160,7 @@ export default function RRPDetailsPage({ params }: {
             }
         };
         fetchRRPDetails();
-    }, [resolvedParams.id, showErrorToast]);
+    }, [resolvedParams.id]);
     const handleDeleteItem = async (itemId: number) => {
         if (!rrpDetails)
             return;

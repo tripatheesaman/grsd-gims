@@ -83,7 +83,7 @@ export default function RequestSettingsPage() {
             }
         };
         fetchAuthorityDetails();
-    }, [showErrorToast]);
+    }, []);
     useEffect(() => {
         const timer = window.setTimeout(() => {
             setDebouncedUnitsSearch(unitsSearchTerm.trim());
@@ -129,7 +129,7 @@ export default function RequestSettingsPage() {
             }
         };
         fetchUnits();
-    }, [debouncedUnitsSearch, onlyDefaultUnits, unitsCurrentPage, unitsPageSize, showErrorToast]);
+    }, [debouncedUnitsSearch, onlyDefaultUnits, unitsCurrentPage, unitsPageSize]);
     const nacSearchAbortRef = useRef<AbortController | null>(null);
     const nacSearchTimeoutRef = useRef<number | null>(null);
     const handleSearchTermChange = useCallback((value: string) => {

@@ -51,7 +51,7 @@ export default function CreateUserPage() {
                 duration: 3000,
             });
         }
-    }, [showErrorToast, user?.UserInfo.username]);
+    }, [user?.UserInfo.username]);
     useEffect(() => {
         fetchRoles();
     }, [fetchRoles]);

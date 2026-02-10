@@ -80,7 +80,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
         finally {
             setIsLoading(false);
         }
-    }, [userId, showErrorToast, user?.UserInfo.username]);
+    }, [userId, user?.UserInfo.username]);
     const fetchRoles = useCallback(async () => {
         try {
             const response = await API.get('/api/role', {
@@ -99,7 +99,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
                 duration: 3000,
             });
         }
-    }, [showErrorToast, user?.UserInfo.username]);
+    }, [user?.UserInfo.username]);
     useEffect(() => {
         Promise.all([
             fetchUserData(),

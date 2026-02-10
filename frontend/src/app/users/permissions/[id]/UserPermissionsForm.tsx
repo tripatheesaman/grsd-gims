@@ -66,7 +66,7 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
         finally {
             setIsLoading(false);
         }
-    }, [showErrorToast, user?.UserInfo.username, userId]);
+    }, [user?.UserInfo.username, userId]);
     useEffect(() => {
         if (user?.UserInfo.username && userId) {
             fetchPermissions();

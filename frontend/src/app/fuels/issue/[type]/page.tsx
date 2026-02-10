@@ -96,7 +96,7 @@ export default function FuelIssueFormPage() {
             }
         };
         fetchConfig();
-    }, [type, toast]);
+    }, [type]);
     const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
         const suggestions = getFilteredSuggestions(index);
         if (!suggestions.length)

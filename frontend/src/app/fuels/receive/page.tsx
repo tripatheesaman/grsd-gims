@@ -37,7 +37,7 @@ export default function FuelReceivePage() {
             }
         };
         fetchLastReceive();
-    }, [toast]);
+    }, []);
     const handleSubmit = async () => {
         if (!user?.UserInfo?.username) {
             toast({

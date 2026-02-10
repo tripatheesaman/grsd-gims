@@ -56,7 +56,7 @@ export default function ReceiveSettingsPage() {
         finally {
             setIsLoading(false);
         }
-    }, [showErrorToast]);
+    }, []);
     const fetchLocationPhrases = useCallback(async () => {
         try {
             const response = await API.get('/api/location-phrases');
@@ -71,7 +71,7 @@ export default function ReceiveSettingsPage() {
                 duration: 3000,
             });
         }
-    }, [showErrorToast]);
+    }, []);
     useEffect(() => {
         fetchBorrowSources();
         fetchLocationPhrases();

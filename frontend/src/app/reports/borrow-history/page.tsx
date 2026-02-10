@@ -1,8 +1,10 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
-import { API } from '@/lib/api';
+import { useApiQuery, useApiPost } from '@/hooks/api';
+import { queryKeys } from '@/lib/queryKeys';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +18,7 @@ import { cn } from '@/utils/utils';
 import { format } from 'date-fns';
 import { BorrowSource } from '@/types/borrow-receive';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+
 interface BorrowHistoryData {
     receiveId: number;
     receiveDate: string;
@@ -40,6 +43,7 @@ interface BorrowHistoryData {
     createdAt: string;
     updatedAt: string;
 }
+
 interface ReportResponse {
     data: BorrowHistoryData[];
     pagination: {
@@ -49,7 +53,9 @@ interface ReportResponse {
         totalPages: number;
     };
 }
+
 export default function BorrowHistoryReportPage() {
+    const queryClient = useQueryClient();
     const { user } = useAuthContext();
     const router = useRouter();
     const { showErrorToast, showSuccessToast } = useCustomToast();
@@ -61,61 +67,74 @@ export default function BorrowHistoryReportPage() {
     const [toDate, setToDate] = useState<Date | undefined>(undefined);
     const [page, setPage] = useState<number>(1);
     const [pageSize] = useState<number>(20);
-    const [data, setData] = useState<BorrowHistoryData[]>([]);
-    const [totalCount, setTotalCount] = useState<number>(0);
-    const [totalPages, setTotalPages] = useState<number>(0);
-    const [loading, setLoading] = useState<boolean>(false);
-    const [borrowSources, setBorrowSources] = useState<BorrowSource[]>([]);
     const [isFromOpen, setIsFromOpen] = useState<boolean>(false);
     const [isToOpen, setIsToOpen] = useState<boolean>(false);
     const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
     const [selectedReturnItem, setSelectedReturnItem] = useState<BorrowHistoryData | null>(null);
     const [returnDate, setReturnDate] = useState<Date | undefined>(undefined);
-    const [isReturning, setIsReturning] = useState<boolean>(false);
     const [isReturnDateOpen, setIsReturnDateOpen] = useState<boolean>(false);
-    useEffect(() => {
+    
         if (!user) {
             router.push('/login');
-            return;
+        return null;
         }
-    }, [user, router]);
-    const fetchBorrowSources = useCallback(async () => {
-        try {
-            const response = await API.get('/api/borrow-sources');
-            if (response.status === 200) {
-                setBorrowSources(response.data.data || []);
-            }
-        }
-        catch {
-        }
-    }, []);
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const params: Record<string, string> = {
+    
+    const params = useMemo(() => {
+        const p: Record<string, string> = {
                 page: page.toString(),
                 pageSize: pageSize.toString(),
             };
             if (universal.trim())
-                params.universal = universal.trim();
+            p.universal = universal.trim();
             if (borrowSourceId !== 'all')
-                params.borrowSourceId = borrowSourceId;
+            p.borrowSourceId = borrowSourceId;
             if (borrowStatus !== 'all')
-                params.borrowStatus = borrowStatus;
+            p.borrowStatus = borrowStatus;
             if (receiveStatus !== 'all')
-                params.receiveStatus = receiveStatus;
+            p.receiveStatus = receiveStatus;
             if (fromDate)
-                params.fromDate = format(fromDate, 'yyyy-MM-dd');
+            p.fromDate = format(fromDate, 'yyyy-MM-dd');
             if (toDate)
-                params.toDate = format(toDate, 'yyyy-MM-dd');
-            const response = await API.get<ReportResponse>('/api/report/borrow-history', { params });
-            if (response.status === 200) {
-                setData(response.data.data);
-                setTotalCount(response.data.pagination.totalCount);
-                setTotalPages(response.data.pagination.totalPages);
-            }
+            p.toDate = format(toDate, 'yyyy-MM-dd');
+        return p;
+    }, [page, pageSize, universal, borrowSourceId, borrowStatus, receiveStatus, fromDate, toDate]);
+    
+    const { data: response, isLoading: loading } = useApiQuery<ReportResponse>(
+        queryKeys.reports.all,
+        '/api/report/borrow-history',
+        params,
+        {
+            staleTime: 1000 * 30,
         }
-        catch (error: unknown) {
+    );
+    
+    const { data: borrowSourcesRes } = useApiQuery<{ data: BorrowSource[] }>(
+        queryKeys.borrowSources.active(),
+        '/api/borrow-sources',
+        undefined,
+        {
+            staleTime: 1000 * 60 * 10,
+        }
+    );
+    
+    const data = response?.data?.data || [];
+    const totalCount = response?.data?.pagination?.totalCount || 0;
+    const totalPages = response?.data?.pagination?.totalPages || 0;
+    const borrowSources = borrowSourcesRes?.data?.data || [];
+    
+    const returnMutation = useApiPost({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.reports.all });
+            showSuccessToast({
+                title: "Success",
+                message: "Item return submitted successfully. Awaiting approval.",
+                duration: 3000,
+            });
+            setIsReturnModalOpen(false);
+            setSelectedReturnItem(null);
+            setReturnDate(undefined);
+        },
+        onError: (error: unknown) => {
             const err = error as {
                 response?: {
                     data?: {
@@ -125,24 +144,16 @@ export default function BorrowHistoryReportPage() {
             };
             showErrorToast({
                 title: "Error",
-                message: err?.response?.data?.message || 'Failed to fetch borrow history',
+                message: err?.response?.data?.message || 'Failed to return item',
                 duration: 3000,
             });
         }
-        finally {
-            setLoading(false);
-        }
-    }, [page, pageSize, universal, borrowSourceId, borrowStatus, receiveStatus, fromDate, toDate, showErrorToast]);
-    useEffect(() => {
-        fetchBorrowSources();
-    }, [fetchBorrowSources]);
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+    });
+    
     const handleSearch = () => {
         setPage(1);
-        fetchData();
     };
+    
     const handleClear = () => {
         setUniversal('');
         setBorrowSourceId('all');
@@ -152,6 +163,7 @@ export default function BorrowHistoryReportPage() {
         setToDate(undefined);
         setPage(1);
     };
+    
     const getStatusBadge = (status: string) => {
         const statusMap: Record<string, {
             bg: string;
@@ -169,12 +181,14 @@ export default function BorrowHistoryReportPage() {
         {status}
       </span>);
     };
+    
     const handleReturnClick = (item: BorrowHistoryData) => {
         setSelectedReturnItem(item);
         setReturnDate(undefined);
         setIsReturnModalOpen(true);
     };
-    const handleReturnItem = async () => {
+    
+    const handleReturnItem = () => {
         if (!selectedReturnItem || !returnDate || !user) {
             showErrorToast({
                 title: "Error",
@@ -183,43 +197,16 @@ export default function BorrowHistoryReportPage() {
             });
             return;
         }
-        setIsReturning(true);
-        try {
-            const response = await API.post('/api/borrow-receive/return', {
+        returnMutation.mutate({
+            url: '/api/borrow-receive/return',
+            data: {
                 borrowReceiveId: selectedReturnItem.receiveId,
                 returnDate: format(returnDate, 'yyyy-MM-dd'),
                 receivedBy: user.UserInfo.username
-            });
-            if (response.status === 201) {
-                showSuccessToast({
-                    title: "Success",
-                    message: "Item return submitted successfully. Awaiting approval.",
-                    duration: 3000,
-                });
-                setIsReturnModalOpen(false);
-                setSelectedReturnItem(null);
-                setReturnDate(undefined);
-                fetchData();
             }
-        }
-        catch (error: unknown) {
-            const err = error as {
-                response?: {
-                    data?: {
-                        message?: string;
-                    };
-                };
-            };
-            showErrorToast({
-                title: "Error",
-                message: err?.response?.data?.message || 'Failed to return item',
-                duration: 3000,
-            });
-        }
-        finally {
-            setIsReturning(false);
-        }
+        });
     };
+    
     return (<div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         <Card>
@@ -428,11 +415,11 @@ export default function BorrowHistoryReportPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsReturnModalOpen(false)} disabled={isReturning}>
+            <Button variant="outline" onClick={() => setIsReturnModalOpen(false)} disabled={returnMutation.isPending}>
               Cancel
             </Button>
-            <Button onClick={handleReturnItem} disabled={!returnDate || isReturning} className="bg-[#003594] text-white hover:bg-[#002a6e]">
-              {isReturning ? 'Returning...' : 'Submit Return'}
+            <Button onClick={handleReturnItem} disabled={!returnDate || returnMutation.isPending} className="bg-[#003594] text-white hover:bg-[#002a6e]">
+              {returnMutation.isPending ? 'Returning...' : 'Submit Return'}
             </Button>
           </DialogFooter>
         </DialogContent>

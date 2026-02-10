@@ -1,7 +1,10 @@
 'use client';
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { API } from '@/lib/api';
+import { createContext, useContext, useMemo, ReactNode } from 'react';
+import { useApiQuery } from '@/hooks/api/useApiQuery';
+import { useApiPut } from '@/hooks/api/useApiMutation';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from './AuthContext';
+
 interface Notification {
     id: number;
     referenceNumber: string;
@@ -10,6 +13,7 @@ interface Notification {
     createdAt: string;
     isRead: number;
 }
+
 interface NotificationContextType {
     notifications: Notification[];
     unreadCount: number;
@@ -19,64 +23,70 @@ interface NotificationContextType {
     markAsRead: (notificationId: number) => Promise<void>;
     markAllAsRead: () => Promise<void>;
 }
+
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+
 export function NotificationProvider({ children }: {
     children: ReactNode;
 }) {
-    const [notifications, setNotifications] = useState<Notification[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const queryClient = useQueryClient();
     const { user } = useAuthContext();
-    const unreadCount = notifications.filter(n => n.isRead === 0).length;
-    const fetchNotifications = useCallback(async () => {
-        if (!user?.UserInfo?.username)
-            return;
-        try {
-            setIsLoading(true);
-            const response = await API.get(`/api/notification/${user.UserInfo.username}`);
-            setNotifications(response.data);
-            setError(null);
+    const username = user?.UserInfo?.username;
+    
+    const { data: response, isLoading, error } = useApiQuery<Notification[]>(
+        ['notifications', username],
+        username ? `/api/notification/${username}` : '',
+        undefined,
+        {
+            enabled: !!username,
+            refetchInterval: 30000,
+            staleTime: 1000 * 15,
         }
-        catch {
-            setError('Failed to fetch notifications');
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [user?.UserInfo?.username]);
-    const markAsRead = async (notificationId: number) => {
-        try {
-            await API.put(`/api/notification/read/${notificationId}`);
-            setNotifications(prev => prev.map(notification => notification.id === notificationId
-                ? { ...notification, isRead: 1 }
-                : notification));
-        }
-        catch {
-        }
+    );
+    
+    const notifications = response?.data || [];
+    const unreadCount = useMemo(() => notifications.filter(n => n.isRead === 0).length, [notifications]);
+    
+    const markAsReadMutation = useApiPut({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['notifications', username] });
+        },
+    });
+    
+    const markAllAsReadMutation = useApiPut({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['notifications', username] });
+        },
+    });
+    
+    const fetchNotifications = async () => {
+        await queryClient.invalidateQueries({ queryKey: ['notifications', username] });
     };
+    
+    const markAsRead = async (notificationId: number) => {
+        markAsReadMutation.mutate({
+            url: `/api/notification/read/${notificationId}`,
+            data: {}
+        });
+    };
+    
     const markAllAsRead = async () => {
-        try {
             const unreadIds = notifications
                 .filter(n => n.isRead === 0)
                 .map(n => n.id);
-            await Promise.all(unreadIds.map(id => API.put(`/api/notification/read/${id}`)));
-            setNotifications(prev => prev.map(notification => ({ ...notification, isRead: 1 })));
-        }
-        catch {
-        }
+        await Promise.all(unreadIds.map(id => 
+            markAsReadMutation.mutateAsync({
+                url: `/api/notification/read/${id}`,
+                data: {}
+            })
+        ));
     };
-    useEffect(() => {
-        if (user?.UserInfo?.username) {
-            fetchNotifications();
-            const interval = setInterval(fetchNotifications, 30000);
-            return () => clearInterval(interval);
-        }
-    }, [user?.UserInfo?.username, fetchNotifications]);
+    
     return (<NotificationContext.Provider value={{
             notifications,
             unreadCount,
             isLoading,
-            error,
+            error: error ? 'Failed to fetch notifications' : null,
             fetchNotifications,
             markAsRead,
             markAllAsRead,
@@ -84,6 +94,7 @@ export function NotificationProvider({ children }: {
       {children}
     </NotificationContext.Provider>);
 }
+
 export function useNotification() {
     const context = useContext(NotificationContext);
     if (context === undefined) {

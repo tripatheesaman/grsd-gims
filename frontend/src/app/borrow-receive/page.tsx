@@ -74,7 +74,7 @@ export default function BorrowReceivePage() {
         return () => {
             isMounted = false;
         };
-    }, [canBorrowStocks, showErrorToast]);
+    }, [canBorrowStocks]);
     if (!canBorrowStocks) {
         return (<div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">

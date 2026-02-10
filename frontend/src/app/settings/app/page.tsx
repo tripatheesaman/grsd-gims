@@ -47,7 +47,7 @@ export default function AppSettingsPage() {
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => {
         showErrorToastRef.current = showErrorToast;
-    }, [showErrorToast]);
+    }, []);
     useEffect(() => {
         const fetchFiscalYear = async () => {
             try {
