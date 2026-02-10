@@ -1,7 +1,10 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
-import { API } from '@/lib/api';
+import { usePendingRequestsQuery, useRequestItemsQuery } from '@/hooks/api/usePendingRequests';
+import { useApiPut } from '@/hooks/api/useApiMutation';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/queryKeys';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { FileText, Eye, X, Pencil, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,11 +57,10 @@ interface EditItemData {
     requestedByEmail?: string | null;
 }
 export function PendingRequestsCount() {
+    const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const { data: authorityOptions, isLoading: isLoadingAuthorities } = useRequestingAuthorities();
-    const [pendingCount, setPendingCount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isImagePreviewOpen, setIsImagePreviewOpen] = useState(false);
@@ -66,76 +68,121 @@ export function PendingRequestsCount() {
     const [isRejectOpen, setIsRejectOpen] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [selectedImage, setSelectedImage] = useState<string>('');
-    const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
-    const [selectedRequest, setSelectedRequest] = useState<{
-        items: RequestItem[];
-        requestNumber: string;
-        requestDate: string;
-        remarks: string;
-        requestedBy: string;
-    } | null>(null);
+    const [selectedRequestNumber, setSelectedRequestNumber] = useState<string | null>(null);
+    const [selectedRequestDate, setSelectedRequestDate] = useState<string>('');
     const [editData, setEditData] = useState<{
         requestNumber: string;
         requestDate: Date;
         remarks: string;
         items: EditItemData[];
     } | null>(null);
-    const fetchPendingCount = useCallback(async () => {
-        if (!permissions?.includes('can_approve_request')) {
-            setIsLoading(false);
-            return;
-        }
-        try {
-            const response = await API.get('/api/request/pending');
-            const uniqueRequests = response.data.reduce((acc: PendingRequest[], curr: PendingRequest) => {
-                if (!acc.find(req => req.requestNumber === curr.requestNumber)) {
-                    acc.push(curr);
-                }
-                return acc;
-            }, []);
-            setPendingRequests(uniqueRequests);
-            setPendingCount(uniqueRequests.length);
-        }
-        catch {
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [permissions]);
-    useEffect(() => {
-        fetchPendingCount();
-    }, [fetchPendingCount]);
-    useEffect(() => {
-        if (isDetailsOpen || isEditOpen || isRejectOpen)
-            return;
-        const interval = setInterval(() => {
-            fetchPendingCount();
-        }, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPendingCount, isDetailsOpen, isEditOpen, isRejectOpen]);
-    const handleViewDetails = async (requestNumber: string, requestDate: string) => {
-        try {
-            const response = await API.get(`/api/request/items/${requestNumber}`);
-            if (response.status === 200) {
-                const pendingRequest = pendingRequests.find(req => req.requestNumber === requestNumber);
-                setSelectedRequest({
-                    items: response.data,
-                    requestNumber,
-                    requestDate,
-                    remarks: response.data[0]?.remarks || '',
-                    requestedBy: pendingRequest?.requestedBy || response.data[0]?.requestedBy || ''
-                });
-                setIsDetailsOpen(true);
+    
+    const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen;
+    const { data: pendingRes, isLoading } = usePendingRequestsQuery(
+        permissions?.includes('can_approve_request') && shouldPoll
+    );
+    
+    const pendingRequestsData = pendingRes?.data as PendingRequest[] | undefined;
+    const pendingRequests = useMemo(() => {
+        if (!pendingRequestsData) return [];
+        return pendingRequestsData.reduce((acc: PendingRequest[], curr: PendingRequest) => {
+            if (!acc.find(req => req.requestNumber === curr.requestNumber)) {
+                acc.push(curr);
             }
+            return acc;
+        }, []);
+    }, [pendingRequestsData]);
+    
+    const pendingCount = pendingRequests.length;
+    
+    const { data: requestItemsRes } = useRequestItemsQuery(selectedRequestNumber, isDetailsOpen && selectedRequestNumber !== null);
+    const requestItems = requestItemsRes?.data as RequestItem[] | undefined;
+    
+    const selectedRequest = useMemo(() => {
+        if (!requestItems || !selectedRequestNumber) return null;
+        const pendingRequest = pendingRequests.find(req => req.requestNumber === selectedRequestNumber);
+        return {
+            items: requestItems,
+            requestNumber: selectedRequestNumber,
+            requestDate: selectedRequestDate,
+            remarks: requestItems[0]?.remarks || '',
+            requestedBy: pendingRequest?.requestedBy || requestItems[0]?.requestedBy || ''
+        };
+    }, [requestItems, selectedRequestNumber, selectedRequestDate, pendingRequests]);
+    
+    const updateRequestMutation = useApiPut({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
+            queryClient.invalidateQueries({ queryKey: queryKeys.request.items(selectedRequestNumber!) });
+            showSuccessToast({
+                title: "Success",
+                message: "Request updated successfully",
+                duration: 3000,
+            });
+            setIsEditOpen(false);
+            if (selectedRequestNumber) {
+                queryClient.invalidateQueries({ queryKey: queryKeys.request.items(selectedRequestNumber) });
+            }
+        },
+        onError: (error: unknown) => {
+            showErrorToast({
+                title: "Error",
+                message: error instanceof Error ? error.message : "Failed to update request",
+                duration: 5000,
+            });
         }
-        catch {
+    });
+    
+    const approveRequestMutation = useApiPut({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
+            showSuccessToast({
+                title: "Success",
+                message: "Request approved successfully",
+                duration: 3000,
+            });
+            setIsDetailsOpen(false);
+        },
+        onError: (error: unknown) => {
+            showErrorToast({
+                title: "Error",
+                message: error instanceof Error ? error.message : "Failed to approve request",
+                duration: 5000,
+            });
         }
-    };
+    });
+    
+    const rejectRequestMutation = useApiPut({
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
+            showSuccessToast({
+                title: "Success",
+                message: "Request rejected successfully",
+                duration: 3000,
+            });
+            setIsDetailsOpen(false);
+            setIsRejectOpen(false);
+            setRejectionReason('');
+        },
+        onError: (error: unknown) => {
+            showErrorToast({
+                title: "Error",
+                message: error instanceof Error ? error.message : "Failed to reject request",
+                duration: 5000,
+            });
+        }
+    });
+    
+    const handleViewDetails = useCallback((requestNumber: string, requestDate: string) => {
+        setSelectedRequestNumber(requestNumber);
+        setSelectedRequestDate(requestDate);
+        setIsDetailsOpen(true);
+    }, []);
     const handleImageClick = (imageUrl: string) => {
         setSelectedImage(resolveImageUrl(imageUrl, '/images/nepal_airlines_logo.png'));
         setIsImagePreviewOpen(true);
     };
-    const handleEditClick = () => {
+    const handleEditClick = useCallback(() => {
         if (!selectedRequest)
             return;
         setEditData({
@@ -148,7 +195,7 @@ export function PendingRequestsCount() {
             }))
         });
         setIsEditOpen(true);
-    };
+    }, [selectedRequest]);
     const handleImageChange = (itemId: number, file: File) => {
         if (!editData)
             return;
@@ -157,117 +204,50 @@ export function PendingRequestsCount() {
             items: editData.items.map(item => item.id === itemId ? { ...item, newImage: file } : item)
         });
     };
-    const handleSaveEdit = async () => {
-        if (!editData)
+    const handleSaveEdit = useCallback(() => {
+        if (!editData || !selectedRequestNumber)
             return;
-        try {
-            const formatDateForAPI = (date: Date): string => {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                return `${year}-${month}-${day}`;
-            };
-            const requestData = {
-                requestNumber: editData.requestNumber,
-                requestDate: formatDateForAPI(editData.requestDate),
-                remarks: editData.remarks,
-                items: editData.items.map(item => ({
-                    id: item.id,
-                    itemName: item.itemName,
-                    partNumber: item.partNumber,
-                    nacCode: item.nacCode,
-                    equipmentNumber: item.equipmentNumber,
-                    requestedQuantity: item.requestedQuantity,
-                    unit: item.unit,
-                    specifications: item.specifications,
-                    remarks: item.remarks,
-                    imageUrl: item.imageUrl,
-                    requestedById: item.requestedById ?? null,
-                    requestedByEmail: item.requestedByEmail ?? null
-                }))
-            };
-            const response = await API.put(`/api/request/${selectedRequest?.requestNumber}`, requestData);
-            if (response.status === 200) {
-                setPendingRequests(prevRequests => prevRequests.map(request => request.requestNumber === selectedRequest?.requestNumber
-                    ? {
-                        ...request,
-                        requestNumber: editData.requestNumber,
-                        requestDate: editData.requestDate.toISOString()
-                    }
-                    : request));
-                setSelectedRequest(prev => prev ? {
-                    ...prev,
-                    requestNumber: editData.requestNumber,
-                    requestDate: editData.requestDate.toISOString(),
-                    remarks: editData.remarks,
-                    items: editData.items.map(item => ({
-                        ...item,
-                        requestNumber: editData.requestNumber
-                    }))
-                } : null);
-                showSuccessToast({
-                    title: "Success",
-                    message: "Request updated successfully",
-                    duration: 3000,
-                });
-                setIsEditOpen(false);
-                if (selectedRequest) {
-                    handleViewDetails(editData.requestNumber, editData.requestDate.toISOString());
-                }
-            }
-            else {
-                throw new Error(response.data?.message || 'Failed to update request');
-            }
-        }
-        catch (error) {
-            showErrorToast({
-                title: "Error",
-                message: error instanceof Error ? error.message : "Failed to update request",
-                duration: 5000,
-            });
-        }
-    };
-    const handleApproveRequest = async () => {
-        if (!selectedRequest)
+        const formatDateForAPI = (date: Date): string => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+        const requestData = {
+            requestNumber: editData.requestNumber,
+            requestDate: formatDateForAPI(editData.requestDate),
+            remarks: editData.remarks,
+            items: editData.items.map(item => ({
+                id: item.id,
+                itemName: item.itemName,
+                partNumber: item.partNumber,
+                nacCode: item.nacCode,
+                equipmentNumber: item.equipmentNumber,
+                requestedQuantity: item.requestedQuantity,
+                unit: item.unit,
+                specifications: item.specifications,
+                remarks: item.remarks,
+                imageUrl: item.imageUrl,
+                requestedById: item.requestedById ?? null,
+                requestedByEmail: item.requestedByEmail ?? null
+            }))
+        };
+        updateRequestMutation.mutate({ url: `/api/request/${selectedRequestNumber}`, data: requestData });
+    }, [editData, selectedRequestNumber, updateRequestMutation]);
+    
+    const handleApproveRequest = useCallback(() => {
+        if (!selectedRequestNumber)
             return;
-        try {
-            const response = await API.put(`/api/request/${selectedRequest.requestNumber}/approve`, {
-                approvedBy: user?.UserInfo?.username
-            });
-            if (response.status === 200) {
-                showSuccessToast({
-                    title: "Success",
-                    message: "Request approved successfully",
-                    duration: 3000,
-                });
-                const pendingResponse = await API.get('/api/request/pending');
-                const uniqueRequests = pendingResponse.data.reduce((acc: PendingRequest[], curr: PendingRequest) => {
-                    if (!acc.find(req => req.requestNumber === curr.requestNumber)) {
-                        acc.push(curr);
-                    }
-                    return acc;
-                }, []);
-                setPendingRequests(uniqueRequests);
-                setPendingCount(uniqueRequests.length);
-                setIsDetailsOpen(false);
-            }
-            else {
-                throw new Error(response.data?.message || 'Failed to approve request');
-            }
-        }
-        catch (error) {
-            showErrorToast({
-                title: "Error",
-                message: error instanceof Error ? error.message : "Failed to approve request",
-                duration: 5000,
-            });
-        }
-    };
+        approveRequestMutation.mutate({
+            url: `/api/request/${selectedRequestNumber}/approve`,
+            data: { approvedBy: user?.UserInfo?.username }
+        });
+    }, [selectedRequestNumber, user?.UserInfo?.username, approveRequestMutation]);
     const handleRejectClick = () => {
         setIsRejectOpen(true);
     };
-    const handleRejectRequest = async () => {
-        if (!selectedRequest || !rejectionReason.trim()) {
+    const handleRejectRequest = useCallback(() => {
+        if (!selectedRequestNumber || !rejectionReason.trim()) {
             showErrorToast({
                 title: "Error",
                 message: "Please provide a reason for rejection",
@@ -275,42 +255,14 @@ export function PendingRequestsCount() {
             });
             return;
         }
-        try {
-            const response = await API.put(`/api/request/${selectedRequest.requestNumber}/reject`, {
+        rejectRequestMutation.mutate({
+            url: `/api/request/${selectedRequestNumber}/reject`,
+            data: {
                 rejectedBy: user?.UserInfo?.username,
                 rejectionReason: rejectionReason.trim()
-            });
-            if (response.status === 200) {
-                showSuccessToast({
-                    title: "Success",
-                    message: "Request rejected successfully",
-                    duration: 3000,
-                });
-                const pendingResponse = await API.get('/api/request/pending');
-                const uniqueRequests = pendingResponse.data.reduce((acc: PendingRequest[], curr: PendingRequest) => {
-                    if (!acc.find(req => req.requestNumber === curr.requestNumber)) {
-                        acc.push(curr);
-                    }
-                    return acc;
-                }, []);
-                setPendingRequests(uniqueRequests);
-                setPendingCount(uniqueRequests.length);
-                setIsDetailsOpen(false);
-                setIsRejectOpen(false);
-                setRejectionReason('');
             }
-            else {
-                throw new Error(response.data?.message || 'Failed to reject request');
-            }
-        }
-        catch (error) {
-            showErrorToast({
-                title: "Error",
-                message: error instanceof Error ? error.message : "Failed to reject request",
-                duration: 5000,
-            });
-        }
-    };
+        });
+    }, [selectedRequestNumber, rejectionReason, user?.UserInfo?.username, rejectRequestMutation, showErrorToast]);
     if (!permissions?.includes('can_approve_request')) {
         return null;
     }
