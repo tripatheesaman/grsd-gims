@@ -1,8 +1,8 @@
 import axios, { AxiosRequestHeaders } from "axios";
 import { getApiBaseUrl } from "@/lib/urls";
-const normalizeAbsoluteUrl = (value?: string) => {
+const normalizeAbsoluteUrl = (value?: string): string => {
     if (!value) {
-        return value;
+        return "";
     }
     let normalized = value.trim();
     if (normalized.startsWith("/http")) {
