@@ -1,80 +1,99 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useMemo, SetStateAction } from 'react';
 import { useDebounce } from './useDebounce';
-import { API } from '@/lib/api';
+import { useApiQuery } from '@/hooks/api/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
 import { RRPSearchResult, RRPSearchParams } from '../types/rrp';
+import { useQueryClient } from '@tanstack/react-query';
+
+interface BackendResponse {
+    data: RRPSearchResult[];
+    pagination: {
+        currentPage: number;
+        pageSize: number;
+        totalCount: number;
+        totalPages: number;
+    };
+}
+
 export function useRRPSearch() {
-    const [results, setResults] = useState<RRPSearchResult[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const queryClient = useQueryClient();
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(20);
-    const [totalCount, setTotalCount] = useState(0);
-    const [totalPages, setTotalPages] = useState(0);
     const [searchParams, setSearchParams] = useState<RRPSearchParams>({
         universal: '',
         equipmentNumber: '',
         partNumber: ''
     });
+    
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipmentNumber = useDebounce(searchParams.equipmentNumber, 500);
     const debouncedPartNumber = useDebounce(searchParams.partNumber, 500);
-    const fetchResults = useCallback(async (page: number = 1) => {
-        setIsLoading(true);
-        setError(null);
-        setCurrentPage(page);
-        try {
-            const params = {
-                page,
+    
+    const { data: response, isLoading, error } = useApiQuery<BackendResponse>(
+        queryKeys.rrp.all,
+        '/api/rrp/search',
+        {
+            page: currentPage,
                 pageSize,
-                universal: debouncedUniversal,
-                equipmentNumber: debouncedEquipmentNumber,
-                partNumber: debouncedPartNumber
-            };
-            const response = await API.get('/api/rrp/search', { params });
-            if (response.status === 200) {
-                if (response.data && response.data.data && response.data.pagination) {
-                    setResults(response.data.data);
-                    setTotalCount(response.data.pagination.totalCount);
-                    setTotalPages(response.data.pagination.totalPages);
-                    setCurrentPage(response.data.pagination.currentPage);
-                }
-                else {
-                    setResults(response.data);
-                    setTotalCount(response.data.length);
-                    setTotalPages(Math.ceil(response.data.length / pageSize));
-                }
-            }
-            else {
-                setError('Failed to fetch results');
-                setResults([]);
-            }
+            universal: debouncedUniversal || undefined,
+            equipmentNumber: debouncedEquipmentNumber || undefined,
+            partNumber: debouncedPartNumber || undefined,
+        },
+        {
+            staleTime: 1000 * 30,
         }
-        catch {
-            setError('An error occurred while searching');
-            setResults([]);
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, pageSize]);
-    useEffect(() => {
-        fetchResults(1);
-    }, [fetchResults]);
+    );
+    
+    const responseData = response?.data;
+    const results = useMemo(
+        () => responseData?.data || (Array.isArray(responseData) ? responseData : []),
+        [responseData]
+    );
+    const pagination = responseData?.pagination;
+    const totalCount = pagination?.totalCount || (Array.isArray(responseData) ? responseData.length : 0);
+    const totalPages = pagination?.totalPages || (Array.isArray(responseData) ? Math.ceil((responseData?.length || 0) / pageSize) : 0);
+    
     const handleSearch = useCallback((type: keyof RRPSearchParams) => (value: string) => {
         setSearchParams(prev => ({ ...prev, [type]: value }));
+        setCurrentPage(1);
     }, []);
+    
     const handlePageChange = useCallback((page: number) => {
-        fetchResults(page);
-    }, [fetchResults]);
+        setCurrentPage(page);
+    }, []);
+    
     const handlePageSizeChange = useCallback((newPageSize: number) => {
         setPageSize(newPageSize);
         setCurrentPage(1);
-        fetchResults(1);
-    }, [fetchResults]);
+    }, []);
+
+    const setResults = useCallback((nextResults: SetStateAction<RRPSearchResult[] | null>) => {
+        const queryKey = queryKeys.rrp.all;
+        const currentResults = results ?? null;
+        const resolvedResults = typeof nextResults === 'function'
+            ? (nextResults as (prev: RRPSearchResult[] | null) => RRPSearchResult[] | null)(currentResults)
+            : nextResults;
+
+        if (response) {
+            queryClient.setQueryData(queryKey, {
+                ...response,
+                data: {
+                    data: resolvedResults || [],
+                    pagination: {
+                        currentPage,
+                        pageSize,
+                        totalCount: resolvedResults?.length || 0,
+                        totalPages: Math.ceil((resolvedResults?.length || 0) / pageSize),
+                    },
+                },
+            });
+        }
+    }, [response, results, queryClient, currentPage, pageSize]);
+    
     return {
         results,
         isLoading,
-        error,
+        error: error ? 'An error occurred while searching' : null,
         currentPage,
         pageSize,
         totalCount,
