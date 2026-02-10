@@ -178,32 +178,41 @@ export const ApprovalCountsProvider = ({ children }: {
         }
         
         if (permissions?.includes('can_approve_issues') && issuesRes?.data) {
-            const issues = Array.isArray(issuesRes.data?.issues) ? issuesRes.data.issues : [];
-                    const grouped = new Map<string, true>();
-                    issues
-                        .filter((issue: {
-                        issue_slip_number?: string;
-                        nac_code?: string;
-                    }) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000')
-                        .forEach((issue: {
-                        issue_slip_number?: string;
-                    }) => {
-                        if (issue.issue_slip_number)
-                            grouped.set(issue.issue_slip_number, true);
-                    });
-                    nextCounts.issues = grouped.size;
+            const issues = (
+                typeof issuesRes.data === 'object' &&
+                issuesRes.data !== null &&
+                'issues' in issuesRes.data &&
+                Array.isArray((issuesRes.data as { issues: unknown }).issues)
+            )
+                ? (issuesRes.data as { issues: { issue_slip_number?: string; nac_code?: string }[] }).issues
+                : [];
+            const grouped = new Map<string, true>();
+            issues
+                .filter((issue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000')
+                .forEach((issue) => {
+                    if (issue.issue_slip_number) {
+                        grouped.set(issue.issue_slip_number, true);
+                    }
+                });
+            nextCounts.issues = grouped.size;
         }
         
         if (permissions?.includes('can_approve_issues') && fuelIssuesRes?.data) {
-            const issues = Array.isArray(fuelIssuesRes.data?.issues) ? fuelIssuesRes.data.issues : [];
-                    const grouped = new Set<string>();
-                    issues.forEach((issue: {
-                        issue_slip_number?: string;
-                    }) => {
-                        if (issue.issue_slip_number)
-                            grouped.add(issue.issue_slip_number);
-                    });
-                    nextCounts.fuelIssues = grouped.size;
+            const issues = (
+                typeof fuelIssuesRes.data === 'object' &&
+                fuelIssuesRes.data !== null &&
+                'issues' in fuelIssuesRes.data &&
+                Array.isArray((fuelIssuesRes.data as { issues: unknown }).issues)
+            )
+                ? (fuelIssuesRes.data as { issues: { issue_slip_number?: string }[] }).issues
+                : [];
+            const grouped = new Set<string>();
+            issues.forEach((issue) => {
+                if (issue.issue_slip_number) {
+                    grouped.add(issue.issue_slip_number);
+                }
+            });
+            nextCounts.fuelIssues = grouped.size;
         }
         
             nextCounts.total = computeTotal(nextCounts);

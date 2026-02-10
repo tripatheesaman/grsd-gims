@@ -49,12 +49,14 @@ services:
       - ../frontend/.env.frontend.development
     depends_on:
       - backend
+    environment:
+      TEST_BUILD: ${TEST_BUILD:-0}
     volumes:
       - ../frontend:/app
       - /app/node_modules
     ports:
       - "3000:3000"
-    command: npm run dev
+    command: sh -lc "if [ \"$TEST_BUILD\" = \"1\" ]; then npm run build; else npm run dev; fi"
 
 volumes:
   gims_dev_mysql:

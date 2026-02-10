@@ -106,13 +106,14 @@ export const useDashboardInsights = () => {
         { staleTime: 1000 * 60 * 2 }
     );
     
-            const issuesByDate = useMemo(() => {
-        const issuesRows: {
-            issue_date: string;
-            nac_code?: string;
-        }[] = Array.isArray(issuesRes?.data?.issues)
-            ? issuesRes.data.issues
-            : [];
+    const issuesByDate = useMemo(() => {
+        const issuesRows =
+            typeof issuesRes?.data === 'object' &&
+            issuesRes.data !== null &&
+            'issues' in issuesRes.data &&
+            Array.isArray((issuesRes.data as { issues: unknown }).issues)
+                ? (issuesRes.data as { issues: { issue_date: string; nac_code?: string }[] }).issues
+                : [];
         const map = new Map<string, Set<string>>();
         for (const item of issuesRows) {
             const key = formatISODate(new Date(item.issue_date));
@@ -123,7 +124,7 @@ export const useDashboardInsights = () => {
             map.set(key, set);
         }
         return map;
-    }, [issuesRes?.data?.issues]);
+    }, [issuesRes?.data]);
     
     const issueSeries = useMemo(() => 
         buildSeries(Array.from(issuesByDate.entries()).map(([date, set]) => ({ date, count: set.size })), range.from, range.to),
@@ -136,22 +137,40 @@ export const useDashboardInsights = () => {
             }
     
     const requestSeries = useMemo(() => {
-        const requestRows: RequestSeriesRow[] = (reqRes?.data?.series ?? []) as RequestSeriesRow[];
+        const requestRows =
+            typeof reqRes?.data === 'object' &&
+            reqRes.data !== null &&
+            'series' in reqRes.data &&
+            Array.isArray((reqRes.data as { series: unknown }).series)
+                ? (reqRes.data as { series: RequestSeriesRow[] }).series
+                : [];
         return buildSeries(requestRows.map(r => ({ date: r.date, count: r.count || 0 })), range.from, range.to);
-    }, [reqRes?.data?.series, range.from, range.to]);
+    }, [reqRes?.data, range.from, range.to]);
     
-    const receiveSeries = useMemo(() => 
-        buildSeries(((recRes?.data?.series ?? []) as SummaryRow[]) ?? [], range.from, range.to),
-        [recRes?.data?.series, range.from, range.to]
-    );
+    const receiveSeries = useMemo(() => {
+        const rows =
+            typeof recRes?.data === 'object' &&
+            recRes.data !== null &&
+            'series' in recRes.data &&
+            Array.isArray((recRes.data as { series: unknown }).series)
+                ? (recRes.data as { series: SummaryRow[] }).series
+                : [];
+        return buildSeries(rows, range.from, range.to);
+    }, [recRes?.data, range.from, range.to]);
     
-    const rrpSeries = useMemo(() => 
-        buildSeries(((rrpRes?.data?.series ?? []) as SummaryRow[]) ?? [], range.from, range.to),
-        [rrpRes?.data?.series, range.from, range.to]
-    );
+    const rrpSeries = useMemo(() => {
+        const rows =
+            typeof rrpRes?.data === 'object' &&
+            rrpRes.data !== null &&
+            'series' in rrpRes.data &&
+            Array.isArray((rrpRes.data as { series: unknown }).series)
+                ? (rrpRes.data as { series: SummaryRow[] }).series
+                : [];
+        return buildSeries(rows, range.from, range.to);
+    }, [rrpRes?.data, range.from, range.to]);
     
     const dashboardTotals: DashboardTotals = useMemo(() => {
-        const data = totalsRes?.data;
+        const data = (totalsRes?.data ?? {}) as Partial<DashboardTotals>;
         return {
             uniqueRequests: Number(data?.uniqueRequests) || 0,
             totalItemsRequested: Number(data?.totalItemsRequested) || 0,
