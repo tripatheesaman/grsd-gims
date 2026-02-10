@@ -1,5 +1,5 @@
 'use client';
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useApiQuery, useApiPost } from '@/hooks/api';
@@ -73,12 +73,12 @@ export default function BorrowHistoryReportPage() {
     const [selectedReturnItem, setSelectedReturnItem] = useState<BorrowHistoryData | null>(null);
     const [returnDate, setReturnDate] = useState<Date | undefined>(undefined);
     const [isReturnDateOpen, setIsReturnDateOpen] = useState<boolean>(false);
-    
+    useEffect(() => {
         if (!user) {
             router.push('/login');
-        return null;
         }
-    
+    }, [user, router]);
+
     const params = useMemo(() => {
         const p: Record<string, string> = {
                 page: page.toString(),
@@ -104,6 +104,7 @@ export default function BorrowHistoryReportPage() {
         '/api/report/borrow-history',
         params,
         {
+            enabled: !!user,
             staleTime: 1000 * 30,
         }
     );
@@ -113,6 +114,7 @@ export default function BorrowHistoryReportPage() {
         '/api/borrow-sources',
         undefined,
         {
+            enabled: !!user,
             staleTime: 1000 * 60 * 10,
         }
     );
@@ -207,6 +209,10 @@ export default function BorrowHistoryReportPage() {
         });
     };
     
+    if (!user) {
+        return null;
+    }
+
     return (<div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         <Card>

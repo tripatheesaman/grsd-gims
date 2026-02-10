@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
 import { useApiQuery } from './useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
 import { ItemDetails } from '@/types/item';

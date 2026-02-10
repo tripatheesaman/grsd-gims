@@ -44,16 +44,10 @@ export function NotificationProvider({ children }: {
         }
     );
     
-    const notifications = response?.data || [];
+    const notifications = useMemo(() => response?.data ?? [], [response?.data]);
     const unreadCount = useMemo(() => notifications.filter(n => n.isRead === 0).length, [notifications]);
     
     const markAsReadMutation = useApiPut({
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['notifications', username] });
-        },
-    });
-    
-    const markAllAsReadMutation = useApiPut({
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['notifications', username] });
         },

@@ -106,22 +106,24 @@ export const useDashboardInsights = () => {
         { staleTime: 1000 * 60 * 2 }
     );
     
-            const issuesRows: {
-                issue_date: string;
-                nac_code?: string;
-    }[] = Array.isArray(issuesRes?.data?.issues)
-                ? issuesRes.data.issues
-                : [];
-    
-            const issuesByDate = new Map<string, Set<string>>();
-            for (const item of issuesRows) {
-                const key = formatISODate(new Date(item.issue_date));
-                const set = issuesByDate.get(key) ?? new Set<string>();
-                if (item.nac_code) {
-                    set.add(item.nac_code);
-                }
-                issuesByDate.set(key, set);
+            const issuesByDate = useMemo(() => {
+        const issuesRows: {
+            issue_date: string;
+            nac_code?: string;
+        }[] = Array.isArray(issuesRes?.data?.issues)
+            ? issuesRes.data.issues
+            : [];
+        const map = new Map<string, Set<string>>();
+        for (const item of issuesRows) {
+            const key = formatISODate(new Date(item.issue_date));
+            const set = map.get(key) ?? new Set<string>();
+            if (item.nac_code) {
+                set.add(item.nac_code);
             }
+            map.set(key, set);
+        }
+        return map;
+    }, [issuesRes?.data?.issues]);
     
     const issueSeries = useMemo(() => 
         buildSeries(Array.from(issuesByDate.entries()).map(([date, set]) => ({ date, count: set.size })), range.from, range.to),
@@ -133,11 +135,10 @@ export const useDashboardInsights = () => {
                 count?: number;
             }
     
-    const requestRows: RequestSeriesRow[] = (reqRes?.data?.series ?? []) as RequestSeriesRow[];
-    const requestSeries = useMemo(() => 
-        buildSeries(requestRows.map(r => ({ date: r.date, count: r.count || 0 })), range.from, range.to),
-        [requestRows, range.from, range.to]
-    );
+    const requestSeries = useMemo(() => {
+        const requestRows: RequestSeriesRow[] = (reqRes?.data?.series ?? []) as RequestSeriesRow[];
+        return buildSeries(requestRows.map(r => ({ date: r.date, count: r.count || 0 })), range.from, range.to);
+    }, [reqRes?.data?.series, range.from, range.to]);
     
     const receiveSeries = useMemo(() => 
         buildSeries(((recRes?.data?.series ?? []) as SummaryRow[]) ?? [], range.from, range.to),
