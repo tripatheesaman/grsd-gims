@@ -156,20 +156,26 @@ export const ApprovalCountsProvider = ({ children }: {
         }
         
         if (permissions?.includes('can_approve_rrp') && rrpsRes?.data) {
-            const pending = Array.isArray(rrpsRes.data?.pendingRRPs) ? rrpsRes.data.pendingRRPs : rrpsRes.data ?? [];
-                    if (Array.isArray(pending)) {
-                        const unique = new Set<string>();
-                        pending.forEach((item: {
-                            rrp_number?: string;
-                        }) => {
-                            if (item?.rrp_number)
-                                unique.add(item.rrp_number);
-                        });
-                        nextCounts.rrps = unique.size;
+            const pending = (
+                typeof rrpsRes.data === 'object' &&
+                rrpsRes.data !== null &&
+                'pendingRRPs' in rrpsRes.data &&
+                Array.isArray((rrpsRes.data as { pendingRRPs: unknown }).pendingRRPs)
+            )
+                ? (rrpsRes.data as { pendingRRPs: unknown[] }).pendingRRPs
+                : rrpsRes.data;
+            if (Array.isArray(pending)) {
+                const unique = new Set<string>();
+                pending.forEach((item: { rrp_number?: string }) => {
+                    if (item?.rrp_number) {
+                        unique.add(item.rrp_number);
+                    }
+                });
+                nextCounts.rrps = unique.size;
             } else {
-                    nextCounts.rrps = 0;
+                nextCounts.rrps = 0;
             }
-            }
+        }
         
         if (permissions?.includes('can_approve_issues') && issuesRes?.data) {
             const issues = Array.isArray(issuesRes.data?.issues) ? issuesRes.data.issues : [];
