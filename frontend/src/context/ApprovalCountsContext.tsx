@@ -143,12 +143,17 @@ export const ApprovalCountsProvider = ({ children }: {
         if (permissions?.includes('can_approve_receive') && receivesRes?.data) {
             if (Array.isArray(receivesRes.data)) {
                 nextCounts.receives = receivesRes.data.length;
-            } else if (Array.isArray(receivesRes.data?.items)) {
-                nextCounts.receives = receivesRes.data.items.length;
+            } else if (
+                typeof receivesRes.data === 'object' &&
+                receivesRes.data !== null &&
+                'items' in receivesRes.data &&
+                Array.isArray((receivesRes.data as { items: unknown }).items)
+            ) {
+                nextCounts.receives = (receivesRes.data as { items: unknown[] }).items.length;
             } else {
-                    nextCounts.receives = 0;
+                nextCounts.receives = 0;
             }
-            }
+        }
         
         if (permissions?.includes('can_approve_rrp') && rrpsRes?.data) {
             const pending = Array.isArray(rrpsRes.data?.pendingRRPs) ? rrpsRes.data.pendingRRPs : rrpsRes.data ?? [];

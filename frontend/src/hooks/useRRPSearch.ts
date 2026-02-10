@@ -1,4 +1,4 @@
-import { useState, useCallback, SetStateAction } from 'react';
+import { useState, useCallback, useMemo, SetStateAction } from 'react';
 import { useDebounce } from './useDebounce';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
@@ -45,7 +45,10 @@ export function useRRPSearch() {
     );
     
     const responseData = response?.data;
-    const results = responseData?.data || (Array.isArray(responseData) ? responseData : []);
+    const results = useMemo(
+        () => responseData?.data || (Array.isArray(responseData) ? responseData : []),
+        [responseData]
+    );
     const pagination = responseData?.pagination;
     const totalCount = pagination?.totalCount || (Array.isArray(responseData) ? responseData.length : 0);
     const totalPages = pagination?.totalPages || (Array.isArray(responseData) ? Math.ceil((responseData?.length || 0) / pageSize) : 0);
