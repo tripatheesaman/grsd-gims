@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Eye, Printer, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { API } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 interface ReceiveSearchResult {
     receiveNumber: string;
     receiveDate: string;
@@ -32,7 +33,7 @@ interface PrintReceiveResultsTableProps {
 }
 export const PrintReceiveResultsTable = ({ results, currentPage, itemsPerPage, onPreview }: PrintReceiveResultsTableProps) => {
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-    const { toast } = useToast();
+    const { showErrorToast } = useCustomToast();
     if (!results || results.length === 0) {
         return (<div className="text-center py-4 text-gray-500">
         No receives found
@@ -65,11 +66,10 @@ export const PrintReceiveResultsTable = ({ results, currentPage, itemsPerPage, o
             document.body.removeChild(link);
             URL.revokeObjectURL(excelUrl);
         }
-        catch {
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: 'Failed to generate Excel file. Please try again.',
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to generate Excel file. Please try again.'),
             });
         }
     };

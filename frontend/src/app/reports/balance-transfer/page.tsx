@@ -91,7 +91,7 @@ export default function BalanceTransferRecordsPage() {
     const handleExport = async () => {
         if (exportType === 'dateRange' && (!fromDate || !toDate)) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please select both from and to dates for date range export",
                 duration: 5000,
             });
@@ -128,7 +128,7 @@ export default function BalanceTransferRecordsPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Report exported successfully",
                     duration: 3000,
                 });
@@ -140,7 +140,7 @@ export default function BalanceTransferRecordsPage() {
         }
         catch {
             showErrorToast({
-                title: "Export Failed",
+                title: 'Error',
                 message: "Failed to export report. Please try again.",
                 duration: 5000,
             });

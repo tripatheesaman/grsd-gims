@@ -9,10 +9,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { format } from 'date-fns';
 import { CalendarIcon, Plus, Trash2, ChevronsUpDown, Check } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
-import { useToast } from '@/components/ui/use-toast';
 import { API } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuthContext } from '@/context/AuthContext';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 interface FuelRecord {
     equipment_number: string;
     kilometers: number | '';
@@ -51,7 +52,7 @@ interface AuthContextType {
 export default function FuelIssueFormPage() {
     const params = useParams();
     const router = useRouter();
-    const { toast } = useToast();
+    const { showErrorToast, showSuccessToast } = useCustomToast();
     const { user } = useAuthContext() as AuthContextType;
     const type = params.type as string;
     const [date, setDate] = useState<Date>(new Date());
@@ -87,16 +88,15 @@ export default function FuelIssueFormPage() {
                 setConfig(response.data);
                 setPrice(response.data.latest_fuel_price || 0);
             }
-            catch {
-                toast({
+            catch (error) {
+                showErrorToast({
                     title: 'Error',
-                    description: 'Failed to load fuel configuration',
-                    variant: 'destructive',
+                    message: getErrorMessage(error, 'Failed to load fuel configuration'),
                 });
             }
         };
         fetchConfig();
-    }, [type, toast]);
+    }, [type, showErrorToast]);
     const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
         const suggestions = getFilteredSuggestions(index);
         if (!suggestions.length)
@@ -247,18 +247,16 @@ export default function FuelIssueFormPage() {
                     });
                 }, 100);
             }
-            toast({
-                title: 'Validation Error',
-                description: `Please fix ${validation.errors.length} error${validation.errors.length > 1 ? 's' : ''} in the form.`,
-                variant: 'destructive',
+            showErrorToast({
+                title: 'Error',
+                message: `Please fix ${validation.errors.length} error${validation.errors.length > 1 ? 's' : ''} in the form.`,
             });
             return;
         }
         if (!user?.UserInfo?.username) {
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'User not authenticated',
-                variant: 'destructive',
+                message: 'User not authenticated',
             });
             return;
         }
@@ -279,9 +277,9 @@ export default function FuelIssueFormPage() {
             };
             const response = await API.post('api/fuel/create', payload);
             if (response.status === 201 || response.status === 200) {
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Fuel records created successfully',
+                    message: 'Fuel records created successfully',
                 });
                 router.push('/fuels/issue');
             }
@@ -289,51 +287,10 @@ export default function FuelIssueFormPage() {
                 throw new Error(response.data?.message || 'Failed to create fuel records');
             }
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to create fuel records';
-            if (error instanceof Error) {
-                errorMessage = error.message;
-            }
-            else if (typeof error === 'object' &&
-                error !== null &&
-                'response' in error &&
-                typeof (error as {
-                    response?: unknown;
-                }).response === 'object' &&
-                (error as {
-                    response?: unknown;
-                }).response !== null) {
-                const response = (error as {
-                    response?: unknown;
-                }).response;
-                if (typeof response === 'object' &&
-                    response !== null &&
-                    'data' in response &&
-                    typeof (response as {
-                        data?: unknown;
-                    }).data === 'object' &&
-                    (response as {
-                        data?: unknown;
-                    }).data !== null) {
-                    const data = (response as {
-                        data?: unknown;
-                    }).data;
-                    if (typeof data === 'object' &&
-                        data !== null &&
-                        'message' in data &&
-                        typeof (data as {
-                            message?: unknown;
-                        }).message === 'string') {
-                        errorMessage = (data as {
-                            message: string;
-                        }).message;
-                    }
-                }
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to create fuel records'),
             });
         }
         finally {

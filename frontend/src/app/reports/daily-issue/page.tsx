@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { API } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,8 +11,9 @@ import { format, startOfDay } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { DailyIssueReport, Issue } from '@/components/reports/DailyIssueReport';
+import { getErrorMessage } from '@/lib/errorHandling';
 export default function DailyIssueReportPage() {
-    const { toast } = useToast();
+    const { showErrorToast } = useCustomToast();
     const [fromDate, setFromDate] = useState<Date>();
     const [toDate, setToDate] = useState<Date>();
     const [equipmentNumber, setEquipmentNumber] = useState('');
@@ -47,11 +48,10 @@ export default function DailyIssueReportPage() {
                 setCurrentPage(page);
             }
         }
-        catch {
-            toast({
-                title: "Error",
-                description: "Failed to generate report",
-                variant: "destructive",
+        catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to generate report'),
                 duration: 3000,
             });
         }
@@ -61,10 +61,9 @@ export default function DailyIssueReportPage() {
     };
     const handleGenerateReport = async () => {
         if (!fromDate || !toDate) {
-            toast({
-                title: "Error",
-                description: "Please select both from and to dates",
-                variant: "destructive",
+            showErrorToast({
+                title: 'Error',
+                message: 'Please select both from and to dates',
                 duration: 3000,
             });
             return;

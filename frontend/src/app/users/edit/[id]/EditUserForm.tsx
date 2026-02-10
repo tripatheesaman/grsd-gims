@@ -72,7 +72,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch user data",
                 duration: 3000,
             });
@@ -94,7 +94,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch roles",
                 duration: 3000,
             });
@@ -123,7 +123,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "User updated successfully",
                     duration: 3000,
                 });
@@ -132,7 +132,7 @@ export default function EditUserForm({ userId }: EditUserFormProps) {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update user",
                 duration: 3000,
             });

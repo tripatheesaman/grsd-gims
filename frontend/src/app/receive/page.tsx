@@ -36,7 +36,7 @@ export default function ReceivePage() {
     const handleAddToCart = (item: ReceiveCartItem) => {
         if (cart.length >= 3) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Maximum of 3 items can be received at once.",
                 duration: 3000,
             });
@@ -46,7 +46,7 @@ export default function ReceivePage() {
         const isDuplicate = cart.some(cartItem => cartItem.id.split('-')[0] === originalRequestId);
         if (isDuplicate) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "This item is already in your receive cart.",
                 duration: 3000,
             });
@@ -81,7 +81,7 @@ export default function ReceivePage() {
     const handleConfirmSubmit = async () => {
         if (!user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "You must be logged in to submit a receive.",
                 duration: 3000,
             });
@@ -89,7 +89,7 @@ export default function ReceivePage() {
         }
         if (!date) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a receive date.",
                 duration: 3000,
             });
@@ -97,7 +97,7 @@ export default function ReceivePage() {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -128,7 +128,7 @@ export default function ReceivePage() {
                     }
                     catch {
                         showErrorToast({
-                            title: "Image Upload Error",
+                            title: 'Error',
                             message: `Failed to upload image for ${item.itemName}. Please try again.`,
                             duration: 5000,
                         });
@@ -161,7 +161,7 @@ export default function ReceivePage() {
             const response = await API.post('/api/receive', receiveData);
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Items received successfully",
                     duration: 3000,
                 });
@@ -181,7 +181,7 @@ export default function ReceivePage() {
             };
             const backendMessage = axiosError?.response?.data?.message || axiosError?.message || 'Failed to submit receive. Please try again.';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: backendMessage,
                 duration: 5000,
             });

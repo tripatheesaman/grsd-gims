@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useItemDetailsQuery } from '@/hooks/api/useItemDetails';
+import { getErrorMessage } from '@/lib/errorHandling';
 
 export const useItemDetails = () => {
     const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
@@ -23,7 +24,7 @@ export const useItemDetails = () => {
         selectedItem,
         isModalOpen,
         isLoading,
-        error: error ? 'Failed to fetch item details. Please try again.' : null,
+        error: error ? getErrorMessage(error, 'Failed to fetch item details. Please try again.') : null,
         fetchItemDetails,
         closeModal,
     };

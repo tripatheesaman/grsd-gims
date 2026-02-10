@@ -76,7 +76,7 @@ export default function IssuePage() {
     const handleConfirmSubmit = async () => {
         if (!user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "You must be logged in to submit an issue request.",
                 duration: 3000,
             });
@@ -84,7 +84,7 @@ export default function IssuePage() {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -110,7 +110,7 @@ export default function IssuePage() {
             const response = await API.post('/api/issue/create', request);
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Issue request submitted successfully.",
                     duration: 3000,
                 });
@@ -187,14 +187,14 @@ export default function IssuePage() {
             }
             if (validationErrs.length > 0) {
                 showErrorToast({
-                    title: "Validation Error",
+                    title: 'Error',
                     message: `${validationErrs.length} item(s) have insufficient stock or are not found. Check the cart for details.`,
                     duration: 5000,
                 });
             }
             else {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: errorMessage,
                     duration: 5000,
                 });

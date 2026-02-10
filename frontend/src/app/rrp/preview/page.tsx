@@ -82,7 +82,7 @@ export default function RRPPreviewPage() {
             };
             await API.post('/api/rrp/create', submissionData);
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "RRP submitted successfully",
                 duration: 3000,
             });
@@ -90,7 +90,7 @@ export default function RRPPreviewPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to submit RRP",
                 duration: 3000,
             });

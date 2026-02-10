@@ -48,7 +48,7 @@ export default function ReceiveSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch borrow sources",
                 duration: 3000,
             });
@@ -66,7 +66,7 @@ export default function ReceiveSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch location phrases",
                 duration: 3000,
             });
@@ -104,7 +104,7 @@ export default function ReceiveSettingsPage() {
     const handleSave = async () => {
         if (!formData.source_name.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Source name is required",
                 duration: 3000,
             });
@@ -118,7 +118,7 @@ export default function ReceiveSettingsPage() {
                 });
                 if (response.status === 200) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Borrow source updated successfully",
                         duration: 3000,
                     });
@@ -133,7 +133,7 @@ export default function ReceiveSettingsPage() {
                 });
                 if (response.status === 201) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Borrow source created successfully",
                         duration: 3000,
                     });
@@ -152,7 +152,7 @@ export default function ReceiveSettingsPage() {
             };
             const errorMessage = err?.response?.data?.message || 'Failed to save borrow source';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -190,7 +190,7 @@ export default function ReceiveSettingsPage() {
     const handleSavePhrase = async () => {
         if (!phraseForm.phrase.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Phrase is required",
                 duration: 3000,
             });
@@ -204,7 +204,7 @@ export default function ReceiveSettingsPage() {
                 });
                 if (response.status === 200) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Location phrase updated successfully",
                         duration: 3000,
                     });
@@ -218,7 +218,7 @@ export default function ReceiveSettingsPage() {
                 });
                 if (response.status === 201) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Location phrase created successfully",
                         duration: 3000,
                     });
@@ -237,7 +237,7 @@ export default function ReceiveSettingsPage() {
             };
             const errorMessage = err?.response?.data?.message || 'Failed to save location phrase';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -251,7 +251,7 @@ export default function ReceiveSettingsPage() {
             const response = await API.delete(`/api/location-phrases/${id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Location phrase deleted successfully",
                     duration: 3000,
                 });
@@ -268,7 +268,7 @@ export default function ReceiveSettingsPage() {
             };
             const errorMessage = err?.response?.data?.message || 'Failed to delete location phrase';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -282,7 +282,7 @@ export default function ReceiveSettingsPage() {
             const response = await API.delete(`/api/borrow-sources/${sourceId}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Borrow source deleted successfully",
                     duration: 3000,
                 });
@@ -299,7 +299,7 @@ export default function ReceiveSettingsPage() {
             };
             const errorMessage = err?.response?.data?.message || 'Failed to delete borrow source';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });

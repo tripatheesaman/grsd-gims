@@ -177,7 +177,7 @@ export default function SpareIssueRecordsPage() {
         try {
             await API.post('/api/spare-issue-records', formData);
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Spare issue record created successfully",
                 duration: 3000,
             });
@@ -187,7 +187,7 @@ export default function SpareIssueRecordsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to create spare issue record",
                 duration: 3000,
             });
@@ -206,7 +206,7 @@ export default function SpareIssueRecordsPage() {
                 message += " (Slip number auto-generated for new date)";
             }
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: message,
                 duration: 4000,
             });
@@ -216,7 +216,7 @@ export default function SpareIssueRecordsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update spare issue record",
                 duration: 3000,
             });
@@ -228,7 +228,7 @@ export default function SpareIssueRecordsPage() {
         try {
             await API.delete(`/api/spare-issue-records/${selectedRecord.id}`);
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Spare issue record deleted successfully (Stock balance updated)",
                 duration: 3000,
             });
@@ -238,7 +238,7 @@ export default function SpareIssueRecordsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to delete spare issue record",
                 duration: 3000,
             });

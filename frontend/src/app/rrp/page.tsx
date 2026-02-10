@@ -17,7 +17,7 @@ export default function RRPPage() {
     const handleCreateRRP = async (type: 'local' | 'foreign') => {
         if (!user?.UserInfo?.permissions?.includes('can_create_rrp')) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to access this page",
                 duration: 3000,
             });
@@ -38,7 +38,7 @@ export default function RRPPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch RRP details. Please try again.",
                 duration: 3000,
             });

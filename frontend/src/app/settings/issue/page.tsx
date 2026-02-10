@@ -6,7 +6,7 @@ export default function IssueSettingsPage() {
     const { showSuccessToast } = useCustomToast();
     const handleSave = () => {
         showSuccessToast({
-            title: "Success",
+            title: 'Success',
             message: "Issue settings saved successfully",
             duration: 3000,
         });

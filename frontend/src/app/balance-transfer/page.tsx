@@ -218,7 +218,7 @@ export default function BalanceTransferPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Balance transferred successfully",
                     duration: 3000,
                 });
@@ -231,7 +231,7 @@ export default function BalanceTransferPage() {
         catch (error: unknown) {
             const errorMessage = error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'data' in error.response && error.response.data && typeof error.response.data === 'object' && 'message' in error.response.data ? String(error.response.data.message) : 'Failed to transfer balance';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });

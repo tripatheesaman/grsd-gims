@@ -284,7 +284,7 @@ export default function RequestRecordsPage() {
             });
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Request record created successfully",
                     duration: 3000,
                 });
@@ -302,7 +302,7 @@ export default function RequestRecordsPage() {
                 };
             })?.response?.data?.message || 'Failed to create request record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -339,7 +339,7 @@ export default function RequestRecordsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Request record updated successfully",
                     duration: 3000,
                 });
@@ -358,7 +358,7 @@ export default function RequestRecordsPage() {
                 };
             })?.response?.data?.message || 'Failed to update request record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -375,7 +375,7 @@ export default function RequestRecordsPage() {
             const response = await API.delete(`/api/request-records/${deletingRecord.id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Request record deleted successfully",
                     duration: 3000,
                 });
@@ -393,7 +393,7 @@ export default function RequestRecordsPage() {
                 };
             })?.response?.data?.message || 'Failed to delete request record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -412,7 +412,7 @@ export default function RequestRecordsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Request force closed successfully",
                     duration: 3000,
                 });
@@ -430,7 +430,7 @@ export default function RequestRecordsPage() {
                 };
             })?.response?.data?.message || 'Failed to force close request';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });

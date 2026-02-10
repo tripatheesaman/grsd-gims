@@ -223,7 +223,7 @@ export default function RequestPage() {
     const handleAddToCart = async (item: RequestCartItem) => {
         if (cart.length >= 3) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Maximum of 3 items can be requested at once.",
                 duration: 3000,
             });
@@ -236,7 +236,7 @@ export default function RequestPage() {
                 });
                 if (response.status === 200 && response.data.isDuplicate) {
                     showErrorToast({
-                        title: "Duplicate Request",
+                        title: 'Error',
                         message: "This item is already requested and pending receive. Please wait for the current request to be processed.",
                         duration: 5000,
                     });
@@ -245,7 +245,7 @@ export default function RequestPage() {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to check for duplicate requests. Please try again.",
                     duration: 3000,
                 });
@@ -282,7 +282,7 @@ export default function RequestPage() {
     const handleConfirmSubmit = async () => {
         if (!user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "You must be logged in to submit a request.",
                 duration: 3000,
             });
@@ -290,7 +290,7 @@ export default function RequestPage() {
         }
         if (!requestNumber.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please enter a request number.",
                 duration: 3000,
             });
@@ -299,7 +299,7 @@ export default function RequestPage() {
         const isDuplicate = await checkDuplicateRequestNumber(requestNumber);
         if (isDuplicate) {
             showErrorToast({
-                title: "Duplicate Request Number",
+                title: 'Error',
                 message: "This request number has already been used. Please use a different request number.",
                 duration: 5000,
             });
@@ -307,7 +307,7 @@ export default function RequestPage() {
         }
         if (!date) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a request date.",
                 duration: 3000,
             });
@@ -317,7 +317,7 @@ export default function RequestPage() {
             const previousRequestDate = new Date(lastRequestCache.requestDate);
             if (date < previousRequestDate) {
                 showErrorToast({
-                    title: "Invalid Date",
+                    title: 'Error',
                     message: `Request date cannot be before the previous request date (${previousRequestDate.toLocaleDateString()}).`,
                     duration: 5000,
                 });
@@ -326,7 +326,7 @@ export default function RequestPage() {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -354,7 +354,7 @@ export default function RequestPage() {
                     }
                     catch {
                         showErrorToast({
-                            title: "Image Upload Error",
+                            title: 'Error',
                             message: `Failed to upload image for ${item.itemName}. Please try again.`,
                             duration: 5000,
                         });
@@ -394,7 +394,7 @@ export default function RequestPage() {
                 const response = await API.post('/api/request/create', requestData);
                 if (response.status === 200 || response.status === 201) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Request submitted successfully.",
                         duration: 3000,
                     });
@@ -511,7 +511,7 @@ export default function RequestPage() {
                 }
             }
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 5000,
             });

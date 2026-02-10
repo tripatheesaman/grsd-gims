@@ -20,7 +20,7 @@ export default function ReceiveDetailsPage() {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to delete notification",
                     duration: 3000,
                 });

@@ -41,7 +41,7 @@ export default function AuthoritiesPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch authorities",
                 duration: 3000,
             });
@@ -56,7 +56,7 @@ export default function AuthoritiesPage() {
     const handleAddAuthority = async () => {
         if (!newAuthorityName.trim() || !newAuthorityDesignation.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Name and designation cannot be empty",
                 duration: 3000,
             });
@@ -79,7 +79,7 @@ export default function AuthoritiesPage() {
                 setNewAuthoritySectionName('');
                 setNewAuthorityEmail('');
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Authority added successfully",
                     duration: 3000,
                 });
@@ -87,7 +87,7 @@ export default function AuthoritiesPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to add authority",
                 duration: 5000,
             });
@@ -102,7 +102,7 @@ export default function AuthoritiesPage() {
         const authority = editingAuthority;
         if (!authority.name.trim() || !authority.designation.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Name and designation cannot be empty",
                 duration: 3000,
             });
@@ -121,7 +121,7 @@ export default function AuthoritiesPage() {
                 await fetchAuthorities();
                 setEditingAuthority(null);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Authority updated successfully",
                     duration: 3000,
                 });
@@ -129,7 +129,7 @@ export default function AuthoritiesPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update authority",
                 duration: 5000,
             });
@@ -145,7 +145,7 @@ export default function AuthoritiesPage() {
             if (response.status === 200) {
                 await fetchAuthorities();
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Authority deleted successfully",
                     duration: 3000,
                 });
@@ -153,7 +153,7 @@ export default function AuthoritiesPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to delete authority",
                 duration: 5000,
             });

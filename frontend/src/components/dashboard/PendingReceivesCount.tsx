@@ -146,7 +146,7 @@ export function PendingReceivesCount() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch receive details",
                 duration: 3000,
             });
@@ -255,14 +255,14 @@ export function PendingReceivesCount() {
                     }
                     catch {
                         showErrorToast({
-                            title: "Warning",
+                            title: 'Error',
                             message: "Details updated but image update failed. Please try updating images again.",
                             duration: 5000,
                         });
                     }
                 }
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive details updated successfully",
                     duration: 3000,
                 });
@@ -275,7 +275,7 @@ export function PendingReceivesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to update receive details",
                 duration: 5000,
             });
@@ -290,7 +290,7 @@ export function PendingReceivesCount() {
     const handleRejectReceive = async () => {
         if (!selectedReceive || !rejectionReason.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please provide a reason for rejection",
                 duration: 3000,
             });
@@ -303,7 +303,7 @@ export function PendingReceivesCount() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive rejected successfully",
                     duration: 3000,
                 });
@@ -320,7 +320,7 @@ export function PendingReceivesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to reject receive",
                 duration: 5000,
             });
@@ -333,7 +333,7 @@ export function PendingReceivesCount() {
             const response = await API.put(`/api/receive/${selectedReceive.id}/approve`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Receive approved successfully",
                     duration: 3000,
                 });
@@ -348,7 +348,7 @@ export function PendingReceivesCount() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve receive",
                 duration: 5000,
             });
