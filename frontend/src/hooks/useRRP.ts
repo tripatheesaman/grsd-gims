@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { API } from '@/lib/api';
+import { useCallback } from 'react';
+import { useApiQuery } from '@/hooks/api/useApiQuery';
+import { queryKeys } from '@/lib/queryKeys';
+import { useQueryClient } from '@tanstack/react-query';
+
 interface InspectionUser {
     name: string;
     designation: string;
@@ -7,6 +10,7 @@ interface InspectionUser {
     section_name?: string | null;
     email?: string | null;
 }
+
 interface RRPConfig {
     supplier_list_local: string[] | string;
     supplier_list_foreign: string[] | string;
@@ -16,32 +20,24 @@ interface RRPConfig {
     vat_rate: number;
     customServiceCharge: number;
 }
+
 export function useRRP() {
-    const [config, setConfig] = useState<RRPConfig | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const configLoadedRef = useRef(false);
-    const fetchConfig = useCallback(async () => {
-        if (!configLoadedRef.current) {
-            try {
-                const response = await API.get('/api/rrp/config');
-                setConfig(response.data);
-                configLoadedRef.current = true;
-            }
-            catch {
-            }
-            finally {
-                setIsLoading(false);
-            }
+    const queryClient = useQueryClient();
+    const { data: response, isLoading } = useApiQuery<RRPConfig>(
+        queryKeys.rrp.config(),
+        '/api/rrp/config',
+        undefined,
+        {
+            staleTime: 1000 * 60 * 10,
         }
-    }, []);
-    const refreshConfig = async () => {
-        configLoadedRef.current = false;
-        setIsLoading(true);
-        await fetchConfig();
-    };
-    useEffect(() => {
-        fetchConfig();
-    }, [fetchConfig]);
+    );
+    
+    const config = response?.data || null;
+    
+    const refreshConfig = useCallback(async () => {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.rrp.config() });
+    }, [queryClient]);
+    
     const normalizeList = (value?: string[] | string) => {
         if (!value)
             return [];
@@ -49,10 +45,12 @@ export function useRRP() {
             return value;
         return value.split(',').map((entry) => entry.trim()).filter(Boolean);
     };
+    
     const getLocalSuppliers = () => normalizeList(config?.supplier_list_local);
     const getForeignSuppliers = () => normalizeList(config?.supplier_list_foreign);
     const getCurrencies = () => normalizeList(config?.currency_list);
     const getInspectionUsers = () => config?.requesting_and_receiving_authority || config?.inspection_user_details || [];
+    
     return {
         config,
         isLoading,
