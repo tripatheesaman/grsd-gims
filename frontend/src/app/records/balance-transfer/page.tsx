@@ -92,7 +92,7 @@ export default function BalanceTransferRecordsPage() {
             const response = await API.post(`/api/balance-transfer/revert/${selectedRecord.id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Balance transfer reverted successfully",
                     duration: 3000,
                 });
@@ -107,7 +107,7 @@ export default function BalanceTransferRecordsPage() {
         }
         catch {
             showErrorToast({
-                title: "Revert Failed",
+                title: 'Error',
                 message: "Failed to revert balance transfer. Please try again.",
                 duration: 5000,
             });

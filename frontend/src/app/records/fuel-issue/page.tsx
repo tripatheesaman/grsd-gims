@@ -274,7 +274,7 @@ const FuelIssueRecordsPage = () => {
     };
     const handleAdd = async () => {
         if (!hasPermission('can_add_fuel_issue_item')) {
-            showErrorToast({ title: 'Forbidden', message: 'You do not have permission to add fuel issue items' });
+            showErrorToast({ title: 'Error', message: 'You do not have permission to add fuel issue items' });
             return;
         }
         try {
@@ -289,7 +289,7 @@ const FuelIssueRecordsPage = () => {
     };
     const handleEdit = async () => {
         if (!hasPermission('can_edit_fuel_issue_item')) {
-            showErrorToast({ title: 'Forbidden', message: 'You do not have permission to edit fuel issue items' });
+            showErrorToast({ title: 'Error', message: 'You do not have permission to edit fuel issue items' });
             return;
         }
         if (!editingRecord)
@@ -306,7 +306,7 @@ const FuelIssueRecordsPage = () => {
     };
     const confirmDelete = async () => {
         if (!hasPermission('can_delete_fuel_issue_item')) {
-            showErrorToast({ title: 'Forbidden', message: 'You do not have permission to delete fuel issue items' });
+            showErrorToast({ title: 'Error', message: 'You do not have permission to delete fuel issue items' });
             return;
         }
         if (confirmDeleteId === null)

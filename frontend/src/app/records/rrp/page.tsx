@@ -290,7 +290,7 @@ export default function RRPRecordsPage() {
             const response = await API.post('/api/rrp-records', formData);
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "RRP record created successfully",
                     duration: 3000,
                 });
@@ -310,7 +310,7 @@ export default function RRPRecordsPage() {
             };
             const errorMessage = errorResponse?.response?.data?.message || errorResponse?.response?.data?.error || 'Failed to create RRP record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -327,7 +327,7 @@ export default function RRPRecordsPage() {
             const response = await API.put(`/api/rrp-records/${editingRecord.id}`, formData);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "RRP record updated successfully",
                     duration: 3000,
                 });
@@ -348,7 +348,7 @@ export default function RRPRecordsPage() {
             };
             const errorMessage = errorResponse?.response?.data?.message || errorResponse?.response?.data?.error || 'Failed to update RRP record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 3000,
             });
@@ -365,7 +365,7 @@ export default function RRPRecordsPage() {
             const response = await API.delete(`/api/rrp-records/${deletingRecord.id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "RRP record deleted successfully",
                     duration: 3000,
                 });
@@ -385,7 +385,7 @@ export default function RRPRecordsPage() {
             };
             const errorMessage = errorResponse?.response?.data?.message || errorResponse?.response?.data?.error || 'Failed to delete RRP record';
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 5000,
             });
@@ -412,7 +412,7 @@ export default function RRPRecordsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Status Updated",
+                    title: 'Success',
                     message: `Status updated successfully for ${response.data.affectedRows} records with RRP number ${response.data.rrpNumber}`,
                     duration: 3000,
                 });

@@ -1,6 +1,5 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { toast } from '@/components/ui/use-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/modal';
 import { PrintRequestSearchControls } from '@/components/print/PrintRequestSearchControls';
 import { PrintRequestResults } from '@/components/print/PrintRequestResults';
@@ -11,11 +10,14 @@ import Image from 'next/image';
 import { useRequestSearch } from '@/hooks/useRequestSearch';
 import { useAuthContext } from '@/context/AuthContext';
 import { resolveImageUrl, withBasePath } from '@/lib/urls';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 export default function PrintRequestPage() {
     const { permissions } = useAuthContext();
     const canUploadRefDoc = permissions?.includes('can_upload_reference_documents');
     const canEditRefDoc = permissions?.includes('can_edit_reference_documents');
     const canDeleteRefDoc = permissions?.includes('can_delete_reference_documents');
+    const { showSuccessToast, showErrorToast } = useCustomToast();
     const [previewRequest, setPreviewRequest] = useState<RequestSearchResult | null>(null);
     const [referenceDocPreview, setReferenceDocPreview] = useState<{
         request: RequestSearchResult;
@@ -40,12 +42,10 @@ export default function PrintRequestPage() {
             document.body.removeChild(link);
             URL.revokeObjectURL(excelUrl);
         }
-        catch {
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: 'Failed to generate Excel file. Please try again.',
-                variant: 'destructive',
-                className: 'bg-red-600 text-white border-none',
+                message: getErrorMessage(error, 'Failed to generate Excel file. Please try again.'),
             });
         }
     };
@@ -71,10 +71,9 @@ export default function PrintRequestPage() {
                 imagePath: imagePath
             });
             if (updateResponse.status === 200 || updateResponse.status === 201) {
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Reference document uploaded successfully.',
-                    className: 'bg-green-600 text-white border-none',
+                    message: 'Reference document uploaded successfully.',
                 });
                 setResults(prevResults => prevResults.map(result => result.requestNumber === request.requestNumber
                     ? { ...result, referenceDoc: imagePath }
@@ -84,12 +83,10 @@ export default function PrintRequestPage() {
                 throw new Error('Failed to update reference document');
             }
         }
-        catch {
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: 'Failed to upload reference document. Please try again.',
-                variant: 'destructive',
-                className: 'bg-red-600 text-white border-none',
+                message: getErrorMessage(error, 'Failed to upload reference document. Please try again.'),
             });
         }
         finally {
@@ -117,19 +114,16 @@ export default function PrintRequestPage() {
             isProcessing = true;
             try {
                 await API.delete(`/api/request/${encodeURIComponent(detail.requestNumber)}/reference-doc`);
-                toast({
+                showSuccessToast({
                     title: 'Success',
-                    description: 'Reference document deleted successfully.',
-                    className: 'bg-green-600 text-white border-none',
+                    message: 'Reference document deleted successfully.',
                 });
                 setResults(prev => prev?.map(r => r.requestNumber === detail.requestNumber ? { ...r, referenceDoc: null } : r) ?? null);
             }
-            catch {
-                toast({
+            catch (error) {
+                showErrorToast({
                     title: 'Error',
-                    description: 'Failed to delete reference document.',
-                    variant: 'destructive',
-                    className: 'bg-red-600 text-white border-none',
+                    message: getErrorMessage(error, 'Failed to delete reference document.'),
                 });
             }
             finally {
@@ -140,7 +134,7 @@ export default function PrintRequestPage() {
         return () => {
             window.removeEventListener('delete-request-ref-doc', handleDeleteRefDoc);
         };
-    }, [setResults]);
+    }, [setResults, showErrorToast, showSuccessToast]);
     return (<div className="container mx-auto px-4 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">Print Request</h1>
@@ -165,18 +159,14 @@ export default function PrintRequestPage() {
           </ModalHeader>
           <div className="flex justify-center items-center p-4">
             {referenceDocPreview?.imagePath ? (referenceDocPreview.imagePath.endsWith('.pdf') ? (<iframe src={referenceDocPreview.imagePath} className="w-full h-[70vh] border rounded-lg shadow-lg" title="Reference Document PDF" onError={() => {
-                toast({
+                showErrorToast({
                     title: 'Error',
-                    description: 'Failed to load reference document PDF.',
-                    variant: 'destructive',
-                    className: 'bg-red-600 text-white border-none',
+                    message: 'Failed to load reference document PDF.',
                 });
             }}/>) : (<Image src={referenceDocPreview.imagePath} alt="Reference Document" width={800} height={600} className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg" onError={() => {
-                toast({
+                showErrorToast({
                     title: 'Error',
-                    description: 'Failed to load reference document image.',
-                    variant: 'destructive',
-                    className: 'bg-red-600 text-white border-none',
+                    message: 'Failed to load reference document image.',
                 });
             }}/>)) : (<div className="text-center text-gray-500 p-8">
                 No reference document available

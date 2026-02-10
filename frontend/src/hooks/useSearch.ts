@@ -5,6 +5,7 @@ import { SearchResult } from '@/types/search';
 import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
+import { getErrorMessage } from '@/lib/errorHandling';
 
 interface SearchParams {
     universal: string;
@@ -115,7 +116,7 @@ export const useSearch = () => {
         searchParams,
         results,
         isLoading,
-        error: error ? 'Failed to perform search. Please try again.' : null,
+        error: error ? getErrorMessage(error, 'Failed to perform search. Please try again.') : null,
         currentPage,
         pageSize,
         totalCount,

@@ -156,7 +156,7 @@ export default function RequestReceiveReportPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch report data",
                 duration: 3000,
             });
@@ -237,7 +237,7 @@ export default function RequestReceiveReportPage() {
     const handleExport = async () => {
         if (exportType === 'dateRange' && (!fromDate || !toDate)) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select both from and to dates for date range export",
                 duration: 3000,
             });
@@ -292,7 +292,7 @@ export default function RequestReceiveReportPage() {
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Report exported successfully",
                     duration: 3000,
                 });
@@ -304,7 +304,7 @@ export default function RequestReceiveReportPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to export report",
                 duration: 3000,
             });

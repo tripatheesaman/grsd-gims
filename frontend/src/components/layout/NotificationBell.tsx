@@ -7,13 +7,14 @@ import { formatDistanceToNow } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { API } from '@/lib/api';
 import { cn } from '@/utils/utils';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { getErrorMessage } from '@/lib/errorHandling';
 export function NotificationBell() {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const { notifications, unreadCount, markAsRead, markAllAsRead, fetchNotifications } = useNotification();
     const router = useRouter();
-    const { toast } = useToast();
+    const { showSuccessToast, showErrorToast } = useCustomToast();
     type NotificationType = {
         id: number;
         referenceType: string;
@@ -40,17 +41,17 @@ export function NotificationBell() {
                     break;
                 case 'issue':
                     await API.delete(`/api/notification/delete/${notification.id}`);
-                    toast({
-                        title: "Success",
-                        description: "Notification deleted successfully",
+                    showSuccessToast({
+                        title: 'Success',
+                        message: 'Notification deleted successfully',
                         duration: 3000,
                     });
                     break;
                 case 'receive':
                     await API.delete(`/api/notification/delete/${notification.id}`);
-                    toast({
-                        title: "Success",
-                        description: "Notification deleted successfully",
+                    showSuccessToast({
+                        title: 'Success',
+                        message: 'Notification deleted successfully',
                         duration: 3000,
                     });
                     break;
@@ -86,12 +87,11 @@ export function NotificationBell() {
             }
             fetchNotifications();
         }
-        catch {
-            toast({
-                title: "Error",
-                description: "Failed to process notification",
+        catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to process notification'),
                 duration: 3000,
-                variant: "destructive"
             });
         }
         setIsOpen(false);

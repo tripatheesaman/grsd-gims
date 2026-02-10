@@ -214,7 +214,7 @@ export function PendingRRPCount() {
                 await markAsRead(Number(notificationId));
             }
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "RRP approved successfully",
                 duration: 3000,
             });
@@ -252,7 +252,7 @@ export function PendingRRPCount() {
                 await markAsRead(Number(notificationId));
             }
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "RRP rejected successfully",
                 duration: 3000,
             });
@@ -344,7 +344,7 @@ export function PendingRRPCount() {
                     await markAsRead(Number(notificationId));
                 }
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "RRP updated successfully",
                     duration: 3000,
                 });
@@ -378,7 +378,7 @@ export function PendingRRPCount() {
         try {
             await API.delete(`/api/rrp/item/${itemId}`);
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Item deleted successfully",
                 duration: 3000,
             });

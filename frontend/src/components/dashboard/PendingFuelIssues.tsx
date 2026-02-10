@@ -108,7 +108,7 @@ export function PendingFuelIssues() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Fuel issue approved successfully",
                     duration: 3000,
                 });
@@ -121,7 +121,7 @@ export function PendingFuelIssues() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve fuel issue",
                 duration: 5000,
             });
@@ -141,7 +141,7 @@ export function PendingFuelIssues() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Fuel issue rejected successfully",
                     duration: 3000,
                 });
@@ -155,7 +155,7 @@ export function PendingFuelIssues() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to reject fuel issue",
                 duration: 5000,
             });
@@ -181,7 +181,7 @@ export function PendingFuelIssues() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Fuel issue updated successfully",
                     duration: 3000,
                 });
@@ -200,7 +200,7 @@ export function PendingFuelIssues() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to update fuel issue",
                 duration: 5000,
             });
@@ -217,7 +217,7 @@ export function PendingFuelIssues() {
             const response = await API.delete(`/api/issue/item/${editingItem.id}`);
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Fuel issue deleted successfully",
                     duration: 3000,
                 });
@@ -235,7 +235,7 @@ export function PendingFuelIssues() {
         }
         catch (error) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to delete fuel issue",
                 duration: 5000,
             });

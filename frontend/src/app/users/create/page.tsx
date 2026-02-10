@@ -46,7 +46,7 @@ export default function CreateUserPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch roles",
                 duration: 3000,
             });
@@ -79,7 +79,7 @@ export default function CreateUserPage() {
             const response = await API.post('/api/user/create', userData);
             if (response.status === 201) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "User created successfully",
                     duration: 3000
                 });

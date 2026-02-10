@@ -83,7 +83,7 @@ export function ReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSub
             return;
         if (editFormData.receiveQuantity && editFormData.receiveQuantity > editingItem.requestedQuantity) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: `Receive quantity cannot be greater than requested quantity (${editingItem.requestedQuantity})`,
                 duration: 3000,
             });

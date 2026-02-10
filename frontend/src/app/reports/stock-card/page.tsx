@@ -6,7 +6,7 @@ import { useAuthContext } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API } from '@/lib/api';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
 import { X, Check, Calendar as CalendarIcon, Loader2 } from 'lucide-react';
 import { format, startOfDay } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/utils/utils';
 import { SearchResult } from '@/types/search';
+import { getErrorMessage } from '@/lib/errorHandling';
 interface SelectedItem {
     id: number;
     naccode: string;
@@ -50,7 +51,7 @@ interface DeferredIssue {
     originalDate: string;
 }
 export default function StockCardPage() {
-    const { toast } = useToast();
+    const { showErrorToast, showSuccessToast } = useCustomToast();
     const {} = useAuthContext();
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
     const [isGenerating, setIsGenerating] = useState(false);
@@ -298,18 +299,16 @@ export default function StockCardPage() {
     };
     const handleGenerateStockCard = async () => {
         if (!generateByIssueDate && selectedItems.length === 0 && !hasFilterOptions) {
-            toast({
-                title: "Error",
-                description: "Select at least one item or apply equipment/created date filters.",
-                variant: "destructive",
+            showErrorToast({
+                title: 'Error',
+                message: 'Select at least one item or apply equipment/created date filters.',
             });
             return;
         }
         if (generateByIssueDate && (!fromDate || !toDate)) {
-            toast({
-                title: "Error",
-                description: "Please select both from and to dates",
-                variant: "destructive",
+            showErrorToast({
+                title: 'Error',
+                message: 'Please select both from and to dates',
             });
             return;
         }
@@ -336,19 +335,18 @@ export default function StockCardPage() {
                 responseType: 'blob'
             });
             downloadStockCardWorkbook(response.data, 'stock-cards');
-            toast({
-                title: "Success",
-                description: "Stock cards generated successfully",
+            showSuccessToast({
+                title: 'Success',
+                message: 'Stock cards generated successfully',
             });
             setSelectedItems([]);
             setFromDate(undefined);
             setToDate(undefined);
         }
-        catch {
-            toast({
-                title: "Error",
-                description: "Failed to generate stock cards",
-                variant: "destructive",
+        catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to generate stock cards'),
             });
         }
         finally {
@@ -357,10 +355,9 @@ export default function StockCardPage() {
     };
     const generateAllStockCards = async () => {
         if (generateByIssueDate) {
-            toast({
-                title: "Turn off issue-date mode",
-                description: "Disable 'Generate by Issue Date' to generate all stock cards.",
-                variant: "destructive",
+            showErrorToast({
+                title: 'Error',
+                message: "Disable 'Generate by Issue Date' to generate all stock cards.",
             });
             return;
         }
@@ -385,17 +382,16 @@ export default function StockCardPage() {
                 mimeType: 'application/zip',
                 extension: 'zip',
             });
-            toast({
+            showSuccessToast({
                 title: 'Success',
-                description: 'A ZIP containing all stock cards has been downloaded.',
+                message: 'A ZIP containing all stock cards has been downloaded.',
             });
         }
-        catch {
+        catch (error) {
             encounteredError = true;
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'Failed to generate all stock cards',
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to generate all stock cards'),
             });
         }
         finally {
@@ -408,10 +404,9 @@ export default function StockCardPage() {
     };
     const handleGenerateAllStockCards = () => {
         if (generateByIssueDate) {
-            toast({
-                title: "Turn off issue-date mode",
-                description: "Disable 'Generate by Issue Date' to generate all stock cards.",
-                variant: "destructive",
+            showErrorToast({
+                title: 'Error',
+                message: "Disable 'Generate by Issue Date' to generate all stock cards.",
             });
             return;
         }
@@ -439,11 +434,10 @@ export default function StockCardPage() {
             setPreviewData(stockData ? normalizePreviewData(stockData) : null);
             setPreviewOpen(true);
         }
-        catch {
-            toast({
-                title: 'Preview unavailable',
-                description: 'Could not load the stock card preview. Please try again.',
-                variant: 'destructive',
+        catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Could not load the stock card preview. Please try again.'),
             });
         }
         finally {

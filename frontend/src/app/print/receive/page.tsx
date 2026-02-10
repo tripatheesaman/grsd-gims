@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PrintReceiveResultsTable } from '@/components/print/PrintReceiveResultsTable';
 import { PrintReceivePreviewModal } from '@/components/print/PrintReceivePreviewModal';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
 import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
+import { getErrorMessage } from '@/lib/errorHandling';
 interface ReceiveSearchParams {
     universal?: string;
     equipmentNumber?: string;
@@ -41,20 +42,19 @@ export default function PrintReceivePage() {
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipment = useDebounce(searchParams.equipmentNumber, 500);
     const debouncedPart = useDebounce(searchParams.partNumber, 500);
-    const { toast } = useToast();
+    const { showErrorToast } = useCustomToast();
     const searchReceives = useCallback(async (params: ReceiveSearchParams) => {
         try {
             const response = await API.get('/api/receive/search', { params });
             setResults(response.data);
         }
-        catch {
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: 'Failed to search receives. Please try again.',
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to search receives. Please try again.'),
             });
         }
-    }, [toast]);
+    }, [showErrorToast]);
     useEffect(() => {
         if (debouncedUniversal || debouncedEquipment || debouncedPart) {
             const params = {

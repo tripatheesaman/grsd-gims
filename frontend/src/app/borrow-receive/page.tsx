@@ -63,7 +63,7 @@ export default function BorrowReceivePage() {
             catch {
                 if (isMounted) {
                     showErrorToast({
-                        title: "Error",
+                        title: 'Error',
                         message: "Failed to load borrow sources",
                         duration: 3000,
                     });
@@ -132,7 +132,7 @@ export default function BorrowReceivePage() {
     const handleConfirmSubmit = async () => {
         if (!user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "You must be logged in to submit a borrow receive.",
                 duration: 3000,
             });
@@ -141,7 +141,7 @@ export default function BorrowReceivePage() {
         if (!borrowSourceId) {
             setSourceError('Please select a borrow source');
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a borrow source.",
                 duration: 3000,
             });
@@ -149,7 +149,7 @@ export default function BorrowReceivePage() {
         }
         if (!date) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a borrow date.",
                 duration: 3000,
             });
@@ -157,7 +157,7 @@ export default function BorrowReceivePage() {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -185,7 +185,7 @@ export default function BorrowReceivePage() {
                     }
                     catch {
                         showErrorToast({
-                            title: "Image Upload Error",
+                            title: 'Error',
                             message: `Failed to upload image for ${item.itemName}. Please try again.`,
                             duration: 5000,
                         });
@@ -220,7 +220,7 @@ export default function BorrowReceivePage() {
                 const response = await API.post('/api/borrow-receive/create', receiveData);
                 if (response.status === 200 || response.status === 201) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Successfully Borrowed, Awaiting Approval!",
                         duration: 3000,
                     });
@@ -337,7 +337,7 @@ export default function BorrowReceivePage() {
                 }
             }
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 5000,
             });

@@ -102,7 +102,7 @@ export default function AppSettingsPage() {
     const handleSave = async () => {
         if (!canEditFiscalYear) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to change fiscal year",
                 duration: 3000,
             });
@@ -111,7 +111,7 @@ export default function AppSettingsPage() {
         const fiscalYearRegex = /^\d{4}\/\d{2}$/;
         if (!fiscalYearRegex.test(fiscalYear)) {
             showErrorToast({
-                title: "Invalid Format",
+                title: 'Error',
                 message: "Fiscal year must be in format YYYY/YY (e.g., 2081/82)",
                 duration: 3000,
             });
@@ -124,7 +124,7 @@ export default function AppSettingsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Fiscal year updated successfully",
                     duration: 3000,
                 });
@@ -132,7 +132,7 @@ export default function AppSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update fiscal year",
                 duration: 3000,
             });
@@ -144,7 +144,7 @@ export default function AppSettingsPage() {
     const handleSaveEmailSettings = async () => {
         if (!canConfigureEmails) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to configure request emails",
                 duration: 3000,
             });
@@ -175,7 +175,7 @@ export default function AppSettingsPage() {
             const res = await API.put('/api/settings/request/email-config', payload);
             if (res.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Email settings saved",
                     duration: 3000,
                 });
@@ -183,7 +183,7 @@ export default function AppSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to save email settings",
                 duration: 3000,
             });
@@ -192,7 +192,7 @@ export default function AppSettingsPage() {
     const handleToggleMail = async (enabled: boolean) => {
         if (!canToggleMail) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to toggle mail sending",
                 duration: 3000,
             });
@@ -203,7 +203,7 @@ export default function AppSettingsPage() {
             if (res.status === 200) {
                 setMailSendingEnabled(enabled);
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: `Mail sending ${enabled ? 'enabled' : 'disabled'}`,
                     duration: 3000,
                 });
@@ -211,7 +211,7 @@ export default function AppSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to toggle mail sending",
                 duration: 3000,
             });
@@ -220,7 +220,7 @@ export default function AppSettingsPage() {
     const handleAddRecipient = () => {
         if (!newRecipient.email.trim()) {
             showErrorToast({
-                title: "Validation",
+                title: 'Error',
                 message: "Email is required",
                 duration: 3000,
             });

@@ -73,7 +73,7 @@ export default function RequestSettingsPage() {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to fetch authority details",
                     duration: 3000,
                 });
@@ -119,7 +119,7 @@ export default function RequestSettingsPage() {
             }
             catch {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Failed to fetch NAC units data",
                     duration: 3000,
                 });
@@ -196,7 +196,7 @@ export default function RequestSettingsPage() {
     const handleSave = async () => {
         if (!permissions?.includes('can_edit_request_authority_details')) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to edit authority details",
                 duration: 3000,
             });
@@ -209,7 +209,7 @@ export default function RequestSettingsPage() {
             });
             if (response.status === 200) {
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Authority details updated successfully",
                     duration: 3000,
                 });
@@ -217,7 +217,7 @@ export default function RequestSettingsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to update authority details",
                 duration: 3000,
             });
@@ -276,7 +276,7 @@ export default function RequestSettingsPage() {
     const handleSaveUnit = async () => {
         if (!unitFormData.nacCode || !unitFormData.unit.trim()) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please select NAC code and enter unit",
                 duration: 3000,
             });
@@ -289,7 +289,7 @@ export default function RequestSettingsPage() {
                     isDefault: unitFormData.isDefault
                 });
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Unit updated successfully",
                     duration: 3000,
                 });
@@ -301,7 +301,7 @@ export default function RequestSettingsPage() {
                     isDefault: unitFormData.isDefault
                 });
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "Unit added successfully",
                     duration: 3000,
                 });
@@ -332,7 +332,7 @@ export default function RequestSettingsPage() {
                 };
             };
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: err?.response?.data?.message || 'Failed to save unit',
                 duration: 3000,
             });
@@ -345,7 +345,7 @@ export default function RequestSettingsPage() {
         try {
             await API.delete(`/api/nac-units/${id}`);
             showSuccessToast({
-                title: "Success",
+                title: 'Success',
                 message: "Unit deleted successfully",
                 duration: 3000,
             });
@@ -374,7 +374,7 @@ export default function RequestSettingsPage() {
                 };
             };
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: err?.response?.data?.message || 'Failed to delete unit',
                 duration: 3000,
             });

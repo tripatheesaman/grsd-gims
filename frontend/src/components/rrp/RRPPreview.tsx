@@ -58,7 +58,7 @@ export default function RRPPreview({ cart, rrpDate, supplier, inspectionUser, in
         try {
             if (!Array.isArray(cart) || cart.length === 0) {
                 showErrorToast({
-                    title: "Error",
+                    title: 'Error',
                     message: "Cart is empty or invalid",
                     duration: 3000,
                 });
@@ -129,7 +129,7 @@ export default function RRPPreview({ cart, rrpDate, supplier, inspectionUser, in
         }
         catch (error) {
             showErrorToast({
-                title: "Calculation Error",
+                title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to calculate totals",
                 duration: 5000,
             });

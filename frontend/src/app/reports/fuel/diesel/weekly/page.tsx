@@ -8,11 +8,12 @@ import { CalendarIcon } from 'lucide-react';
 import { format } from 'date-fns';
 import { API } from '@/lib/api';
 import { withBasePath } from '@/lib/urls';
-import { useToast } from '@/components/ui/use-toast';
+import { useCustomToast } from '@/components/ui/custom-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Spinner, ContentSpinner } from '@/components/ui/spinner';
+import { getErrorMessage } from '@/lib/errorHandling';
 export default function WeeklyDieselReportPage() {
     const [startDate, setStartDate] = useState<Date>(new Date());
     const [endDate, setEndDate] = useState<Date>(new Date());
@@ -20,13 +21,12 @@ export default function WeeklyDieselReportPage() {
     const [showFlightDialog, setShowFlightDialog] = useState(false);
     const [flightCount, setFlightCount] = useState<number>(0);
     const [pendingReportMode, setPendingReportMode] = useState<'plain' | 'charts' | null>(null);
-    const { toast } = useToast();
+    const { showErrorToast, showSuccessToast } = useCustomToast();
     const handleGenerateReport = async () => {
         if (!startDate || !endDate) {
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'Please select both start and end dates',
-                variant: 'destructive',
+                message: 'Please select both start and end dates',
             });
             return;
         }
@@ -46,51 +46,10 @@ export default function WeeklyDieselReportPage() {
                 setShowFlightDialog(true);
             }
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to check flight count';
-            if (error &&
-                typeof error === 'object' &&
-                'response' in error &&
-                typeof (error as {
-                    response?: unknown;
-                }).response === 'object' &&
-                (error as {
-                    response?: unknown;
-                }).response !== null) {
-                const response = (error as {
-                    response?: unknown;
-                }).response;
-                if (typeof response === 'object' &&
-                    response !== null &&
-                    'data' in response &&
-                    typeof (response as {
-                        data?: unknown;
-                    }).data === 'object' &&
-                    (response as {
-                        data?: unknown;
-                    }).data !== null) {
-                    const data = (response as {
-                        data?: unknown;
-                    }).data;
-                    if (typeof data === 'object' &&
-                        data !== null &&
-                        'message' in data &&
-                        typeof (data as {
-                            message?: unknown;
-                        }).message === 'string') {
-                        errorMessage = (data as {
-                            message: string;
-                        }).message;
-                    }
-                }
-            }
-            else if (error instanceof Error && error.message) {
-                errorMessage = error.message;
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to check flight count'),
             });
         }
         finally {
@@ -99,10 +58,9 @@ export default function WeeklyDieselReportPage() {
     };
     const handleGenerateReportWithCharts = async () => {
         if (!startDate || !endDate) {
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'Please select both start and end dates',
-                variant: 'destructive',
+                message: 'Please select both start and end dates',
             });
             return;
         }
@@ -122,51 +80,10 @@ export default function WeeklyDieselReportPage() {
                 setShowFlightDialog(true);
             }
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to check flight count';
-            if (error &&
-                typeof error === 'object' &&
-                'response' in error &&
-                typeof (error as {
-                    response?: unknown;
-                }).response === 'object' &&
-                (error as {
-                    response?: unknown;
-                }).response !== null) {
-                const response = (error as {
-                    response?: unknown;
-                }).response;
-                if (typeof response === 'object' &&
-                    response !== null &&
-                    'data' in response &&
-                    typeof (response as {
-                        data?: unknown;
-                    }).data === 'object' &&
-                    (response as {
-                        data?: unknown;
-                    }).data !== null) {
-                    const data = (response as {
-                        data?: unknown;
-                    }).data;
-                    if (typeof data === 'object' &&
-                        data !== null &&
-                        'message' in data &&
-                        typeof (data as {
-                            message?: unknown;
-                        }).message === 'string') {
-                        errorMessage = (data as {
-                            message: string;
-                        }).message;
-                    }
-                }
-            }
-            else if (error instanceof Error && error.message) {
-                errorMessage = error.message;
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to check flight count'),
             });
         }
         finally {
@@ -195,56 +112,15 @@ export default function WeeklyDieselReportPage() {
             link.click();
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
-            toast({
+            showSuccessToast({
                 title: 'Success',
-                description: 'Report downloaded successfully',
+                message: 'Report downloaded successfully',
             });
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to generate report';
-            if (error &&
-                typeof error === 'object' &&
-                'response' in error &&
-                typeof (error as {
-                    response?: unknown;
-                }).response === 'object' &&
-                (error as {
-                    response?: unknown;
-                }).response !== null) {
-                const response = (error as {
-                    response?: unknown;
-                }).response;
-                if (typeof response === 'object' &&
-                    response !== null &&
-                    'data' in response &&
-                    typeof (response as {
-                        data?: unknown;
-                    }).data === 'object' &&
-                    (response as {
-                        data?: unknown;
-                    }).data !== null) {
-                    const data = (response as {
-                        data?: unknown;
-                    }).data;
-                    if (typeof data === 'object' &&
-                        data !== null &&
-                        'message' in data &&
-                        typeof (data as {
-                            message?: unknown;
-                        }).message === 'string') {
-                        errorMessage = (data as {
-                            message: string;
-                        }).message;
-                    }
-                }
-            }
-            else if (error instanceof Error && error.message) {
-                errorMessage = error.message;
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to generate report'),
             });
         }
     };
@@ -304,29 +180,23 @@ export default function WeeklyDieselReportPage() {
             link.click();
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
-            toast({
+            showSuccessToast({
                 title: 'Success',
-                description: 'Report with charts downloaded successfully',
+                message: 'Report with charts downloaded successfully',
             });
         }
-        catch (error: unknown) {
-            let errorMessage = 'Failed to generate report with charts';
-            if (error instanceof Error && error.message) {
-                errorMessage = error.message;
-            }
-            toast({
+        catch (error) {
+            showErrorToast({
                 title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
+                message: getErrorMessage(error, 'Failed to generate report with charts'),
             });
         }
     };
     const handleFlightCountSubmit = async () => {
         if (flightCount <= 0) {
-            toast({
+            showErrorToast({
                 title: 'Error',
-                description: 'Please enter a valid flight count',
-                variant: 'destructive',
+                message: 'Please enter a valid flight count',
             });
             return;
         }

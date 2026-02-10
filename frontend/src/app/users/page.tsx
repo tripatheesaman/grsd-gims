@@ -52,7 +52,7 @@ export default function UsersPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to fetch users",
                 duration: 3000,
             });
@@ -67,7 +67,7 @@ export default function UsersPage() {
     const handleDeleteUser = async (userId: number) => {
         if (!canDeleteUser) {
             showErrorToast({
-                title: "Access Denied",
+                title: 'Error',
                 message: "You don't have permission to delete users",
                 duration: 3000,
             });
@@ -78,7 +78,7 @@ export default function UsersPage() {
             if (response.status === 200) {
                 setUsers(users.filter(user => user.id !== userId));
                 showSuccessToast({
-                    title: "Success",
+                    title: 'Success',
                     message: "User deleted successfully",
                     duration: 3000,
                 });
@@ -86,7 +86,7 @@ export default function UsersPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to delete user",
                 duration: 3000,
             });

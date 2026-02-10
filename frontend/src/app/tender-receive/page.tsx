@@ -65,7 +65,7 @@ export default function TenderReceivePage() {
     const handleAddToCart = async (item: TenderReceiveCartItem) => {
         if (!item.image) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select an image",
                 duration: 3000,
             });
@@ -101,7 +101,7 @@ export default function TenderReceivePage() {
     const handleConfirmSubmit = async () => {
         if (!user) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "You must be logged in to submit a request.",
                 duration: 3000,
             });
@@ -109,7 +109,7 @@ export default function TenderReceivePage() {
         }
         if (!tenderNumber.trim()) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please enter a request number.",
                 duration: 3000,
             });
@@ -117,7 +117,7 @@ export default function TenderReceivePage() {
         }
         if (!date) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Please select a request date.",
                 duration: 3000,
             });
@@ -125,7 +125,7 @@ export default function TenderReceivePage() {
         }
         if (cart.length === 0) {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Your cart is empty. Please add items before submitting.",
                 duration: 3000,
             });
@@ -153,7 +153,7 @@ export default function TenderReceivePage() {
                     }
                     catch {
                         showErrorToast({
-                            title: "Image Upload Error",
+                            title: 'Error',
                             message: `Failed to upload image for ${item.itemName}. Please try again.`,
                             duration: 5000,
                         });
@@ -187,7 +187,7 @@ export default function TenderReceivePage() {
                 const response = await API.post('/api/tender-receive/create', receiveData);
                 if (response.status === 200 || response.status === 201) {
                     showSuccessToast({
-                        title: "Success",
+                        title: 'Success',
                         message: "Succesfully Received, Awaiting Approval!",
                         duration: 3000,
                     });
@@ -303,7 +303,7 @@ export default function TenderReceivePage() {
                 }
             }
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: errorMessage,
                 duration: 5000,
             });

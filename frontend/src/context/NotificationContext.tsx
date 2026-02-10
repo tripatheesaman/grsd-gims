@@ -4,6 +4,7 @@ import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { useApiPut } from '@/hooks/api/useApiMutation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from './AuthContext';
+import { getErrorMessage } from '@/lib/errorHandling';
 
 interface Notification {
     id: number;
@@ -58,7 +59,7 @@ export function NotificationProvider({ children }: {
     };
     
     const markAsRead = async (notificationId: number) => {
-        markAsReadMutation.mutate({
+        await markAsReadMutation.mutateAsync({
             url: `/api/notification/read/${notificationId}`,
             data: {}
         });
@@ -80,7 +81,7 @@ export function NotificationProvider({ children }: {
             notifications,
             unreadCount,
             isLoading,
-            error: error ? 'Failed to fetch notifications' : null,
+            error: error ? getErrorMessage(error, 'Failed to fetch notifications') : null,
             fetchNotifications,
             markAsRead,
             markAllAsRead,

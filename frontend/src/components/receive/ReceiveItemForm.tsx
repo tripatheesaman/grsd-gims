@@ -237,7 +237,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         e.preventDefault();
         if (!validateForm()) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please fill in all required fields",
                 duration: 3000,
             });

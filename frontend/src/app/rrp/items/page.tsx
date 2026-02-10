@@ -107,7 +107,7 @@ export default function RRPItemsPage() {
         const isForeign = rrpType === 'foreign';
         if (isForeign && (!customsCharge || customsCharge <= 0)) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Customs charge is required for foreign RRP",
                 duration: 3000,
             });
@@ -116,7 +116,7 @@ export default function RRPItemsPage() {
         const existingItemIndex = cart.findIndex(cartItem => cartItem.id === item.id);
         if (existingItemIndex !== -1) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "This item is already in the cart",
                 duration: 3000,
             });
@@ -144,7 +144,7 @@ export default function RRPItemsPage() {
     const handleSubmit = async () => {
         if (cart.length === 0) {
             showErrorToast({
-                title: "Validation Error",
+                title: 'Error',
                 message: "Please add at least one item to the cart",
                 duration: 3000,
             });
@@ -157,7 +157,7 @@ export default function RRPItemsPage() {
         }
         catch {
             showErrorToast({
-                title: "Error",
+                title: 'Error',
                 message: "Failed to submit RRP",
                 duration: 3000,
             });
@@ -383,7 +383,7 @@ export default function RRPItemsPage() {
                 if (selectedItem) {
                     if (rrpType === 'foreign' && (!selectedItem.customsCharge || selectedItem.customsCharge <= 0)) {
                         showErrorToast({
-                            title: "Validation Error",
+                            title: 'Error',
                             message: "Customs charge is required for foreign RRP",
                             duration: 3000,
                         });
