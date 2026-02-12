@@ -80,7 +80,7 @@ export default function RequestRecordsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
-    const fetchingRef = useRef<boolean>(false);
+    const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -139,9 +139,8 @@ export default function RequestRecordsPage() {
     const [selectedImage, setSelectedImage] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const fetchData = useCallback(async () => {
-        if (fetchingRef.current)
-            return;
-        fetchingRef.current = true;
+        const requestId = latestRequestRef.current + 1;
+        latestRequestRef.current = requestId;
         try {
             setLoading(true);
             setError(null);
@@ -155,6 +154,9 @@ export default function RequestRecordsPage() {
                 ...(requestedBy && requestedBy !== 'all' && { requestedBy })
             });
             const response = await API.get(`/api/request-records?${params}`);
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             if (response.status === 200) {
                 const data: RequestRecordsResponse = response.data;
                 setRecords(data.data);
@@ -163,6 +165,9 @@ export default function RequestRecordsPage() {
             }
         }
         catch {
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             setError('Failed to fetch request records');
             showErrorToastRef.current({
                 title: "Error",
@@ -171,8 +176,9 @@ export default function RequestRecordsPage() {
             });
         }
         finally {
-            setLoading(false);
-            fetchingRef.current = false;
+            if (requestId === latestRequestRef.current) {
+                setLoading(false);
+            }
         }
     }, [page, pageSize, universal, equipmentNumber, partNumber, status, requestedBy]);
     const fetchFilterOptions = useCallback(async () => {
@@ -676,7 +682,7 @@ export default function RequestRecordsPage() {
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-600">
-              Showing <span className="font-semibold text-gray-900">{((page - 1) * pageSize) + 1}</span> to <span className="font-semibold text-gray-900">{Math.min(page * pageSize, totalCount)}</span> of <span className="font-semibold text-gray-900">{totalCount}</span> records
+              Showing <span className="font-semibold text-gray-900">{totalCount > 0 ? ((page - 1) * pageSize) + 1 : 0}</span> to <span className="font-semibold text-gray-900">{totalCount > 0 ? Math.min(page * pageSize, totalCount) : 0}</span> of <span className="font-semibold text-gray-900">{totalCount}</span> records
             </div>
             <div className="flex items-center gap-2">
               <button className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>

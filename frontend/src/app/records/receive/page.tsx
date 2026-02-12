@@ -72,7 +72,7 @@ export default function ReceiveRecordsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
-    const fetchingRef = useRef<boolean>(false);
+    const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -126,9 +126,8 @@ export default function ReceiveRecordsPage() {
     const [selectedImage, setSelectedImage] = useState<File | null>(null);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const fetchData = useCallback(async () => {
-        if (fetchingRef.current)
-            return;
-        fetchingRef.current = true;
+        const requestId = latestRequestRef.current + 1;
+        latestRequestRef.current = requestId;
         try {
             setLoading(true);
             setError(null);
@@ -142,6 +141,9 @@ export default function ReceiveRecordsPage() {
                 ...(receivedBy && receivedBy !== 'all' && { receivedBy })
             });
             const response = await API.get(`/api/receive-records?${params}`);
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             if (response.status === 200) {
                 const data: ReceiveRecordsResponse = response.data;
                 setRecords(data.data);
@@ -150,6 +152,9 @@ export default function ReceiveRecordsPage() {
             }
         }
         catch {
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             setError('Failed to fetch receive records');
             showErrorToastRef.current({
                 title: "Error",
@@ -158,8 +163,9 @@ export default function ReceiveRecordsPage() {
             });
         }
         finally {
-            setLoading(false);
-            fetchingRef.current = false;
+            if (requestId === latestRequestRef.current) {
+                setLoading(false);
+            }
         }
     }, [page, pageSize, universal, equipmentNumber, partNumber, status, receivedBy]);
     const fetchFilterOptions = useCallback(async () => {
@@ -542,7 +548,7 @@ export default function ReceiveRecordsPage() {
         
         <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600">
-            Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} records
+            Showing {totalCount > 0 ? ((page - 1) * pageSize) + 1 : 0} to {totalCount > 0 ? Math.min(page * pageSize, totalCount) : 0} of {totalCount} records
           </div>
           <div className="flex gap-2">
             <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
