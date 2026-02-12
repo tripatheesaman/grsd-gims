@@ -88,7 +88,7 @@ export default function RRPRecordsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
-    const fetchingRef = useRef<boolean>(false);
+    const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -156,9 +156,8 @@ export default function RRPRecordsPage() {
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
     const fetchData = useCallback(async () => {
-        if (fetchingRef.current)
-            return;
-        fetchingRef.current = true;
+        const requestId = latestRequestRef.current + 1;
+        latestRequestRef.current = requestId;
         try {
             setLoading(true);
             setError(null);
@@ -172,6 +171,9 @@ export default function RRPRecordsPage() {
                 ...(createdBy && createdBy !== 'all' && { createdBy })
             });
             const response = await API.get(`/api/rrp-records?${params}`);
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             if (response.status === 200) {
                 const data: RRPRecordsResponse = response.data;
                 setRecords(data.data);
@@ -180,6 +182,9 @@ export default function RRPRecordsPage() {
             }
         }
         catch {
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             setError('Failed to fetch RRP records');
             showErrorToastRef.current({
                 title: "Error",
@@ -188,8 +193,9 @@ export default function RRPRecordsPage() {
             });
         }
         finally {
-            setLoading(false);
-            fetchingRef.current = false;
+            if (requestId === latestRequestRef.current) {
+                setLoading(false);
+            }
         }
     }, [page, pageSize, universal, equipmentNumber, partNumber, status, createdBy]);
     const fetchFilterOptions = useCallback(async () => {
@@ -588,7 +594,7 @@ export default function RRPRecordsPage() {
         
         <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600">
-            Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} records
+            Showing {totalCount > 0 ? ((page - 1) * pageSize) + 1 : 0} to {totalCount > 0 ? Math.min(page * pageSize, totalCount) : 0} of {totalCount} records
           </div>
           <div className="flex gap-2">
             <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>

@@ -64,7 +64,7 @@ export default function SpareIssueRecordsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
-    const fetchingRef = useRef<boolean>(false);
+    const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -113,9 +113,8 @@ export default function SpareIssueRecordsPage() {
         approval_status: 'PENDING'
     });
     const fetchData = useCallback(async () => {
-        if (fetchingRef.current)
-            return;
-        fetchingRef.current = true;
+        const requestId = latestRequestRef.current + 1;
+        latestRequestRef.current = requestId;
         setLoading(true);
         try {
             const params = new URLSearchParams({
@@ -133,12 +132,18 @@ export default function SpareIssueRecordsPage() {
                 sortOrder
             });
             const response = await API.get(`/api/spare-issue-records?${params}`);
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             const data: SpareIssueRecordsResponse = response.data;
             setRecords(data.records);
             setTotalPages(data.pagination.totalPages);
             setTotalRecords(data.pagination.total);
         }
         catch {
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             showErrorToastRef.current({
                 title: "Error",
                 message: "Failed to fetch spare issue records",
@@ -146,8 +151,9 @@ export default function SpareIssueRecordsPage() {
             });
         }
         finally {
-            setLoading(false);
-            fetchingRef.current = false;
+            if (requestId === latestRequestRef.current) {
+                setLoading(false);
+            }
         }
     }, [currentPage, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder]);
     const fetchFilterOptions = useCallback(async () => {

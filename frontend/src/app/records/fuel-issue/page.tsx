@@ -91,6 +91,7 @@ const FuelIssueRecordsPage = () => {
     });
     const [fuelTypes, setFuelTypes] = useState<string[]>([]);
     const [nacCodes, setNacCodes] = useState<string[]>([]);
+    const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -140,47 +141,50 @@ const FuelIssueRecordsPage = () => {
         return () => el.removeEventListener('submit', onSubmit, true);
     }, []);
     const fetchData = useCallback(async (isInitial = false) => {
+        const requestId = latestRequestRef.current + 1;
+        latestRequestRef.current = requestId;
         try {
-            if (isInitial)
+            if (isInitial) {
                 setLoading(true);
-            setPagination((prevPagination) => {
-                const currentPage = prevPagination.page;
-                const currentLimit = prevPagination.limit;
-                const params = new URLSearchParams({
-                    page: String(currentPage),
-                    limit: String(currentLimit),
-                    sortBy,
-                    sortOrder,
-                    fromDate,
-                    toDate,
-                    fuelType,
-                    weekNumber,
-                    equipmentNumber,
-                    issueSlipNumber
-                });
-                API.get(`/api/fuel-issue-records?${params.toString()}`)
-                    .then(({ data }) => {
-                    setRecords(data.records || []);
-                    setPagination((p) => data.pagination || p);
-                })
-                    .catch(() => {
-                    showErrorToast({ title: 'Error', message: 'Failed to fetch fuel issue records' });
-                })
-                    .finally(() => {
-                    if (isInitial) {
-                        setLoading(false);
-                    }
-                });
-                return prevPagination;
+            }
+            const params = new URLSearchParams({
+                page: String(pagination.page),
+                limit: String(pagination.limit),
+                sortBy,
+                sortOrder,
+                search,
+                fromDate,
+                toDate,
+                fuelType,
+                weekNumber,
+                equipmentNumber,
+                issueSlipNumber
             });
+            const { data } = await API.get(`/api/fuel-issue-records?${params.toString()}`);
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
+            setRecords(data.records || []);
+            setPagination((prevPagination) => ({
+                ...prevPagination,
+                ...(data.pagination || {})
+            }));
         }
         catch {
+            if (requestId !== latestRequestRef.current) {
+                return;
+            }
             showErrorToast({ title: 'Error', message: 'Failed to fetch fuel issue records' });
             if (isInitial) {
                 setLoading(false);
             }
         }
-    }, [sortBy, sortOrder, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber, showErrorToast]);
+        finally {
+            if (isInitial && requestId === latestRequestRef.current) {
+                setLoading(false);
+            }
+        }
+    }, [pagination.page, pagination.limit, sortBy, sortOrder, search, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber, showErrorToast]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const [{ data: fuelData }, { data: nacData }] = await Promise.all([
@@ -330,9 +334,6 @@ const FuelIssueRecordsPage = () => {
         setEquipmentNumber('');
         setIssueSlipNumber('');
         setPagination(prev => ({ ...prev, page: 1 }));
-        setTimeout(() => {
-            fetchData();
-        }, 0);
     };
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString();

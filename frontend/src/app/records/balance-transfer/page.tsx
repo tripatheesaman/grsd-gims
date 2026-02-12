@@ -69,10 +69,14 @@ export default function BalanceTransferRecordsPage() {
             filtered = filtered.filter(record => record.partNumber.toLowerCase().includes(partNumberSearch.toLowerCase()));
         }
         if (filterFromDate) {
-            filtered = filtered.filter(record => new Date(record.transferDate) >= filterFromDate);
+            const fromBoundary = new Date(filterFromDate);
+            fromBoundary.setHours(0, 0, 0, 0);
+            filtered = filtered.filter(record => new Date(record.transferDate) >= fromBoundary);
         }
         if (filterToDate) {
-            filtered = filtered.filter(record => new Date(record.transferDate) <= filterToDate);
+            const toBoundary = new Date(filterToDate);
+            toBoundary.setHours(23, 59, 59, 999);
+            filtered = filtered.filter(record => new Date(record.transferDate) <= toBoundary);
         }
         setFilteredRecords(filtered);
         setCurrentPage(1);
