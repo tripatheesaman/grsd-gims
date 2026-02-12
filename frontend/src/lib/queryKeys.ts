@@ -26,6 +26,7 @@ export const queryKeys = {
   },
   rrp: {
     all: ['rrp'] as const,
+    search: (params: Record<string, unknown>) => ['rrp', 'search', params] as const,
     pending: () => ['rrp', 'pending'] as const,
     config: () => ['rrp', 'config'] as const,
     print: (rrpNumber: string) => ['rrp', 'print', rrpNumber] as const,

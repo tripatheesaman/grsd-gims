@@ -84,7 +84,7 @@ export const getPendingReceives = async (req: Request, res: Response): Promise<v
     try {
         const [results] = await pool.execute<PendingReceiveItem[]>(`SELECT 
                 rd.id,
-                rd.nac_code,
+                COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) as nac_code,
                 rd.item_name,
                 rd.part_number,
                 rd.received_quantity,
@@ -403,7 +403,7 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
                 COALESCE(req.equipment_number, '') as equipment_number,
                 rd.unit,
                 COALESCE(req.unit, '') as requested_unit,
-                rd.nac_code as nac_code,
+                COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) as nac_code,
                 COALESCE(req.image_path, '') as requested_image,
                 rd.image_path as received_image,
                 rd.location,
@@ -452,6 +452,7 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
             unit: result.unit,
             requestedUnit: result.requested_unit || null,
             conversionBase: conversionBase,
+            nacCode: result.nac_code && result.nac_code.trim() !== '' ? result.nac_code : 'N/A',
             receiveSource: result.receive_source || null,
             tenderReferenceNumber: result.tender_reference_number || null,
             borrowReferenceNumber: result.borrow_reference_number || null,
@@ -484,7 +485,7 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
 export const updateReceive = async (req: Request, res: Response): Promise<void> => {
     try {
         const { receiveId } = req.params;
-        const { receivedQuantity, receivedPartNumber, nacCode, unit } = req.body;
+        const { receivedQuantity, receivedPartNumber, unit, nacCode } = req.body;
         if (!receivedQuantity || typeof receivedQuantity !== 'number' || receivedQuantity <= 0) {
             logEvents(`Failed to update receive - Invalid quantity: ${receivedQuantity} for ID: ${receiveId}`, "receiveLog.log");
             res.status(400).json({
@@ -501,7 +502,7 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
             });
             return;
         }
-        const [fkRows] = await pool.execute<RowDataPacket[]>(`SELECT request_fk, approval_status FROM receive_details WHERE id = ?`, [receiveId]);
+        const [fkRows] = await pool.execute<RowDataPacket[]>(`SELECT request_fk, approval_status, nac_code FROM receive_details WHERE id = ?`, [receiveId]);
         if (!fkRows.length) {
             logEvents(`Failed to update receive - Receive not found: ${receiveId}`, "receiveLog.log");
             res.status(404).json({
@@ -511,6 +512,7 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
             return;
         }
         const requestFk = fkRows[0].request_fk as number;
+        const existingNacCode = typeof fkRows[0].nac_code === 'string' ? fkRows[0].nac_code.trim() : '';
         const [[need]] = await pool.execute<RowDataPacket[]>(`SELECT requested_quantity AS rq FROM request_details WHERE id = ?`, [requestFk]);
         const requestedQty = Number((need as any).rq);
         const [[sumRow]] = await pool.execute<RowDataPacket[]>(`SELECT COALESCE(SUM(received_quantity),0) AS total
@@ -529,14 +531,22 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
         }
         const updateFields = [
             'received_quantity = ?',
-            'part_number = ?',
-            'nac_code = ?'
+            'part_number = ?'
         ];
         const updateValues: (number | string | null)[] = [
             receivedQuantity,
-            receivedPartNumber,
-            nacCode || null
+            receivedPartNumber
         ];
+        let requestNacCode = '';
+        if (requestFk && requestFk > 0) {
+            const [[requestRow]] = await pool.execute<RowDataPacket[]>(`SELECT nac_code FROM request_details WHERE id = ?`, [requestFk]);
+            requestNacCode = typeof (requestRow as any)?.nac_code === 'string' ? (requestRow as any).nac_code.trim() : '';
+        }
+        const incomingNacCode = typeof nacCode === 'string' ? nacCode.trim() : '';
+        const resolvedNacCode = incomingNacCode || requestNacCode || existingNacCode || '';
+        // Protect against accidental blanking of NAC during edit updates.
+        updateFields.push('nac_code = COALESCE(NULLIF(?, \'\'), nac_code)');
+        updateValues.push(resolvedNacCode);
         if (typeof unit === 'string' && unit.trim() !== '') {
             updateFields.push('unit = ?');
             updateValues.push(unit.trim());
@@ -555,6 +565,19 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
             });
             return;
         }
+        // Final guard: never leave nac_code blank after an edit.
+        const [[postUpdateRow]] = await pool.execute<RowDataPacket[]>(`SELECT nac_code FROM receive_details WHERE id = ?`, [receiveId]);
+        const postUpdateNacCode = typeof (postUpdateRow as any)?.nac_code === 'string' ? (postUpdateRow as any).nac_code.trim() : '';
+        if (postUpdateNacCode === '') {
+            const fallbackNacCode = incomingNacCode || requestNacCode || existingNacCode || '';
+            if (fallbackNacCode !== '') {
+                await pool.execute(`UPDATE receive_details 
+                    SET nac_code = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?`, [fallbackNacCode, receiveId]);
+                logEvents(`Recovered blank nac_code for receive ${receiveId} using fallback value: ${fallbackNacCode}`, "receiveLog.log");
+            }
+        }
         if (fkRows[0].approval_status === 'APPROVED') {
             const [[apprSum]] = await pool.execute<RowDataPacket[]>(`SELECT COALESCE(SUM(received_quantity),0) AS total
                  FROM receive_details
@@ -572,13 +595,13 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
                  WHERE id = ?`, [isComplete, latestReceiveId, requestFk]);
             logEvents(`Updated request ${requestFk} after edit: is_received=${isComplete}, receive_fk=${latestReceiveId}, approved_total=${approvedTotal}/${requestedQty}`, "receiveLog.log");
         }
-        logEvents(`Successfully updated receive for ID: ${receiveId} - Quantity: ${receivedQuantity}, Part Number: ${receivedPartNumber}, NAC Code: ${nacCode || 'N/A'}`, "receiveLog.log");
+        logEvents(`Successfully updated receive for ID: ${receiveId} - Quantity: ${receivedQuantity}, Part Number: ${receivedPartNumber}, NAC Code: ${resolvedNacCode || 'N/A'}`, "receiveLog.log");
         res.status(200).json({
             message: 'Receive updated successfully',
             receiveId,
             receivedQuantity,
             receivedPartNumber,
-            nacCode
+            nacCode: resolvedNacCode || null
         });
     }
     catch (error) {

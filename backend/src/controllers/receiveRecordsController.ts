@@ -139,7 +139,7 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
           ELSE COALESCE(req.request_number, '')
         END AS request_number,
         rd.receive_source, rd.tender_reference_number,
-        rd.nac_code, rd.part_number, rd.item_name,
+        COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) AS nac_code, rd.part_number, rd.item_name,
         rd.received_quantity, req.requested_quantity, rd.unit, rd.approval_status, rd.received_by,
         rd.image_path, rd.location, rd.card_number, rd.rejection_reason,
         COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) AS equipment_number,
@@ -202,7 +202,7 @@ export const getReceiveRecordById = async (req: Request, res: Response): Promise
           ELSE COALESCE(req.request_number, '')
         END AS request_number,
         rd.receive_source, rd.tender_reference_number,
-        rd.nac_code, rd.part_number, rd.item_name,
+        COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) AS nac_code, rd.part_number, rd.item_name,
         rd.received_quantity, req.requested_quantity, rd.unit, rd.approval_status, rd.received_by,
         rd.image_path, rd.location, rd.card_number, rd.rejection_reason,
         COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) AS equipment_number,
