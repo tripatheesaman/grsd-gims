@@ -292,7 +292,7 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
     const connection = await pool.getConnection();
     try {
         const { id } = req.params;
-        const formData: ReceiveFormData = req.body;
+        const formData: Partial<ReceiveFormData> = req.body;
         await connection.beginTransaction();
         const [currentRecord] = await connection.execute<RowDataPacket[]>(`SELECT rd.*, req.requested_quantity 
        FROM receive_details rd 
@@ -304,7 +304,21 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
             return;
         }
         const record = currentRecord[0];
-        if (formData.image_path && record.image_path && formData.image_path !== record.image_path) {
+        const updatedData = {
+            receive_date: formData.receive_date ?? record.receive_date,
+            request_fk: formData.request_fk ?? record.request_fk,
+            nac_code: formData.nac_code ?? record.nac_code,
+            part_number: formData.part_number ?? record.part_number,
+            item_name: formData.item_name ?? record.item_name,
+            received_quantity: formData.received_quantity ?? record.received_quantity,
+            unit: formData.unit ?? record.unit,
+            approval_status: formData.approval_status ?? record.approval_status,
+            received_by: formData.received_by ?? record.received_by,
+            image_path: formData.image_path !== undefined ? formData.image_path : (record.image_path || ''),
+            location: formData.location !== undefined ? formData.location : (record.location || ''),
+            card_number: formData.card_number !== undefined ? formData.card_number : (record.card_number || '')
+        };
+        if (formData.image_path !== undefined && formData.image_path && record.image_path && formData.image_path !== record.image_path) {
             try {
                 const fs = require('fs');
                 const path = require('path');
@@ -320,7 +334,7 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
             }
         }
         if (record.request_fk && record.request_fk > 0 && record.requested_quantity != null) {
-            if (formData.received_quantity > record.requested_quantity) {
+            if (updatedData.received_quantity > record.requested_quantity) {
                 await connection.rollback();
                 res.status(400).json({
                     error: 'Validation Error',
@@ -329,7 +343,7 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
                 return;
             }
         }
-        const quantityDifference = formData.received_quantity - record.received_quantity;
+        const quantityDifference = updatedData.received_quantity - record.received_quantity;
         if (quantityDifference !== 0) {
             const currentStockBalance = await getCurrentStockBalance(connection, record.nac_code);
             const newStockBalance = currentStockBalance + quantityDifference;
@@ -360,18 +374,18 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
       WHERE id = ?
     `;
         const values = [
-            formData.receive_date,
-            formData.request_fk,
-            formData.nac_code,
-            formData.part_number,
-            formData.item_name,
-            formData.received_quantity,
-            formData.unit,
-            formData.approval_status,
-            formData.received_by,
-            formData.image_path || '',
-            formData.location || '',
-            formData.card_number || '',
+            updatedData.receive_date,
+            updatedData.request_fk,
+            updatedData.nac_code,
+            updatedData.part_number,
+            updatedData.item_name,
+            updatedData.received_quantity,
+            updatedData.unit,
+            updatedData.approval_status,
+            updatedData.received_by,
+            updatedData.image_path || '',
+            updatedData.location || '',
+            updatedData.card_number || '',
             id
         ];
         await connection.execute(query, values);

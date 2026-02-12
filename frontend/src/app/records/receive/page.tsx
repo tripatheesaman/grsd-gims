@@ -326,10 +326,68 @@ export default function ReceiveRecordsPage() {
                 const uploadResult = await uploadResponse.json();
                 imagePath = uploadResult.path;
             }
-            const response = await API.put(`/api/receive-records/${editingRecord.id}`, {
-                ...formData,
-                image_path: imagePath
-            });
+            const originalData = {
+                request_fk: editingRecord.request_fk,
+                receive_date: editingRecord.receive_date.split('T')[0],
+                nac_code: editingRecord.nac_code,
+                part_number: editingRecord.part_number,
+                item_name: editingRecord.item_name,
+                received_quantity: editingRecord.received_quantity,
+                unit: editingRecord.unit,
+                received_by: editingRecord.received_by,
+                image_path: editingRecord.image_path || '',
+                location: editingRecord.location || ''
+            };
+            const nextData = {
+                request_fk: formData.request_fk,
+                receive_date: formData.receive_date,
+                nac_code: formData.nac_code,
+                part_number: formData.part_number,
+                item_name: formData.item_name,
+                received_quantity: formData.received_quantity,
+                unit: formData.unit,
+                received_by: formData.received_by,
+                image_path: imagePath,
+                location: formData.location
+            };
+            const payload: Partial<ReceiveFormData> = {};
+            if (editingRecord.request_fk > 0 && nextData.request_fk !== originalData.request_fk) {
+                payload.request_fk = nextData.request_fk;
+            }
+            if (nextData.receive_date !== originalData.receive_date) {
+                payload.receive_date = nextData.receive_date;
+            }
+            if (nextData.nac_code !== originalData.nac_code) {
+                payload.nac_code = nextData.nac_code;
+            }
+            if (nextData.part_number !== originalData.part_number) {
+                payload.part_number = nextData.part_number;
+            }
+            if (nextData.item_name !== originalData.item_name) {
+                payload.item_name = nextData.item_name;
+            }
+            if (nextData.received_quantity !== originalData.received_quantity) {
+                payload.received_quantity = nextData.received_quantity;
+            }
+            if (nextData.unit !== originalData.unit) {
+                payload.unit = nextData.unit;
+            }
+            if (nextData.received_by !== originalData.received_by) {
+                payload.received_by = nextData.received_by;
+            }
+            if (nextData.image_path !== originalData.image_path) {
+                payload.image_path = nextData.image_path;
+            }
+            if (nextData.location !== originalData.location) {
+                payload.location = nextData.location;
+            }
+            if (Object.keys(payload).length === 0) {
+                setShowEditModal(false);
+                setEditingRecord(null);
+                resetForm();
+                return;
+            }
+            const response = await API.put(`/api/receive-records/${editingRecord.id}`, payload);
             if (response.status === 200) {
                 showSuccessToast({
                     title: 'Success',
