@@ -29,17 +29,19 @@ export function useRRPSearch() {
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipmentNumber = useDebounce(searchParams.equipmentNumber, 500);
     const debouncedPartNumber = useDebounce(searchParams.partNumber, 500);
+    const queryParams = useMemo(() => ({
+        page: currentPage,
+        pageSize,
+        universal: debouncedUniversal || undefined,
+        equipmentNumber: debouncedEquipmentNumber || undefined,
+        partNumber: debouncedPartNumber || undefined,
+    }), [currentPage, pageSize, debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber]);
+    const queryKey = useMemo(() => queryKeys.rrp.search(queryParams), [queryParams]);
     
     const { data: response, isLoading, error } = useApiQuery<BackendResponse>(
-        queryKeys.rrp.all,
+        queryKey,
         '/api/rrp/search',
-        {
-            page: currentPage,
-                pageSize,
-            universal: debouncedUniversal || undefined,
-            equipmentNumber: debouncedEquipmentNumber || undefined,
-            partNumber: debouncedPartNumber || undefined,
-        },
+        queryParams,
         {
             staleTime: 1000 * 30,
         }
@@ -69,7 +71,6 @@ export function useRRPSearch() {
     }, []);
 
     const setResults = useCallback((nextResults: SetStateAction<RRPSearchResult[] | null>) => {
-        const queryKey = queryKeys.rrp.all;
         const currentResults = results ?? null;
         const resolvedResults = typeof nextResults === 'function'
             ? (nextResults as (prev: RRPSearchResult[] | null) => RRPSearchResult[] | null)(currentResults)
@@ -89,7 +90,7 @@ export function useRRPSearch() {
                 },
             });
         }
-    }, [response, results, queryClient, currentPage, pageSize]);
+    }, [response, results, queryClient, queryKey, currentPage, pageSize]);
     
     return {
         results,

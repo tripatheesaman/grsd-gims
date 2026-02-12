@@ -164,7 +164,7 @@ export default function PrintRRPPage() {
             </select>
           </div>
           <div className="text-sm text-gray-600">
-            Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalCount)} of {totalCount} results
+            Showing {totalCount > 0 ? ((currentPage - 1) * pageSize) + 1 : 0} to {totalCount > 0 ? Math.min(currentPage * pageSize, totalCount) : 0} of {totalCount} results
           </div>
         </div>
 

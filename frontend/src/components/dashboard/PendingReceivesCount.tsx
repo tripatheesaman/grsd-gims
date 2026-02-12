@@ -9,7 +9,6 @@ import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTr
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/utils/utils';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import Image from 'next/image';
 import { resolveImageUrl, withBasePath } from '@/lib/urls';
@@ -59,7 +58,6 @@ interface ReceiveDetails {
 interface EditData {
     receivedQuantity: number;
     receivedPartNumber: string;
-    nacCode?: string;
     unit?: string;
     newRequestedImage?: File;
     newReceivedImage?: File;
@@ -81,7 +79,6 @@ export function PendingReceivesCount() {
     const [pendingReceives, setPendingReceives] = useState<PendingReceive[]>([]);
     const [selectedReceive, setSelectedReceive] = useState<ReceiveDetails | null>(null);
     const [editData, setEditData] = useState<EditData | null>(null);
-    const [nacCodeError, setNacCodeError] = useState<string>('');
     const fetchPendingCount = useCallback(async () => {
         if (!permissions?.includes('can_approve_receive')) {
             setIsLoading(false);
@@ -129,7 +126,7 @@ export function PendingReceivesCount() {
                     conversionBase: response.data.conversionBase,
                     requestedImage: response.data.requestedImage,
                     receivedImage: response.data.receivedImage,
-                    nacCode: response.data.nacCode,
+                    nacCode: response.data.nacCode || 'N/A',
                     location: response.data.location,
                     cardNumber: response.data.cardNumber,
                     receiveSource: response.data.receiveSource,
@@ -156,33 +153,21 @@ export function PendingReceivesCount() {
         setSelectedImage(resolveImageUrl(imageUrl, FALLBACK_IMAGE));
         setIsImagePreviewOpen(true);
     };
-    const validateNacCode = (code: string): boolean => {
-        const nacCodeRegex = /^(GT|TW|GS) \d{5}$/;
-        return nacCodeRegex.test(code);
-    };
     const handleEditClick = () => {
         if (!selectedReceive)
             return;
         setEditData({
             receivedQuantity: selectedReceive.receivedQuantity,
             receivedPartNumber: selectedReceive.receivedPartNumber,
-            nacCode: selectedReceive.nacCode === 'N/A' ? '' : selectedReceive.nacCode,
             unit: selectedReceive.unit,
             newRequestedImage: undefined,
             newReceivedImage: undefined
         });
-        setNacCodeError('');
         setIsEditOpen(true);
     };
     const handleSaveEdit = async () => {
         if (!editData || !selectedReceive)
             return;
-        if (selectedReceive.nacCode === 'N/A' && editData.nacCode) {
-            if (!validateNacCode(editData.nacCode)) {
-                setNacCodeError('NAC Code must be in format: GT 12345, TW 12345, or GS 12345');
-                return;
-            }
-        }
         setIsSaving(true);
         try {
             let newRequestedImagePath: string | undefined;
@@ -230,15 +215,15 @@ export function PendingReceivesCount() {
             const updatePayload: {
                 receivedQuantity: number;
                 receivedPartNumber: string;
-                nacCode?: string;
                 unit?: string;
+                nacCode?: string;
             } = {
                 receivedQuantity: editData.receivedQuantity,
                 receivedPartNumber: editData.receivedPartNumber
             };
-            const trimmedNac = editData.nacCode?.trim();
-            if (trimmedNac) {
-                updatePayload.nacCode = trimmedNac;
+            const trimmedNacCode = selectedReceive.nacCode?.trim();
+            if (trimmedNacCode && trimmedNacCode !== 'N/A') {
+                updatePayload.nacCode = trimmedNacCode;
             }
             const trimmedUnit = editData.unit?.trim();
             if (trimmedUnit) {
@@ -357,7 +342,6 @@ export function PendingReceivesCount() {
     const handleCloseEditModal = () => {
         setIsEditOpen(false);
         setEditData(null);
-        setNacCodeError('');
         setIsSaving(false);
     };
     const handleImageChange = (type: 'requested' | 'received', file: File) => {
@@ -706,14 +690,6 @@ export function PendingReceivesCount() {
             <ModalTitle className="text-xl font-semibold text-[#003594]">Edit Receive Details</ModalTitle>
           </ModalHeader>
           <div className="p-6 space-y-6">
-            {selectedReceive?.nacCode === 'N/A' && (<div className="space-y-2">
-                <Label htmlFor="nacCode" className="text-[#003594]">NAC Code</Label>
-                <Input id="nacCode" value={editData?.nacCode || ''} onChange={(e) => {
-                setEditData(prev => prev ? { ...prev, nacCode: e.target.value } : null);
-                setNacCodeError('');
-            }} placeholder="Enter NAC Code (e.g., GT 12345)" className={cn("border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20", nacCodeError && "border-red-500 focus:border-red-500 focus:ring-red-500/20")}/>
-                {nacCodeError && (<p className="text-sm text-red-500">{nacCodeError}</p>)}
-              </div>)}
             <div className="space-y-2">
               <Label htmlFor="receivedPartNumber" className="text-[#003594]">Received Part Number</Label>
               <Input id="receivedPartNumber" value={editData?.receivedPartNumber || ''} onChange={(e) => setEditData(prev => prev ? { ...prev, receivedPartNumber: e.target.value } : null)} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
