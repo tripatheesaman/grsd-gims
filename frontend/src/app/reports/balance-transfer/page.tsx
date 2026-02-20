@@ -34,7 +34,7 @@ export default function BalanceTransferRecordsPage() {
     const [toDate, setToDate] = useState<Date | undefined>(undefined);
     const [exporting, setExporting] = useState<boolean>(false);
     const [currentPage, setCurrentPage] = useState(1);
-    const pageSize = 10;
+    const [pageSize, setPageSize] = useState(10);
     const [universalSearch, setUniversalSearch] = useState('');
     const [equipmentNumberSearch, setEquipmentNumberSearch] = useState('');
     const [partNumberSearch, setPartNumberSearch] = useState('');
@@ -287,7 +287,16 @@ export default function BalanceTransferRecordsPage() {
                        Showing {startIndex + 1} to {Math.min(endIndex, filteredRecords.length)} of {filteredRecords.length} results
                      </div>
                      
-                     <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-2">
+                      <select value={pageSize} onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }} className="px-2 py-1 border border-[#002a6e]/20 rounded text-sm bg-white">
+                        <option value={10}>10 / page</option>
+                        <option value={20}>20 / page</option>
+                        <option value={50}>50 / page</option>
+                        <option value={100}>100 / page</option>
+                      </select>
                        <Button variant="outline" size="sm" onClick={() => handlePageChange(1)} disabled={currentPage === 1} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594]">
                          <ChevronsLeft className="h-4 w-4"/>
                        </Button>

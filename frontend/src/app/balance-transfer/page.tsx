@@ -51,7 +51,7 @@ export default function BalanceTransferPage() {
         supplier: ''
     });
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage] = useState(10);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const [formData, setFormData] = useState<TransferFormData>({
         fromNacCode: '',
         toNacCode: '',
@@ -435,6 +435,15 @@ export default function BalanceTransferPage() {
                       Page {currentPage} of {paginationData.totalPages}
                     </div>
                     <div className="flex items-center space-x-2">
+                      <select value={itemsPerPage} onChange={(e) => {
+                        setItemsPerPage(Number(e.target.value));
+                        setCurrentPage(1);
+                      }} className="px-2 py-1 border border-[#002a6e]/10 rounded text-sm bg-white">
+                        <option value={10}>10 / page</option>
+                        <option value={20}>20 / page</option>
+                        <option value={50}>50 / page</option>
+                        <option value={100}>100 / page</option>
+                      </select>
                       <Button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} variant="outline" size="sm" className="border-[#002a6e]/10 hover:border-[#003594] hover:bg-[#003594]/5">
                         Previous
                       </Button>

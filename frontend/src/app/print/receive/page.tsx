@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { PrintReceiveResultsTable } from '@/components/print/PrintReceiveResultsTable';
 import { PrintReceivePreviewModal } from '@/components/print/PrintReceivePreviewModal';
 import { useCustomToast } from '@/components/ui/custom-toast';
+import { Button } from '@/components/ui/button';
 import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
 import { getErrorMessage } from '@/lib/errorHandling';
 interface ReceiveSearchParams {
@@ -36,9 +37,9 @@ interface ReceiveSearchResult {
 export default function PrintReceivePage() {
     const [searchParams, setSearchParams] = useState<ReceiveSearchParams>({});
     const [results, setResults] = useState<ReceiveSearchResult[] | null>(null);
-    const [currentPage] = useState(1);
+    const [currentPage, setCurrentPage] = useState(1);
     const [previewReceive, setPreviewReceive] = useState<ReceiveSearchResult | null>(null);
-    const itemsPerPage = 10;
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipment = useDebounce(searchParams.equipmentNumber, 500);
     const debouncedPart = useDebounce(searchParams.partNumber, 500);
@@ -67,6 +68,7 @@ export default function PrintReceivePage() {
         else {
             setResults(null);
         }
+        setCurrentPage(1);
     }, [debouncedUniversal, debouncedEquipment, debouncedPart, searchReceives]);
     const handleUniversalSearch = (value: string) => {
         setSearchParams(prev => ({ ...prev, universal: value }));
@@ -83,6 +85,9 @@ export default function PrintReceivePage() {
     const handlePreview = (receive: ReceiveSearchResult) => {
         setPreviewReceive(receive);
     };
+    const totalCount = results?.length || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage));
+    const canPaginate = totalCount > 0;
     return (<div className="container mx-auto px-4 py-8">
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-gray-900">Print Receives</h1>
@@ -102,9 +107,39 @@ export default function PrintReceivePage() {
           </div>
         </div>
 
+        {canPaginate && (<div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount}
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="itemsPerPage">Items per page</Label>
+              <select id="itemsPerPage" value={itemsPerPage} onChange={(e) => {
+            setItemsPerPage(Number(e.target.value));
+            setCurrentPage(1);
+        }} className="border rounded px-2 py-1 text-sm">
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+          </div>)}
+
         <div className="mt-6">
           <PrintReceiveResultsTable results={results} currentPage={currentPage} itemsPerPage={itemsPerPage} onPreview={handlePreview}/>
         </div>
+
+        {canPaginate && totalPages > 1 && (<div className="flex items-center justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}>
+              Previous
+            </Button>
+            <span className="text-sm text-gray-600">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}>
+              Next
+            </Button>
+          </div>)}
 
         <PrintReceivePreviewModal receive={previewReceive} isOpen={!!previewReceive} onClose={() => setPreviewReceive(null)}/>
       </div>

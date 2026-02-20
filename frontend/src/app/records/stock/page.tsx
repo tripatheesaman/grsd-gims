@@ -56,7 +56,7 @@ export default function StockRecordsPage() {
     const [equipmentNumber, setEquipmentNumber] = useState<string>('');
     const [partNumber, setPartNumber] = useState<string>('');
     const [page, setPage] = useState<number>(1);
-    const [pageSize] = useState<number>(20);
+    const [pageSize, setPageSize] = useState<number>(20);
     const [rows, setRows] = useState<StockRow[]>([]);
     const [totalCount, setTotalCount] = useState<number>(0);
     const [totalPages, setTotalPages] = useState<number>(0);
@@ -329,9 +329,20 @@ export default function StockRecordsPage() {
           <div>
             Page {page} of {totalPages} ({totalCount} total records)
           </div>
+          <div className="flex items-center gap-2">
+            <select value={pageSize} onChange={(e) => {
+            setPage(1);
+            setPageSize(Number(e.target.value));
+        }} className="px-2 py-1 rounded border border-[#002a6e]/20 bg-white text-sm">
+              <option value={10}>10 / page</option>
+              <option value={20}>20 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
           <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
             Next
           </button>
+          </div>
         </div>
       </div>
 

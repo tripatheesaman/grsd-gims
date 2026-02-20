@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDebounce } from './useDebounce';
 import { API } from '@/lib/api';
 import { ReceiveSearchResult } from '@/types/search';
@@ -23,23 +23,12 @@ export function useReceiveSearch() {
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipmentNumber = useDebounce(searchParams.equipmentNumber, 500);
     const debouncedPartNumber = useDebounce(searchParams.partNumber, 500);
-    const lastSearchParams = useRef({
-        universal: '',
-        equipmentNumber: '',
-        partNumber: '',
-    });
     const fetchSearchResults = useCallback(async (page: number = 1) => {
         const currentParams = {
             universal: debouncedUniversal,
             equipmentNumber: debouncedEquipmentNumber,
             partNumber: debouncedPartNumber,
         };
-        if (currentParams.universal === lastSearchParams.current.universal &&
-            currentParams.equipmentNumber === lastSearchParams.current.equipmentNumber &&
-            currentParams.partNumber === lastSearchParams.current.partNumber) {
-            return;
-        }
-        lastSearchParams.current = currentParams;
         setIsLoading(true);
         setError(null);
         setCurrentPage(page);

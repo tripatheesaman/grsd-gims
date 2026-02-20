@@ -11,19 +11,25 @@ interface SearchBarProps {
 export const SearchBar = ({ placeholder, onSearch, className, debounceTime = 300 }: SearchBarProps) => {
     const [searchTerm, setSearchTerm] = useState('');
     const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const onSearchRef = useRef(onSearch);
+
+    useEffect(() => {
+        onSearchRef.current = onSearch;
+    }, [onSearch]);
+
     useEffect(() => {
         if (timeoutRef.current) {
             clearTimeout(timeoutRef.current);
         }
         timeoutRef.current = setTimeout(() => {
-            onSearch(searchTerm);
+            onSearchRef.current(searchTerm);
         }, debounceTime);
         return () => {
             if (timeoutRef.current) {
                 clearTimeout(timeoutRef.current);
             }
         };
-    }, [searchTerm, onSearch, debounceTime]);
+    }, [searchTerm, debounceTime]);
     return (<div className={cn("relative", className)}>
       <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
         <Search className="h-5 w-5 text-[#003594] group-hover:text-[#d2293b] transition-colors"/>
