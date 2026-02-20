@@ -78,6 +78,7 @@ export default function SpareIssueRecordsPage() {
     const [records, setRecords] = useState<SpareIssueRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
     const [totalPages, setTotalPages] = useState(1);
     const [totalRecords, setTotalRecords] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
@@ -119,7 +120,7 @@ export default function SpareIssueRecordsPage() {
         try {
             const params = new URLSearchParams({
                 page: currentPage.toString(),
-                limit: '10',
+                limit: pageSize.toString(),
                 search: searchTerm,
                 issueSlipNumber,
                 partNumber,
@@ -155,7 +156,7 @@ export default function SpareIssueRecordsPage() {
                 setLoading(false);
             }
         }
-    }, [currentPage, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder]);
+    }, [currentPage, pageSize, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const response = await API.get('/api/spare-issue-records/filters/options');
@@ -523,15 +524,24 @@ export default function SpareIssueRecordsPage() {
               <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm text-black">
-                    Showing <span className="font-medium">{(currentPage - 1) * 10 + 1}</span> to{' '}
+                    Showing <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> to{' '}
                     <span className="font-medium">
-                      {Math.min(currentPage * 10, totalRecords)}
+                      {Math.min(currentPage * pageSize, totalRecords)}
                     </span>{' '}
                     of <span className="font-medium">{totalRecords}</span> results
                   </p>
                 </div>
                 <div>
                   <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                    <select value={pageSize} onChange={(e) => {
+            setPageSize(Number(e.target.value));
+            setCurrentPage(1);
+        }} className="mr-2 px-2 py-1 border border-black/20 rounded bg-white text-sm">
+                      <option value={10}>10 / page</option>
+                      <option value={25}>25 / page</option>
+                      <option value={50}>50 / page</option>
+                      <option value={100}>100 / page</option>
+                    </select>
                     <Button variant="outline" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded-l-md">
                       Previous
                     </Button>

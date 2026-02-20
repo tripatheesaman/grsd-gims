@@ -66,7 +66,7 @@ export default function BorrowHistoryReportPage() {
     const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
     const [toDate, setToDate] = useState<Date | undefined>(undefined);
     const [page, setPage] = useState<number>(1);
-    const [pageSize] = useState<number>(20);
+    const [pageSize, setPageSize] = useState<number>(20);
     const [isFromOpen, setIsFromOpen] = useState<boolean>(false);
     const [isToOpen, setIsToOpen] = useState<boolean>(false);
     const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
@@ -366,7 +366,16 @@ export default function BorrowHistoryReportPage() {
                     <div className="text-sm text-gray-600">
                       Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, totalCount)} of {totalCount} results
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
+                      <select value={pageSize} onChange={(e) => {
+            setPageSize(Number(e.target.value));
+            setPage(1);
+        }} className="px-2 py-1 border rounded text-sm bg-white">
+                        <option value={10}>10 / page</option>
+                        <option value={20}>20 / page</option>
+                        <option value={50}>50 / page</option>
+                        <option value={100}>100 / page</option>
+                      </select>
                       <Button variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1 || loading}>
                         <ChevronLeft className="h-4 w-4"/>
                         Previous

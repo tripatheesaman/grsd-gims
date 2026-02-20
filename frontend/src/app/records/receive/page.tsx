@@ -93,7 +93,7 @@ export default function ReceiveRecordsPage() {
     const [status, setStatus] = useState<string>('all');
     const [receivedBy, setReceivedBy] = useState<string>('all');
     const [page, setPage] = useState<number>(1);
-    const [pageSize] = useState<number>(20);
+    const [pageSize, setPageSize] = useState<number>(20);
     const [records, setRecords] = useState<ReceiveRecord[]>([]);
     const [totalCount, setTotalCount] = useState<number>(0);
     const [totalPages, setTotalPages] = useState<number>(0);
@@ -608,7 +608,16 @@ export default function ReceiveRecordsPage() {
           <div className="text-sm text-gray-600">
             Showing {totalCount > 0 ? ((page - 1) * pageSize) + 1 : 0} to {totalCount > 0 ? Math.min(page * pageSize, totalCount) : 0} of {totalCount} records
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <select value={pageSize} onChange={(e) => {
+            setPage(1);
+            setPageSize(Number(e.target.value));
+        }} className="px-2 py-1 rounded border border-[#002a6e]/20 bg-white text-sm">
+              <option value={10}>10 / page</option>
+              <option value={20}>20 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
             <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
               Previous
             </button>

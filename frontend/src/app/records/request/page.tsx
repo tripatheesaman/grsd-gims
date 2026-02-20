@@ -102,7 +102,7 @@ export default function RequestRecordsPage() {
     const [status, setStatus] = useState<string>('all');
     const [requestedBy, setRequestedBy] = useState<string>('all');
     const [page, setPage] = useState<number>(1);
-    const [pageSize] = useState<number>(20);
+    const [pageSize, setPageSize] = useState<number>(20);
     const [records, setRecords] = useState<RequestRecord[]>([]);
     const [totalCount, setTotalCount] = useState<number>(0);
     const [totalPages, setTotalPages] = useState<number>(0);
@@ -685,6 +685,15 @@ export default function RequestRecordsPage() {
               Showing <span className="font-semibold text-gray-900">{totalCount > 0 ? ((page - 1) * pageSize) + 1 : 0}</span> to <span className="font-semibold text-gray-900">{totalCount > 0 ? Math.min(page * pageSize, totalCount) : 0}</span> of <span className="font-semibold text-gray-900">{totalCount}</span> records
             </div>
             <div className="flex items-center gap-2">
+              <select value={pageSize} onChange={(e) => {
+            setPage(1);
+            setPageSize(Number(e.target.value));
+        }} className="px-2 py-2 text-sm border border-gray-300 rounded-lg bg-white">
+                <option value={10}>10 / page</option>
+                <option value={20}>20 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
               <button className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
                 Previous
               </button>
