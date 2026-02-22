@@ -21,7 +21,7 @@ const isAbsoluteUrl = (value?: string) => {
     if (!value) {
         return false;
     }
-    return /^https?:\/\
+    return /^https?:\/\//i.test(value.trim());
 };
 const isBrowser = typeof window !== 'undefined';
 const getToken = () => {
@@ -37,7 +37,7 @@ export const API = axios.create({
 });
 
 const normalizeApiPath = (url?: string) => {
-    if (!url || /^https?:\/\
+    if (!url || /^https?:\/\//i.test(url)) {
         return url;
     }
     if (!shouldStripApiPrefix) {

@@ -159,6 +159,14 @@ export const getRRPConfig = async (req: Request, res: Response): Promise<void> =
 };
 export const getRRPItems = async (req: Request, res: Response): Promise<void> => {
     try {
+        const { rrpDate } = req.query;
+        let dateFilter = '';
+        const queryParams: any[] = [];
+        if (typeof rrpDate === 'string' && rrpDate.trim()) {
+            const normalizedRRPDate = formatDateForDB(utcToLocalDateString(rrpDate));
+            dateFilter = ' AND DATE(rq.request_date) <= DATE(?)';
+            queryParams.push(normalizedRRPDate);
+        }
         const [rows] = await pool.query<RRPItem[]>(`SELECT 
                 rd.id,
                 rq.request_number,
@@ -176,7 +184,8 @@ export const getRRPItems = async (req: Request, res: Response): Promise<void> =>
             JOIN request_details rq ON rd.request_fk = rq.id
             WHERE rd.approval_status = 'APPROVED'
             AND (rd.rrp_fk IS NULL OR rd.rrp_fk = '')
-            ORDER BY rd.receive_date DESC`);
+            ${dateFilter}
+            ORDER BY rd.receive_date DESC`, queryParams);
         const formattedItems = rows.map(item => ({
             ...item,
             request_date: formatDateForDB(item.request_date),

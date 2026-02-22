@@ -66,9 +66,20 @@ export default function RRPItemsPage() {
     useEffect(() => {
         const fetchItems = async () => {
             try {
-                const response = await API.get('/api/rrp/items');
-                setItems(response.data);
-                setFilteredItems(response.data);
+                const params = rrpDate ? { rrpDate } : undefined;
+                const response = await API.get('/api/rrp/items', { params });
+                const serverItems: RRPItem[] = response.data || [];
+                const safeFilteredItems = rrpDate
+                    ? serverItems.filter(item => {
+                        const requestDate = new Date(item.request_date);
+                        const selectedRRPDate = new Date(rrpDate);
+                        requestDate.setHours(0, 0, 0, 0);
+                        selectedRRPDate.setHours(0, 0, 0, 0);
+                        return requestDate <= selectedRRPDate;
+                    })
+                    : serverItems;
+                setItems(safeFilteredItems);
+                setFilteredItems(safeFilteredItems);
             }
             catch {
             }
@@ -77,7 +88,7 @@ export default function RRPItemsPage() {
             }
         };
         fetchItems();
-    }, []);
+    }, [rrpDate]);
     useEffect(() => {
         const filtered = items.filter(item => (searchQueries.partNumber ? item.part_number.toLowerCase().includes(searchQueries.partNumber.toLowerCase()) : true) &&
             (searchQueries.equipmentNumber ? item.equipment_number.toLowerCase().includes(searchQueries.equipmentNumber.toLowerCase()) : true) &&

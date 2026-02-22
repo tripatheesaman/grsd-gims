@@ -473,7 +473,6 @@ export const deleteFuelIssueRecord = async (req: Request, res: Response): Promis
             throw new Error('Fuel issue record not found');
         }
         const fuel = fuelDetails[0];
-        console.log(fuel.issue_fk, id);
         await connection.execute('DELETE FROM issue_details WHERE id = ?', [fuel.issue_fk]);
         await connection.execute('DELETE FROM fuel_records WHERE id = ?', [id]);
         await connection.execute('UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?', [fuel.issue_quantity, fuel.nac_code]);
