@@ -544,7 +544,7 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
         }
         const incomingNacCode = typeof nacCode === 'string' ? nacCode.trim() : '';
         const resolvedNacCode = incomingNacCode || requestNacCode || existingNacCode || '';
-        // Protect against accidental blanking of NAC during edit updates.
+        
         updateFields.push('nac_code = COALESCE(NULLIF(?, \'\'), nac_code)');
         updateValues.push(resolvedNacCode);
         if (typeof unit === 'string' && unit.trim() !== '') {
@@ -565,7 +565,7 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
             });
             return;
         }
-        // Final guard: never leave nac_code blank after an edit.
+        
         const [[postUpdateRow]] = await pool.execute<RowDataPacket[]>(`SELECT nac_code FROM receive_details WHERE id = ?`, [receiveId]);
         const postUpdateNacCode = typeof (postUpdateRow as any)?.nac_code === 'string' ? (postUpdateRow as any).nac_code.trim() : '';
         if (postUpdateNacCode === '') {

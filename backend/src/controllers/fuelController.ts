@@ -115,7 +115,31 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       }
     };
 
-    // Check if stock exists for each equipment and create if needed
+
+    if (payload.fuel_type.toLowerCase() === 'diesel') {
+      for (const record of payload.records) {
+        const equipment = record.equipment_number?.trim() || '';
+        if (!equipment || equipment.toLowerCase() === 'cleaning') {
+          continue;
+        }
+
+        const [existingRows] = await connection.query<RowDataPacket[]>(
+          `SELECT f.id
+           FROM fuel_records f
+           INNER JOIN issue_details i ON f.issue_fk = i.id
+           WHERE LOWER(TRIM(f.fuel_type)) = 'diesel'
+             AND DATE(i.issue_date) = DATE(?)
+             AND LOWER(TRIM(i.issued_for)) = LOWER(TRIM(?))
+           LIMIT 1`,
+          [payload.issue_date, equipment]
+        );
+
+        if (existingRows.length > 0) {
+          throw new Error(`Diesel entry already exists for equipment "${equipment}" on ${payload.issue_date}. Only Cleaning allows duplicate entries on the same date.`);
+        }
+      }
+    }
+
     let totalFuelNeeded = 0;
     for (const record of payload.records) {
       totalFuelNeeded += record.quantity;
@@ -124,14 +148,12 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     for (const record of payload.records) {
       const nacCode = getNacCode(payload.fuel_type);
       
-      // First check with exact match
       const [stockResults] = await connection.query<RowDataPacket[]>(
         'SELECT id, nac_code, current_balance FROM stock_details WHERE nac_code = ? COLLATE utf8mb4_unicode_ci',
         [nacCode]
       );
 
       if (stockResults.length === 0) {
-        // Create stock record if it doesn't exist
         const [insertResult] = await connection.query(
           `INSERT INTO stock_details 
           (nac_code, item_name, part_numbers, applicable_equipments, current_balance, unit) 
@@ -146,7 +168,6 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
           ]
         );
       } else {
-        // Check if there's enough fuel in stock for total quantity
         const currentBalance = stockResults[0].current_balance;
         if (currentBalance < totalFuelNeeded) {
           throw new Error(`Insufficient ${payload.fuel_type} fuel. Total requested: ${totalFuelNeeded}L, Available: ${currentBalance}L`);
@@ -154,7 +175,6 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       }
     }
 
-    // Create issue record using createIssue function
     const issueReq = {
       body: {
         issueDate: payload.issue_date,
@@ -167,7 +187,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
           quantity: record.quantity,
           equipmentNumber: record.equipment_number,
           partNumber: 'N/A',
-          originalIndex: index // Add original index to preserve order
+          originalIndex: index
         }))
       }
     } as Request;
@@ -205,12 +225,10 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       throw new Error('Failed to create issue record');
     }
 
-    // Create fuel records for each equipment
     for (let i = 0; i < payload.records.length; i++) {
       const record = payload.records[i];
       const issueId = issueIds[i];
       
-      // For diesel, calculate fuel_price from FIFO-calculated issue_cost
       let fuelPrice = payload.price;
       if (payload.fuel_type.toLowerCase() === 'diesel') {
         const [issueDetails] = await connection.query<RowDataPacket[]>(
@@ -228,7 +246,6 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
         }
       }
       
-      // Create fuel record
       const [fuelResult] = await connection.query<RowDataPacket[]>(
         `INSERT INTO fuel_records 
         (fuel_type, kilometers, issue_fk, is_kilometer_reset, fuel_price, week_number, fy) 
@@ -246,7 +263,6 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
 
       const fuelId = (fuelResult as any).insertId;
 
-      // Log the creation
       logEvents(
         `Fuel record created - Issue ID: ${issueId}, Fuel ID: ${fuelId}, Equipment: ${record.equipment_number}, Fuel Type: ${payload.fuel_type}, Week: ${weekNumber}, FY: ${currentFY}`,
         "fuelLog.log"
@@ -280,7 +296,6 @@ export const updateFuelRecord = async (req: Request, res: Response): Promise<voi
   try {
     await connection.beginTransaction();
 
-    // Get the current fuel record with its issue details
     const [fuelDetails] = await connection.query<RowDataPacket[]>(
       `SELECT f.*, i.issue_quantity, i.nac_code 
        FROM fuel_records f
@@ -295,7 +310,6 @@ export const updateFuelRecord = async (req: Request, res: Response): Promise<voi
 
     const fuel = fuelDetails[0];
 
-    // Update the fuel record
     await connection.execute(
       `UPDATE fuel_records 
        SET fuel_type = ?,
@@ -331,7 +345,6 @@ export const deleteFuelRecord = async (req: Request, res: Response): Promise<voi
   try {
     await connection.beginTransaction();
 
-    // Get the fuel record details before deletion
     const [fuelDetails] = await connection.query<RowDataPacket[]>(
       `SELECT f.*, i.issue_quantity, i.nac_code 
        FROM fuel_records f
@@ -346,10 +359,13 @@ export const deleteFuelRecord = async (req: Request, res: Response): Promise<voi
 
     const fuel = fuelDetails[0];
 
-    // Delete the fuel record (this will cascade delete the issue record)
     await connection.execute(
       'DELETE FROM fuel_records WHERE id = ?',
       [id]
+    );
+    await connection.execute(
+      'DELETE FROM issue_details WHERE id = ?',
+      [fuel.issue_fk]
     );
 
     await connection.commit();
@@ -378,7 +394,6 @@ export const approveFuelRecord = async (req: Request, res: Response): Promise<vo
   try {
     await connection.beginTransaction();
 
-    // Get the fuel record with its issue details
     const [fuelDetails] = await connection.query<RowDataPacket[]>(
       `SELECT f.*, i.issue_quantity, i.nac_code 
        FROM fuel_records f
@@ -393,7 +408,6 @@ export const approveFuelRecord = async (req: Request, res: Response): Promise<vo
 
     const fuel = fuelDetails[0];
 
-    // Update the fuel record
     await connection.execute(
       `UPDATE fuel_records 
        SET approval_status = 'APPROVED',
@@ -403,7 +417,6 @@ export const approveFuelRecord = async (req: Request, res: Response): Promise<vo
       [JSON.stringify(approvedBy), id]
     );
 
-    // Update the issue record
     await connection.execute(
       `UPDATE issue_details 
        SET approval_status = 'APPROVED',
@@ -440,7 +453,6 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
   const totalStartTime = Date.now();
 
   try {
-    // Get the equipment list from dedicated table (fallback to app_config for compatibility)
     const equipmentStartTime = Date.now();
     const [equipmentRows] = await connection.query<RowDataPacket[]>(
       `SELECT equipment_code FROM fuel_valid_equipments WHERE fuel_type = ? AND is_active = 1`,
@@ -459,27 +471,20 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
         throw new Error('Fuel configuration not found');
       }
 
-      // Clean and split the equipment list
       equipmentList = configResult[0].config_value
-        .replace(/\r\n/g, '')  // Remove newlines
+        .replace(/\r\n/g, '')
         .split(',')
         .map((item: string) => item.trim())
-        .filter((item: string) => item && !item.includes(' ')); // Remove empty items and items with spaces
+        .filter((item: string) => item && !item.includes(' '));
     }
 
-    // Initialize default values in case kilometers query fails or is slow
     let equipmentKilometers: { [key: string]: number } = {};
     let latestFuelPrice = 0;
 
-    // Only fetch kilometers if we have equipment - optimize for performance
-    // Use a more efficient approach: fetch all latest records at once using a single optimized query
     if (equipmentList.length > 0) {
       try {
         const startTime = Date.now();
-        
-        // Optimized query: Use window function but with better index usage
-        // For very large equipment lists, process in smaller batches
-        const batchSize = 500; // Reduced batch size for better performance
+        const batchSize = 500;
         const batches = [];
         for (let i = 0; i < equipmentList.length; i += batchSize) {
           batches.push(equipmentList.slice(i, i + batchSize));
@@ -508,16 +513,13 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
         const queryTime = Date.now() - startTime;
         logEvents(`Kilometers query took ${queryTime}ms for ${equipmentList.length} equipment (${batches.length} batches)`, "fuelLog.log");
 
-        // Create equipment-kilometer mapping
         equipmentKilometers = equipmentList.reduce((acc: { [key: string]: number }, equipment: string) => {
           const record = allKilometerResults.find(r => r.issued_for === equipment);
           acc[equipment] = record && !record.is_kilometer_reset ? record.kilometers : 0;
           return acc;
         }, {});
       } catch (kmError) {
-        // If kilometers query fails, log but don't fail the entire request
         logEvents(`Warning: Failed to fetch kilometers: ${kmError instanceof Error ? kmError.message : 'Unknown error'}`, "fuelLog.log");
-        // Initialize all to 0
         equipmentKilometers = equipmentList.reduce((acc: { [key: string]: number }, equipment: string) => {
           acc[equipment] = 0;
           return acc;
@@ -525,7 +527,6 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Get the latest fuel price for the type
     try {
       const [priceResult] = await connection.query<RowDataPacket[]>(
         `SELECT fuel_price 
@@ -537,7 +538,6 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
       );
       latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
     } catch (priceError) {
-      // If price query fails, just use 0
       logEvents(`Warning: Failed to fetch fuel price: ${priceError instanceof Error ? priceError.message : 'Unknown error'}`, "fuelLog.log");
     }
 
@@ -568,7 +568,6 @@ export const receiveFuel = async (req: Request, res: Response): Promise<void> =>
   try {
     await connection.beginTransaction();
 
-    // Insert into transaction_details
     const [transactionResult] = await connection.query<RowDataPacket[]>(
       `INSERT INTO transaction_details 
       (transaction_type, transaction_quantity, transaction_date, transaction_status, transaction_done_by) 
@@ -578,7 +577,6 @@ export const receiveFuel = async (req: Request, res: Response): Promise<void> =>
 
     const transactionId = (transactionResult as any).insertId;
 
-    // Update stock balance
     const [updateResult] = await connection.query<RowDataPacket[]>(
       `UPDATE stock_details 
        SET current_balance = current_balance + ? 
