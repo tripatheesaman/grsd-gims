@@ -50,6 +50,15 @@ interface PaginationInfo {
     limit: number;
     totalPages: number;
 }
+interface FuelIssueFilters {
+    search: string;
+    fromDate: string;
+    toDate: string;
+    fuelType: string;
+    weekNumber: string;
+    equipmentNumber: string;
+    issueSlipNumber: string;
+}
 const FuelIssueRecordsPage = () => {
     const { user, permissions } = useAuthContext();
     const hasPermission = (perm: string) => permissions.includes(perm);
@@ -91,6 +100,15 @@ const FuelIssueRecordsPage = () => {
     });
     const [fuelTypes, setFuelTypes] = useState<string[]>([]);
     const [nacCodes, setNacCodes] = useState<string[]>([]);
+    const [appliedFilters, setAppliedFilters] = useState<FuelIssueFilters>({
+        search: '',
+        fromDate: '',
+        toDate: '',
+        fuelType: '',
+        weekNumber: '',
+        equipmentNumber: '',
+        issueSlipNumber: ''
+    });
     const latestRequestRef = useRef<number>(0);
     useEffect(() => {
         if (!user) {
@@ -152,13 +170,13 @@ const FuelIssueRecordsPage = () => {
                 limit: String(pagination.limit),
                 sortBy,
                 sortOrder,
-                search,
-                fromDate,
-                toDate,
-                fuelType,
-                weekNumber,
-                equipmentNumber,
-                issueSlipNumber
+                search: appliedFilters.search,
+                fromDate: appliedFilters.fromDate,
+                toDate: appliedFilters.toDate,
+                fuelType: appliedFilters.fuelType,
+                weekNumber: appliedFilters.weekNumber,
+                equipmentNumber: appliedFilters.equipmentNumber,
+                issueSlipNumber: appliedFilters.issueSlipNumber
             });
             const { data } = await API.get(`/api/fuel-issue-records?${params.toString()}`);
             if (requestId !== latestRequestRef.current) {
@@ -184,7 +202,7 @@ const FuelIssueRecordsPage = () => {
                 setLoading(false);
             }
         }
-    }, [pagination.page, pagination.limit, sortBy, sortOrder, search, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber, showErrorToast]);
+    }, [pagination.page, pagination.limit, sortBy, sortOrder, appliedFilters, showErrorToast]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const [{ data: fuelData }, { data: nacData }] = await Promise.all([
@@ -203,8 +221,16 @@ const FuelIssueRecordsPage = () => {
     }, [fetchData, fetchFilterOptions]);
     const applyFilters = useCallback(() => {
         setPagination(prev => ({ ...prev, page: 1 }));
-        fetchData();
-    }, [fetchData]);
+        setAppliedFilters({
+            search,
+            fromDate,
+            toDate,
+            fuelType,
+            weekNumber,
+            equipmentNumber,
+            issueSlipNumber
+        });
+    }, [search, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber]);
     const setCurrentPage = (page: number) => {
         setPagination(prev => ({ ...prev, page }));
     };
@@ -333,6 +359,15 @@ const FuelIssueRecordsPage = () => {
         setWeekNumber('');
         setEquipmentNumber('');
         setIssueSlipNumber('');
+        setAppliedFilters({
+            search: '',
+            fromDate: '',
+            toDate: '',
+            fuelType: '',
+            weekNumber: '',
+            equipmentNumber: '',
+            issueSlipNumber: ''
+        });
         setPagination(prev => ({ ...prev, page: 1 }));
     };
     const formatDate = (dateString: string) => {

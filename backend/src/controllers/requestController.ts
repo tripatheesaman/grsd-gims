@@ -114,7 +114,7 @@ const getStockDetails = async (nacCode: string): Promise<StockDetail | null> => 
     }
 };
 
-// Helper function to validate request date against previous request dates
+
 const validateRequestDate = async (requestDate: string, excludeRequestNumber?: string): Promise<{ isValid: boolean; lastRequestDate?: Date; errorMessage?: string }> => {
     try {
         let query = `SELECT request_date 
@@ -175,7 +175,7 @@ const getPreviousRate = async (nacCode: string): Promise<string | number> => {
     }
 };
 
-// -------- Email helpers for request approval --------
+
 interface RequestEmailSettings {
     send_enabled: number;
     reminders_enabled: number;
@@ -254,7 +254,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             return;
         }
 
-        // Collect all unique requested_by emails from all items
+        
         const requestedByEmails = new Set<string>();
         for (const row of requestRows) {
             const email = row.requested_by_email || (row.requested_by?.includes('@') ? row.requested_by : null);
@@ -266,7 +266,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
         const primaryRequestedByEmail = requestedByEmailArray.length > 0 ? requestedByEmailArray[0] : null;
         const { to, cc, bcc } = buildRecipientLists(recipients, primaryRequestedByEmail);
         
-        // Add all other requested_by emails to CC
+        
         if (requestedByEmailArray.length > 1) {
             requestedByEmailArray.slice(1).forEach(email => {
                 if (!cc.includes(email) && !to.includes(email) && !bcc.includes(email)) {
@@ -279,7 +279,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             return;
         }
 
-        // Check received status for each item
+        
         const [receiveDetails] = await pool.query<RowDataPacket[]>(
             `SELECT 
                 r.request_fk,
@@ -292,7 +292,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             [requestNumber]
         );
 
-        // Create a map of request_detail_id -> total received quantity
+        
         const receivedMap = new Map<number, number>();
         for (const receive of receiveDetails) {
             const requestFk = receive.request_fk;
@@ -301,7 +301,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             receivedMap.set(requestFk, currentTotal + receivedQty);
         }
 
-        // Calculate totals
+        
         let totalRequested = 0;
         let totalReceived = 0;
         const itemsWithStatus = requestRows.map((row, idx) => {
@@ -322,7 +322,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
             };
         });
 
-        // Determine status message
+        
         let statusMessage = '';
         let statusTitle = 'Request Closed';
         if (totalReceived === 0) {
@@ -338,7 +338,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
 
         const requestDate = formatDate(new Date(requestRows[0].request_date));
         
-        // Build items list with received status
+        
         const itemsList = itemsWithStatus.map(item => {
             let itemStatus = '';
             if (item.receivedQuantity === 0) {
@@ -394,7 +394,7 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
                 html,
             },
             {
-                // Use configured sender email as SMTP username if provided
+                
                 user: settings.from_email || undefined,
                 pass: settings.smtp_pass ?? undefined,
             }
@@ -430,7 +430,7 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
             return;
         }
 
-        // Collect all unique requested_by emails from all items
+        
         const requestedByEmails = new Set<string>();
         for (const row of requestRows) {
             const email = row.requested_by_email || (row.requested_by?.includes('@') ? row.requested_by : null);
@@ -442,7 +442,7 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
         const primaryRequestedByEmail = requestedByEmailArray.length > 0 ? requestedByEmailArray[0] : null;
         const { to, cc, bcc } = buildRecipientLists(recipients, primaryRequestedByEmail);
         
-        // Add all other requested_by emails to CC
+        
         if (requestedByEmailArray.length > 1) {
             requestedByEmailArray.slice(1).forEach(email => {
                 if (!cc.includes(email) && !to.includes(email) && !bcc.includes(email)) {
@@ -496,11 +496,11 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
         let tempPdf: string | null = null;
         if (settings.include_pdf) {
             try {
-                // Generate PDF directly using the same data/logic as Excel generation
+                
                 tempPdf = await generateRequestPdf(requestNumber);
                 
                 if (tempPdf && fs.existsSync(tempPdf)) {
-                    // Attach the PDF file
+                    
                     attachments.push({ 
                         filename: `request-${requestNumber}.pdf`, 
                         path: tempPdf,
@@ -511,7 +511,7 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
                 }
             } catch (error) {
                 await logEvents(`Error generating request PDF for email attachment ${requestNumber}: ${error instanceof Error ? error.message : String(error)}`, "mailLog.log");
-                // Continue without attachment if generation fails
+                
             }
         }
 
@@ -531,7 +531,7 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
             }
         );
 
-        // Clean up temporary files
+        
         if (tempPdf) {
             fs.unlink(tempPdf, () => {});
         }
@@ -540,14 +540,10 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
     }
 };
 
-/**
- * Compute the next request number. Preferred logic:
- * - If lastRequestNumber matches pattern <section>Y<yy>T<seq1>F<yy2>RN<seq2>, increment seq1 and seq2 by 1 and reuse other parts.
- * - Otherwise, fall back to building from sectionCode and currentFy with RN sequence increment.
- */
+
 const computeNextRequestNumber = (lastRequestNumber: string | null, sectionCode: string, currentFy: string): string => {
     if (lastRequestNumber) {
-        // Try parse pattern like: 10.19Y83T182F82RN186
+        
         const m = lastRequestNumber.match(/^(.+?)Y(\d+)T(\d+)F(\d+)RN(\d+)$/);
         const fy = currentFy.slice(2,4);
         if (m) {
@@ -562,7 +558,7 @@ const computeNextRequestNumber = (lastRequestNumber: string | null, sectionCode:
         }
     }
 
-    // Fallback: derive parts from currentFy and sectionCode
+    
     const parts = (currentFy || '').split('/');
     let fy_front = '';
     let fy_back = '';
@@ -642,7 +638,7 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             return;
         }
         
-        // Check if request number already exists (excluding CLOSED and REJECTED)
+        
         const [existingRequests] = await connection.query<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM request_details WHERE request_number = ? AND approval_status NOT IN ("CLOSED", "REJECTED")',
             [requestData.requestNumber]
@@ -658,15 +654,15 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        // Check if user has permission to skip date validation
+        
         const userPermissions = req.permissions || [];
         const canSkipDateValidation = userPermissions.includes('can_approve_request');
 
-        // If the user does not have permission to create custom request numbers, ensure the provided
-        // request number matches the system-generated next request number
+        
+        
         const canCreateCustomRequestNumber = userPermissions.includes('can_create_new_request_number');
         if (!canCreateCustomRequestNumber) {
-            // Generate expected next request number from the latest request and app_config
+            
             const [configRows] = await connection.query<RowDataPacket[]>(
                 'SELECT config_name, config_value FROM app_config WHERE config_name IN (?, ?)',
                 ['section_code', 'current_fy']
@@ -678,7 +674,7 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
                 if (r.config_name === 'current_fy') currentFy = r.config_value;
             }
 
-            // Find last request
+            
             const [lastRows] = await connection.query<RowDataPacket[]>(
                 `SELECT request_number FROM request_details GROUP BY request_number ORDER BY MAX(request_date) DESC, request_number DESC LIMIT 1`
             );
@@ -696,8 +692,8 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             }
         }
 
-        // Check if request date is not before the previous request date
-        // Skip validation if user has approval permission
+        
+        
         logEvents(`Performing date validation for user: ${req.user || 'unknown'} (permissions: ${userPermissions.join(', ')})`, "requestLog.log");
         const validationResult = await validateRequestDate(requestData.requestDate, requestData.requestNumber);
         if (!validationResult.isValid) {
@@ -842,12 +838,12 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
         const { requestNumber: oldRequestNumber } = req.params;
         await connection.beginTransaction();
 
-        // Check if user has permission to skip date validation
+        
         const userPermissions = req.permissions || [];
         const canSkipDateValidation = userPermissions.includes('can_approve_request');
 
-        // Check if request date is not before the previous request date (excluding current request)
-        // Skip validation if user has approval permission
+        
+        
         if (!canSkipDateValidation) {
             logEvents(`Performing date validation for user: ${req.user || 'unknown'} (permissions: ${userPermissions.join(', ')})`, "requestLog.log");
             const validationResult = await validateRequestDate(requestDate, oldRequestNumber);
@@ -885,7 +881,7 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
             if (item.id) {
                 logEvents(`Updating item ${item.id} with NAC code: ${item.nacCode}`, "requestLog.log");
 
-                // Fetch existing item to preserve requested_by if not provided
+                
                 const [existingItemRows] = await connection.query<RowDataPacket[]>(
                     'SELECT requested_by, requested_by_id, requested_by_email FROM request_details WHERE id = ?',
                     [item.id]
@@ -896,18 +892,18 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 let finalRequestedById = item.requestedById ?? null;
                 let finalRequestedByEmail = item.requestedByEmail ?? null;
 
-                // Check if requestedById actually changed
+                
                 const requestedByIdChanged = finalRequestedById !== null && finalRequestedById !== existingItem?.requested_by_id;
                 const isExistingRequestedByEmail = existingItem?.requested_by && existingItem.requested_by.includes('@');
 
-                // If requestedById hasn't changed and existing requested_by is an email, preserve it
+                
                 if (finalRequestedById && !requestedByIdChanged && isExistingRequestedByEmail) {
-                    // Preserve existing email when requestedById hasn't changed
+                    
                     finalRequestedBy = existingItem.requested_by || '';
                     finalRequestedById = existingItem.requested_by_id ?? null;
                     finalRequestedByEmail = existingItem.requested_by_email ?? null;
                 } else if (finalRequestedById && requestedByIdChanged) {
-                    // If requestedById changed, fetch the authority name
+                    
                     const [authorityRows] = await connection.query<RowDataPacket[]>(
                         'SELECT name, designation FROM requesting_receiving_authority WHERE id = ? AND is_active = 1',
                         [finalRequestedById]
@@ -975,7 +971,7 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 let newItemRequestedById = item.requestedById ?? null;
                 let newItemRequestedByEmail = item.requestedByEmail ?? null;
 
-                // If item has requested_by_id, fetch the authority name
+                
                 if (newItemRequestedById) {
                     const [authorityRows] = await connection.query<RowDataPacket[]>(
                         'SELECT name, designation FROM requesting_receiving_authority WHERE id = ? AND is_active = 1',
@@ -1029,7 +1025,7 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
             }
         }
 
-        // Note: requested_by_id and requested_by_email are now stored per item, not per request
+        
 
         await connection.commit();
         logEvents(`Successfully updated request ${oldRequestNumber} to ${newRequestNumber} with ${items.length} items`, "requestLog.log");
@@ -1060,15 +1056,15 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
 
         await connection.beginTransaction();
 
-        // First, get all NAC codes from the request being approved
+        
         const [requestItems] = await connection.query<RowDataPacket[]>(
             `SELECT nac_code FROM request_details WHERE request_number = ?`,
             [requestNumber]
         );
 
-        // For each NAC code, check if there are existing requests with the same NAC code
-        // that haven't been received yet (receive_fk is null) and update their receive_fk to 0
-        // and set is_received as true
+        
+        
+        
         for (const item of requestItems) {
             if (item.nac_code && item.nac_code !== 'N/A') {
                 await connection.query(
@@ -1082,7 +1078,7 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
             }
         }
 
-        // Approve the current request
+        
         await connection.query(
             `UPDATE request_details 
              SET approval_status = 'APPROVED',
@@ -1094,7 +1090,7 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
         await connection.commit();
         logEvents(`Successfully approved request ${requestNumber} by user: ${approvedBy}`, "requestLog.log");
         
-        // Send approval email (non-blocking)
+        
         await sendRequestApprovalEmail(requestNumber);
 
         res.status(200).json({ 
@@ -1145,8 +1141,8 @@ export const rejectRequest = async (req: Request, res: Response): Promise<void> 
         const firstItemId = requestDetails[0].id;
         const requestedBy = requestDetails[0].requested_by;
 
-        // Try to find user by username
-        // Note: requested_by might be a name/designation string, not always a username
+        
+        
         let userId: number | null = null;
         
         if (requestedBy) {
@@ -1159,7 +1155,7 @@ export const rejectRequest = async (req: Request, res: Response): Promise<void> 
             }
         }
 
-        // Update request status
+        
         await connection.query(
             `UPDATE request_details 
              SET approval_status = 'REJECTED',
@@ -1169,7 +1165,7 @@ export const rejectRequest = async (req: Request, res: Response): Promise<void> 
             [rejectedBy, rejectionReason, requestNumber]
         );
 
-        // Create notification only if user is found
+        
         if (userId) {
             await connection.query(
                 `INSERT INTO notifications 
@@ -1215,7 +1211,7 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
 
         await connection.beginTransaction();
 
-        // Check if request exists and is active (not already closed or rejected)
+        
         const [requestDetails] = await connection.query<RowDataPacket[]>(
             `SELECT id, approval_status, requested_by 
              FROM request_details 
@@ -1239,7 +1235,7 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
         const approvalStatus = requestDetails[0].approval_status;
         const requestedBy = requestDetails[0].requested_by;
 
-        // Check if request is already closed or rejected
+        
         if (approvalStatus === 'CLOSED') {
             await connection.rollback();
             logEvents(`Failed to force close request - Request already closed: ${requestNumber}`, "requestLog.log");
@@ -1260,8 +1256,8 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
             return;
         }
 
-        // Allow force-close for incomplete requests even if partially received.
-        // Block only if the request is already fully received (approved receives >= requested qty).
+        
+        
         const [totals] = await connection.query<RowDataPacket[]>(
             `
             SELECT 
@@ -1291,7 +1287,7 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
             return;
         }
 
-        // Force close the request
+        
         await connection.query(
             `UPDATE request_details 
              SET approval_status = 'CLOSED',
@@ -1301,7 +1297,7 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
             [closedBy, requestNumber]
         );
 
-        // Get user ID for notification
+        
         const [users] = await connection.query<RowDataPacket[]>(
             'SELECT id FROM users WHERE username = ?',
             [requestedBy]
@@ -1323,7 +1319,7 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
         await connection.commit();
         logEvents(`Successfully force closed request ${requestNumber} by user: ${closedBy}`, "requestLog.log");
         
-        // Send force close email
+        
         await sendRequestForceCloseEmail(requestNumber);
         
         res.status(200).json({ 
@@ -1443,19 +1439,19 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         `;
         const params: (string | number)[] = [];
 
-        // If no search parameters provided, show all requests
+        
         if (!universal && !equipmentNumber && !partNumber) {
-            // Get total count for pagination
+            
             let countQuery = 'SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd';
             const [countResult] = await pool.execute<RowDataPacket[]>(countQuery);
             const totalCount = (countResult as any)[0]?.total || 0;
 
-            // Calculate pagination
+            
             const currentPage = parseInt(page.toString()) || 1;
             const limit = parseInt(pageSize.toString()) || 20;
             const offset = (currentPage - 1) * limit;
 
-            // First, get the distinct request numbers with pagination
+            
             const distinctQuery = `
                 SELECT DISTINCT rd.request_number, rd.request_date, rd.requested_by, rd.approval_status, rd.reference_doc
                 FROM request_details rd
@@ -1478,10 +1474,10 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                 return;
             }
 
-            // Get the request numbers for this page
+            
             const requestNumbers = distinctResults.map((r: any) => `'${r.request_number}'`).join(',');
             
-            // Now get all items for these request numbers
+            
             const itemsQuery = `
                 SELECT rd.*
                 FROM request_details rd
@@ -1548,12 +1544,12 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             params.push(`%${partNumber}%`);
         }
 
-        // Calculate pagination
+        
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
 
-        // First, get the distinct request numbers with pagination
+        
         let distinctQuery = `
             SELECT DISTINCT rd.request_number, rd.request_date, rd.requested_by, rd.approval_status, rd.reference_doc
             FROM request_details rd
@@ -1595,10 +1591,10 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             return;
         }
 
-        // Get the request numbers for this page
+        
         const requestNumbers = distinctResults.map((r: any) => `'${r.request_number}'`).join(',');
         
-        // Now get all items for these request numbers
+        
         const itemsQuery = `
             SELECT rd.*
             FROM request_details rd
@@ -1608,7 +1604,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         
         const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery);
         
-        // Get total count for pagination
+        
         let totalCount = 0;
         try {
             let countQuery = 'SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd WHERE 1=1';
@@ -1638,7 +1634,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             totalCount = (countResult as any)[0]?.total || 0;
         } catch (countError) {
             logEvents(`Count query failed: ${JSON.stringify(countError)}`, "requestLog.log");
-            // Continue without count if it fails
+            
         }
         
         const groupedResults = results.reduce((acc, result) => {
@@ -1727,7 +1723,7 @@ export const getLastRequestInfo = async (req: Request, res: Response): Promise<v
 export const getNextRequestNumber = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        // Read section_code and current_fy from app_config
+        
         const [configRows] = await connection.query<RowDataPacket[]>(
             'SELECT config_name, config_value FROM app_config WHERE config_name IN (?, ?)',
             ['section_code', 'current_fy']
@@ -1739,7 +1735,7 @@ export const getNextRequestNumber = async (req: Request, res: Response): Promise
             if (r.config_name === 'section_code') sectionCode = r.config_value;
             if (r.config_name === 'current_fy') currentFy = r.config_value;
         }
-        // Get last request number
+        
         const [lastRows] = await connection.query<RowDataPacket[]>(
             `SELECT request_number FROM request_details GROUP BY request_number ORDER BY MAX(request_date) DESC, request_number DESC LIMIT 1`
         );
@@ -1769,7 +1765,7 @@ export const checkDuplicateRequest = async (req: Request, res: Response): Promis
             return;
         }
 
-        // Check if there's a pending request with the same NAC code (excluding CLOSED and REJECTED)
+        
         const [existingRequests] = await pool.query<RowDataPacket[]>(
             `SELECT COUNT(*) as count 
              FROM request_details 
@@ -1804,7 +1800,7 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         const userPermissions = req.permissions || [];
         const { requestNumber, imagePath } = req.body;
         
-        // Check if a reference document already exists for this request
+        
         const [existingDoc] = await connection.query<RowDataPacket[]>(
             'SELECT reference_doc FROM request_details WHERE request_number = ? AND reference_doc IS NOT NULL LIMIT 1',
             [requestNumber]
@@ -1812,7 +1808,7 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         
         const isEdit = existingDoc.length > 0 && existingDoc[0].reference_doc;
         
-        // Check appropriate permission based on whether it's upload or edit
+        
         if (isEdit) {
             if (!userPermissions.includes('can_edit_reference_documents')) {
                 res.status(403).json({
@@ -1831,7 +1827,7 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             }
         }
 
-        // Validate required fields
+        
         if (!requestNumber || !imagePath) {
             logEvents(`Failed to upload reference document - Missing required fields: requestNumber=${requestNumber}, imagePath=${imagePath}`, "requestLog.log");
             res.status(400).json({
@@ -1845,7 +1841,7 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
 
         await connection.beginTransaction();
 
-        // First, check if the request exists
+        
         const [existingRequests] = await connection.query<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM request_details WHERE request_number = ?',
             [requestNumber]
@@ -1861,8 +1857,8 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             return;
         }
 
-        // Update all records in request_details table with the specified request_number
-        // Set reference_document_uploaded_date only if it's the first upload (not an edit)
+        
+        
         const updateQuery = isEdit 
             ? `UPDATE request_details 
                SET reference_doc = ?, 
