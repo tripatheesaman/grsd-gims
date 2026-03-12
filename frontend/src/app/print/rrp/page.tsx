@@ -19,12 +19,17 @@ export default function PrintRRPPage() {
         rrp: RRPSearchResult;
         imagePath: string;
     } | null>(null);
+    const [pendingUpload, setPendingUpload] = useState<{
+        rrp: RRPSearchResult;
+        file: File;
+        previewUrl: string;
+    } | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const canUploadRefDoc = permissions?.includes('can_upload_reference_documents');
     const canEditRefDoc = permissions?.includes('can_edit_reference_documents');
     const canDeleteRefDoc = permissions?.includes('can_delete_reference_documents');
     const { showSuccessToast, showErrorToast } = useCustomToast();
-    const { results, isLoading, error, currentPage, pageSize, totalCount, totalPages, handleSearch, handlePageChange, handlePageSizeChange, setResults, } = useRRPSearch();
+    const { results, isLoading, error, currentPage, pageSize, totalCount, totalPages, searchParams, handleSearch, handlePageChange, handlePageSizeChange, setResults, } = useRRPSearch();
     const handlePreview = (rrp: RRPSearchResult) => {
         setPreviewRRP(rrp);
     };
@@ -49,7 +54,15 @@ export default function PrintRRPPage() {
             });
         }
     };
-    const handleUploadReferenceDoc = async (rrp: RRPSearchResult, file: File) => {
+    const handleUploadReferenceDoc = (rrp: RRPSearchResult, file: File) => {
+        const previewUrl = URL.createObjectURL(file);
+        setPendingUpload({ rrp, file, previewUrl });
+    };
+    const confirmUploadReferenceDoc = async () => {
+        if (!pendingUpload) {
+            return;
+        }
+        const { rrp, file, previewUrl } = pendingUpload;
         setIsUploading(true);
         try {
             const formData = new FormData();
@@ -91,6 +104,8 @@ export default function PrintRRPPage() {
         }
         finally {
             setIsUploading(false);
+            URL.revokeObjectURL(previewUrl);
+            setPendingUpload(null);
         }
     };
     const handlePreviewReferenceDoc = (rrp: RRPSearchResult) => {
@@ -142,7 +157,7 @@ export default function PrintRRPPage() {
       </div>
       
       <div className="mb-8 bg-white rounded-lg shadow-xl border-[#002a6e]/10 p-6">
-        <PrintRRPSearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')}/>
+        <PrintRRPSearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')} referenceStatus={searchParams.referenceStatus} onReferenceStatusChange={handleSearch('referenceStatus')}/>
       </div>
 
       {error && (<div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
@@ -193,6 +208,44 @@ export default function PrintRRPPage() {
             }}/>)) : (<div className="text-center text-gray-500 p-8">
                 No reference document available
               </div>)}
+          </div>
+        </ModalContent>
+      </Modal>
+
+      <Modal open={!!pendingUpload} onOpenChange={(open) => {
+            if (!open && pendingUpload) {
+                URL.revokeObjectURL(pendingUpload.previewUrl);
+                setPendingUpload(null);
+            }
+        }}>
+        <ModalContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <ModalHeader>
+            <ModalTitle>Confirm Reference Document Upload</ModalTitle>
+          </ModalHeader>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-gray-700">
+              RRP {pendingUpload?.rrp.rrpNumber}
+            </p>
+            <div className="flex justify-center items-center">
+              {pendingUpload && pendingUpload.file.type === 'application/pdf' ? (
+                <iframe src={pendingUpload.previewUrl} className="w-full h-[60vh] border rounded-lg" />
+              ) : pendingUpload ? (
+                <Image src={pendingUpload.previewUrl} alt="Reference Preview" width={800} height={600} className="max-w-full max-h-[60vh] object-contain rounded-lg" />
+              ) : null}
+            </div>
+            <div className="flex justify-end space-x-2 pt-2">
+              <button type="button" className="px-4 py-2 text-sm border rounded-md" onClick={() => {
+                if (pendingUpload) {
+                    URL.revokeObjectURL(pendingUpload.previewUrl);
+                }
+                setPendingUpload(null);
+            }}>
+                Cancel
+              </button>
+              <button type="button" className="px-4 py-2 text-sm bg-[#003594] text-white rounded-md disabled:opacity-50" disabled={isUploading} onClick={confirmUploadReferenceDoc}>
+                {isUploading ? 'Uploading...' : 'Confirm Upload'}
+              </button>
+            </div>
           </div>
         </ModalContent>
       </Modal>

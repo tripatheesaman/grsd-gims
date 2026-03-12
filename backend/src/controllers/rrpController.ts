@@ -968,7 +968,7 @@ export const getRRPById = async (req: Request, res: Response): Promise<void> => 
     }
 };
 export const searchRRP = async (req: Request, res: Response): Promise<void> => {
-    const { universal, equipmentNumber, partNumber, page = 1, pageSize = 20 } = req.query;
+    const { universal, equipmentNumber, partNumber, referenceStatus, page = 1, pageSize = 20 } = req.query;
     const currentPage = parseInt(page as string) || 1;
     const limit = parseInt(pageSize as string) || 20;
     const offset = (currentPage - 1) * limit;
@@ -988,23 +988,45 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
             whereClause += " AND rd.part_number LIKE ?";
             params.push(`%${partNumber}%`);
         }
+        if (referenceStatus === 'uploaded') {
+            whereClause += " AND rrp.reference_doc IS NOT NULL";
+        } else if (referenceStatus === 'not_uploaded') {
+            whereClause += " AND (rrp.reference_doc IS NULL OR rrp.reference_doc = '')";
+        }
         const countQuery = `SELECT COUNT(DISTINCT rrp.rrp_number) as total FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id ${whereClause}`;
         logEvents(`Count query: ${countQuery}`, "rrpLog.log");
         logEvents(`Count params: ${JSON.stringify(params)}`, "rrpLog.log");
         const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, params);
         const totalCount = countResult[0].total;
         logEvents(`Count result: ${totalCount}`, "rrpLog.log");
-        const mainQuery = `SELECT DISTINCT rrp.id, rrp.rrp_number, rrp.date as rrp_date, rrp.supplier_name, rrp.currency, rrp.forex_rate, rrp.item_price, rrp.customs_charge, rrp.customs_service_charge, rrp.vat_percentage, rrp.invoice_number, rrp.invoice_date, rrp.po_number, rrp.airway_bill_number, rrp.inspection_details, rrp.approval_status, rrp.created_by, rrp.total_amount, rrp.freight_charge, rrp.customs_date, rrp.customs_number, rrp.reference_doc, rd.item_name, rd.part_number, rd.received_quantity, rd.unit, COALESCE(rqd.equipment_number, 'N/A') as equipment_number, rd.receive_source, rd.tender_reference_number FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id ${whereClause} ORDER BY rrp.date DESC LIMIT ${limit} OFFSET ${offset}`;
-        const mainParams = [...params];
-        logEvents(`Main query: ${mainQuery}`, "rrpLog.log");
-        logEvents(`Main params: ${JSON.stringify(mainParams)}`, "rrpLog.log");
+        const distinctQuery = `SELECT DISTINCT rrp.rrp_number, rrp.date as rrp_date FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id ${whereClause} ORDER BY CASE WHEN LEFT(rrp.rrp_number, 1) = 'L' THEN 0 ELSE 1 END, CAST(CASE WHEN rrp.rrp_number LIKE '%T%' THEN SUBSTRING_INDEX(SUBSTRING(rrp.rrp_number, 2), 'T', 1) ELSE SUBSTRING(rrp.rrp_number, 2) END AS UNSIGNED) DESC, rrp.rrp_number DESC LIMIT ${limit} OFFSET ${offset}`;
+        const distinctParams = [...params];
+        logEvents(`Distinct query: ${distinctQuery}`, "rrpLog.log");
+        logEvents(`Distinct params: ${JSON.stringify(distinctParams)}`, "rrpLog.log");
+        const [distinctResults] = await pool.execute<RowDataPacket[]>(distinctQuery, distinctParams);
+        if (distinctResults.length === 0) {
+            const emptyResponse = {
+                data: [],
+                pagination: {
+                    currentPage,
+                    pageSize: limit,
+                    totalCount,
+                    totalPages: Math.ceil(totalCount / limit)
+                }
+            };
+            res.json(emptyResponse);
+            return;
+        }
+        const rrpNumbers = distinctResults.map((r: any) => `'${r.rrp_number}'`).join(',');
+        const detailsQuery = `SELECT rrp.id, rrp.rrp_number, rrp.date as rrp_date, rrp.supplier_name, rrp.currency, rrp.forex_rate, rrp.item_price, rrp.customs_charge, rrp.customs_service_charge, rrp.vat_percentage, rrp.invoice_number, rrp.invoice_date, rrp.po_number, rrp.airway_bill_number, rrp.inspection_details, rrp.approval_status, rrp.created_by, rrp.total_amount, rrp.freight_charge, rrp.customs_date, rrp.customs_number, rrp.reference_doc, rd.item_name, rd.part_number, rd.received_quantity, rd.unit, COALESCE(rqd.equipment_number, 'N/A') as equipment_number, rd.receive_source, rd.tender_reference_number FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id WHERE rrp.rrp_number IN (${rrpNumbers}) ORDER BY CASE WHEN LEFT(rrp.rrp_number, 1) = 'L' THEN 0 ELSE 1 END, CAST(CASE WHEN rrp.rrp_number LIKE '%T%' THEN SUBSTRING_INDEX(SUBSTRING(rrp.rrp_number, 2), 'T', 1) ELSE SUBSTRING(rrp.rrp_number, 2) END AS UNSIGNED) DESC, rrp.rrp_number DESC`;
+        logEvents(`Details query: ${detailsQuery}`, "rrpLog.log");
         let results: RowDataPacket[];
         try {
-            [results] = await pool.execute<RowDataPacket[]>(mainQuery, mainParams);
-            logEvents(`Main query executed successfully, got ${results.length} results`, "rrpLog.log");
+            [results] = await pool.execute<RowDataPacket[]>(detailsQuery);
+            logEvents(`Details query executed successfully, got ${results.length} results`, "rrpLog.log");
         }
         catch (mainError) {
-            logEvents(`Main query error: ${mainError}`, "rrpLog.log");
+            logEvents(`Details query error: ${mainError}`, "rrpLog.log");
             throw mainError;
         }
         const groupedResults = results.reduce((acc, result) => {
@@ -1244,8 +1266,14 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
     try {
         const userPermissions = req.permissions || [];
         const { rrpNumber, imagePath } = req.body;
-        const [existingDoc] = await pool.query<RowDataPacket[]>('SELECT reference_doc FROM rrp_details WHERE rrp_number = ? AND reference_doc IS NOT NULL LIMIT 1', [rrpNumber]);
-        const isEdit = existingDoc.length > 0 && existingDoc[0].reference_doc;
+        const [existingDoc] = await pool.query<RowDataPacket[]>(
+            'SELECT reference_doc, date FROM rrp_details WHERE rrp_number = ? LIMIT 1',
+            [rrpNumber]
+        );
+        const currentReferenceDoc = existingDoc.length > 0 ? existingDoc[0].reference_doc : null;
+        const currentDate = existingDoc.length > 0 ? existingDoc[0].date : null;
+        const { type } = getRRPType(rrpNumber);
+        const isEdit = !!currentReferenceDoc;
         if (isEdit) {
             if (!userPermissions.includes('can_edit_reference_documents')) {
                 res.status(403).json({
@@ -1270,6 +1298,29 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
                 message: 'RRP number and image path are required'
             });
             return;
+        }
+        if (currentDate) {
+            const prefix = type === 'local' ? 'L' : 'F';
+            const [pendingPrevious] = await pool.query<RowDataPacket[]>(
+                `SELECT DISTINCT rrp_number, date
+                 FROM rrp_details 
+                 WHERE date < ? 
+                   AND reference_doc IS NULL 
+                   AND rrp_number LIKE ?
+                   AND rrp_number != 'Code Transfer' 
+                   AND rrp_number != 'TENDER-FREE' 
+                 ORDER BY date DESC, rrp_number DESC 
+                 LIMIT 1`,
+                [currentDate, `${prefix}%`]
+            );
+            if (pendingPrevious.length > 0) {
+                const previousRRPNumber = pendingPrevious[0].rrp_number;
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message: `Reference document for previous RRP ${previousRRPNumber} must be uploaded before uploading for ${rrpNumber}.`
+                });
+                return;
+            }
         }
         const [result] = await pool.query('UPDATE rrp_details SET reference_doc = ? WHERE rrp_number = ?', [imagePath, rrpNumber]);
         if ((result as any).affectedRows === 0) {

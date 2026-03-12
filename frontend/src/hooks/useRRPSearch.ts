@@ -23,7 +23,8 @@ export function useRRPSearch() {
     const [searchParams, setSearchParams] = useState<RRPSearchParams>({
         universal: '',
         equipmentNumber: '',
-        partNumber: ''
+        partNumber: '',
+        referenceStatus: undefined,
     });
     
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
@@ -35,7 +36,8 @@ export function useRRPSearch() {
         universal: debouncedUniversal || undefined,
         equipmentNumber: debouncedEquipmentNumber || undefined,
         partNumber: debouncedPartNumber || undefined,
-    }), [currentPage, pageSize, debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber]);
+        referenceStatus: searchParams.referenceStatus || undefined,
+    }), [currentPage, pageSize, debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, searchParams.referenceStatus]);
     const queryKey = useMemo(() => queryKeys.rrp.search(queryParams), [queryParams]);
     
     const { data: response, isLoading, error } = useApiQuery<BackendResponse>(

@@ -53,19 +53,19 @@ export function RequestCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSub
       <h2 className="text-lg font-semibold">Request Slip</h2>
       {items.length === 0 ? (<p className="text-muted-foreground">No items in slip</p>) : (<div className="space-y-4">
           {items.map((item) => (<div key={item.id} className="flex items-start justify-between p-4 border rounded-lg">
-              <div className="space-y-1">
-                <p className="font-medium">{item.itemName}</p>
-                <p className="text-sm text-muted-foreground">
+              <div className="space-y-1 max-w-full">
+                <p className="font-medium break-words">{item.itemName}</p>
+                <p className="text-sm text-muted-foreground break-words">
                   NAC Code: {item.nacCode}
                 </p>
-                <p className="text-sm">
+                <p className="text-sm break-words">
                   Request Quantity: {item.requestQuantity} {item.unit ? item.unit : ''}
                 </p>
-                {item.partNumber && (<p className="text-sm">Part Number: {item.partNumber}</p>)}
-                <p className="text-sm">
+                {item.partNumber && (<p className="text-sm break-words">Part Number: {item.partNumber}</p>)}
+                <p className="text-sm break-words max-h-20 overflow-y-auto">
                   Equipment Number: {item.equipmentNumber}
                 </p>
-                {item.specifications && (<p className="text-sm">
+                {item.specifications && (<p className="text-sm break-words">
                     Specifications: {item.specifications}
                   </p>)}
                 {item.image && (<div className="mt-2">

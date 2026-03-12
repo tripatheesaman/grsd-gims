@@ -45,4 +45,5 @@ export interface RequestSearchParams {
     universal: string;
     equipmentNumber: string;
     partNumber: string;
+    referenceStatus?: string;
 }
