@@ -1871,19 +1871,23 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         }
         if (currentRequestDate) {
             const [pendingPrevious] = await connection.query<RowDataPacket[]>(
-                `SELECT DISTINCT rd.request_number, rd.request_date
+                `SELECT rd.request_number, MAX(rd.request_date) AS last_request_date
                  FROM request_details rd 
                  WHERE rd.request_date < ? 
+                   AND rd.request_number != ?
                    AND (rd.reference_doc IS NULL OR rd.reference_doc = '') 
-                 ORDER BY CAST(
-                    CASE
-                        WHEN rd.request_number LIKE '%T%'
-                            THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
-                        ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
-                    END AS UNSIGNED
-                 ) DESC, rd.request_date DESC, rd.request_number DESC
+                 GROUP BY rd.request_number
+                 ORDER BY last_request_date DESC,
+                   CAST(
+                     CASE
+                       WHEN rd.request_number LIKE '%T%'
+                         THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                       ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                     END AS UNSIGNED
+                   ) DESC,
+                   rd.request_number DESC
                  LIMIT 1`,
-                [currentRequestDate]
+                [currentRequestDate, requestNumber]
             );
             if (pendingPrevious.length > 0) {
                 const previousRequestNumber = pendingPrevious[0].request_number;
