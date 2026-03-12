@@ -1871,11 +1871,17 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         }
         if (currentRequestDate) {
             const [pendingPrevious] = await connection.query<RowDataPacket[]>(
-                `SELECT DISTINCT rd.request_number 
+                `SELECT DISTINCT rd.request_number, rd.request_date
                  FROM request_details rd 
                  WHERE rd.request_date < ? 
                    AND (rd.reference_doc IS NULL OR rd.reference_doc = '') 
-                 ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC 
+                 ORDER BY CAST(
+                    CASE
+                        WHEN rd.request_number LIKE '%T%'
+                            THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                        ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                    END AS UNSIGNED
+                 ) DESC, rd.request_date DESC, rd.request_number DESC
                  LIMIT 1`,
                 [currentRequestDate]
             );
