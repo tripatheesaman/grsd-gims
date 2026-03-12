@@ -1302,16 +1302,26 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
         if (currentDate) {
             const prefix = type === 'local' ? 'L' : 'F';
             const [pendingPrevious] = await pool.query<RowDataPacket[]>(
-                `SELECT DISTINCT rrp_number, date
+                `SELECT rrp_number, MAX(date) AS last_date
                  FROM rrp_details 
                  WHERE date < ? 
+                   AND rrp_number != ?
                    AND reference_doc IS NULL 
                    AND rrp_number LIKE ?
                    AND rrp_number != 'Code Transfer' 
                    AND rrp_number != 'TENDER-FREE' 
-                 ORDER BY date DESC, rrp_number DESC 
+                 GROUP BY rrp_number
+                 ORDER BY last_date DESC,
+                   CAST(
+                     CASE
+                       WHEN rrp_number LIKE '%T%'
+                         THEN SUBSTRING_INDEX(SUBSTRING(rrp_number, 2), 'T', 1)
+                       ELSE SUBSTRING(rrp_number, 2)
+                     END AS UNSIGNED
+                   ) DESC,
+                   rrp_number DESC 
                  LIMIT 1`,
-                [currentDate, `${prefix}%`]
+                [currentDate, rrpNumber, `${prefix}%`]
             );
             if (pendingPrevious.length > 0) {
                 const previousRRPNumber = pendingPrevious[0].rrp_number;
