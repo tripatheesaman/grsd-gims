@@ -37,4 +37,5 @@ export interface RRPSearchParams {
     universal: string;
     equipmentNumber: string;
     partNumber: string;
+    referenceStatus?: string;
 }

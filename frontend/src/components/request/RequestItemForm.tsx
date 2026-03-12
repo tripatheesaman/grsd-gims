@@ -115,9 +115,28 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
             return;
         setIsSubmitting(true);
         try {
-            const finalEquipmentNumber = isManualEntry
-                ? Array.from(expandEquipmentNumbers(equipmentNumber)).join(',')
-                : equipmentNumber;
+            let finalEquipmentNumber = equipmentNumber;
+            if (isManualEntry) {
+                const expandedSet = expandEquipmentNumbers(equipmentNumber);
+                const expandedList = Array.from(expandedSet);
+                if (expandedList.length === 0) {
+                    setErrors(prev => ({
+                        ...prev,
+                        equipmentNumber: 'Invalid equipment number format',
+                    }));
+                    setIsSubmitting(false);
+                    return;
+                }
+                if (expandedList.length > 1000) {
+                    setErrors(prev => ({
+                        ...prev,
+                        equipmentNumber: 'Equipment number range is too large. Please reduce the range.',
+                    }));
+                    setIsSubmitting(false);
+                    return;
+                }
+                finalEquipmentNumber = equipmentNumber.trim();
+            }
             const cartItem: RequestCartItem = {
                 id: isManualEntry ? 'N/A' : (item?.id?.toString() || 'N/A'),
                 nacCode: isManualEntry ? 'N/A' : (item?.nacCode || 'N/A'),

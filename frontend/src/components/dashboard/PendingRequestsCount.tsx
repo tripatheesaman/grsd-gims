@@ -497,9 +497,9 @@ export function PendingRequestsCount() {
                              <SelectValue placeholder="Select requesting authority"/>
                            </SelectTrigger>
                            <SelectContent>
-                             {isLoadingAuthorities ? (<SelectItem value="" disabled>Loading...</SelectItem>) : authorityOptions && authorityOptions.length > 0 ? (authorityOptions.map((authority) => (<SelectItem key={authority.id} value={authority.id.toString()}>
+                             {isLoadingAuthorities ? (<SelectItem value="loading" disabled>Loading...</SelectItem>) : authorityOptions && authorityOptions.length > 0 ? (authorityOptions.map((authority) => (<SelectItem key={authority.id} value={authority.id.toString()}>
                                    {authority.name} {authority.designation ? `(${authority.designation})` : ''}
-                                 </SelectItem>))) : (<SelectItem value="" disabled>No authorities available</SelectItem>)}
+                                 </SelectItem>))) : (<SelectItem value="none" disabled>No authorities available</SelectItem>)}
                            </SelectContent>
                          </Select>
                        </div>

@@ -1418,7 +1418,7 @@ export const getRequestById = async (req: Request, res: Response): Promise<void>
 };
 
 export const searchRequests = async (req: Request, res: Response): Promise<void> => {
-    const { universal, equipmentNumber, partNumber, page = 1, pageSize = 20 } = req.query;
+    const { universal, equipmentNumber, partNumber, referenceStatus, page = 1, pageSize = 20 } = req.query;
 
     try {
         let query = `
@@ -1440,8 +1440,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         const params: (string | number)[] = [];
 
         
-        if (!universal && !equipmentNumber && !partNumber) {
-            
+        if (!universal && !equipmentNumber && !partNumber && !referenceStatus) {
             let countQuery = 'SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd';
             const [countResult] = await pool.execute<RowDataPacket[]>(countQuery);
             const totalCount = (countResult as any)[0]?.total || 0;
@@ -1455,7 +1454,13 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             const distinctQuery = `
                 SELECT DISTINCT rd.request_number, rd.request_date, rd.requested_by, rd.approval_status, rd.reference_doc
                 FROM request_details rd
-                ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC
+                ORDER BY CAST(
+                    CASE
+                        WHEN rd.request_number LIKE '%T%'
+                            THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                        ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                    END AS UNSIGNED
+                ) DESC, rd.request_date DESC, rd.request_number DESC
                 LIMIT ${limit} OFFSET ${offset}
             `;
             
@@ -1482,7 +1487,13 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                 SELECT rd.*
                 FROM request_details rd
                 WHERE rd.request_number IN (${requestNumbers})
-                ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC
+                ORDER BY CAST(
+                    CASE
+                        WHEN rd.request_number LIKE '%T%'
+                            THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                        ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                    END AS UNSIGNED
+                ) DESC, rd.request_date DESC, rd.request_number DESC
             `;
             
             const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery);
@@ -1544,6 +1555,12 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             params.push(`%${partNumber}%`);
         }
 
+        if (referenceStatus === 'uploaded') {
+            query += ` AND rd.reference_doc IS NOT NULL`;
+        } else if (referenceStatus === 'not_uploaded') {
+            query += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
+        }
+
         
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
@@ -1574,7 +1591,19 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             distinctQuery += ` AND rd.part_number LIKE ?`;
         }
 
-        distinctQuery += ` ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC LIMIT ${limit} OFFSET ${offset}`;
+        if (referenceStatus === 'uploaded') {
+            distinctQuery += ` AND rd.reference_doc IS NOT NULL`;
+        } else if (referenceStatus === 'not_uploaded') {
+            distinctQuery += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
+        }
+
+        distinctQuery += ` ORDER BY CAST(
+                CASE
+                    WHEN rd.request_number LIKE '%T%'
+                        THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                    ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                END AS UNSIGNED
+            ) DESC, rd.request_date DESC, rd.request_number DESC LIMIT ${limit} OFFSET ${offset}`;
         
         const [distinctResults] = await pool.execute<RowDataPacket[]>(distinctQuery, params);
         
@@ -1599,7 +1628,13 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             SELECT rd.*
             FROM request_details rd
             WHERE rd.request_number IN (${requestNumbers})
-            ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC
+            ORDER BY CAST(
+                CASE
+                    WHEN rd.request_number LIKE '%T%'
+                        THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
+                    ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
+                END AS UNSIGNED
+            ) DESC, rd.request_date DESC, rd.request_number DESC
         `;
         
         const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery);
@@ -1609,25 +1644,28 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         try {
             let countQuery = 'SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd WHERE 1=1';
             const countParams: (string | number)[] = [];
-
             if (universal) {
                 countQuery += ` AND (
                     rd.request_number LIKE ? OR
                     rd.item_name LIKE ? OR
                     rd.part_number LIKE ? OR
+                    rd.equipment_number LIKE ? OR
                     rd.nac_code LIKE ?
                 )`;
-                countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
+                countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
             }
-
             if (equipmentNumber) {
                 countQuery += ` AND rd.equipment_number LIKE ?`;
                 countParams.push(`%${equipmentNumber}%`);
             }
-
             if (partNumber) {
                 countQuery += ` AND rd.part_number LIKE ?`;
                 countParams.push(`%${partNumber}%`);
+            }
+            if (referenceStatus === 'uploaded') {
+                countQuery += ` AND rd.reference_doc IS NOT NULL`;
+            } else if (referenceStatus === 'not_uploaded') {
+                countQuery += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
             }
 
             const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, countParams);
@@ -1795,20 +1833,16 @@ export const checkDuplicateRequest = async (req: Request, res: Response): Promis
 
 export const uploadReferenceDocument = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
-    
     try {
         const userPermissions = req.permissions || [];
         const { requestNumber, imagePath } = req.body;
-        
-        
         const [existingDoc] = await connection.query<RowDataPacket[]>(
-            'SELECT reference_doc FROM request_details WHERE request_number = ? AND reference_doc IS NOT NULL LIMIT 1',
+            'SELECT reference_doc, request_date FROM request_details WHERE request_number = ? ORDER BY request_date DESC LIMIT 1',
             [requestNumber]
         );
-        
-        const isEdit = existingDoc.length > 0 && existingDoc[0].reference_doc;
-        
-        
+        const currentReferenceDoc = existingDoc.length > 0 ? existingDoc[0].reference_doc : null;
+        const currentRequestDate = existingDoc.length > 0 ? new Date(existingDoc[0].request_date) : null;
+        const isEdit = !!currentReferenceDoc;
         if (isEdit) {
             if (!userPermissions.includes('can_edit_reference_documents')) {
                 res.status(403).json({
@@ -1817,7 +1851,8 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
                 });
                 return;
             }
-        } else {
+        }
+        else {
             if (!userPermissions.includes('can_upload_reference_documents')) {
                 res.status(403).json({
                     error: 'Forbidden',
@@ -1826,8 +1861,6 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
                 return;
             }
         }
-
-        
         if (!requestNumber || !imagePath) {
             logEvents(`Failed to upload reference document - Missing required fields: requestNumber=${requestNumber}, imagePath=${imagePath}`, "requestLog.log");
             res.status(400).json({
@@ -1836,17 +1869,31 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             });
             return;
         }
-
+        if (currentRequestDate) {
+            const [pendingPrevious] = await connection.query<RowDataPacket[]>(
+                `SELECT DISTINCT rd.request_number 
+                 FROM request_details rd 
+                 WHERE rd.request_date < ? 
+                   AND (rd.reference_doc IS NULL OR rd.reference_doc = '') 
+                 ORDER BY rd.request_date DESC, CAST(SUBSTRING_INDEX(rd.request_number, 'RN', -1) AS UNSIGNED) DESC 
+                 LIMIT 1`,
+                [currentRequestDate]
+            );
+            if (pendingPrevious.length > 0) {
+                const previousRequestNumber = pendingPrevious[0].request_number;
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message: `Reference document for previous request ${previousRequestNumber} must be uploaded before uploading for ${requestNumber}.`
+                });
+                return;
+            }
+        }
         logEvents(`Starting reference document upload for request: ${requestNumber}`, "requestLog.log");
-
         await connection.beginTransaction();
-
-        
         const [existingRequests] = await connection.query<RowDataPacket[]>(
             'SELECT COUNT(*) as count FROM request_details WHERE request_number = ?',
             [requestNumber]
         );
-
         if (existingRequests[0].count === 0) {
             await connection.rollback();
             logEvents(`Failed to upload reference document - Request not found: ${requestNumber}`, "requestLog.log");
@@ -1856,10 +1903,7 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             });
             return;
         }
-
-        
-        
-        const updateQuery = isEdit 
+        const updateQuery = isEdit
             ? `UPDATE request_details 
                SET reference_doc = ?, 
                    updated_at = CURRENT_TIMESTAMP
@@ -1869,12 +1913,10 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
                    reference_document_uploaded_date = NOW(),
                    updated_at = CURRENT_TIMESTAMP
                WHERE request_number = ?`;
-        
         const [updateResult] = await connection.query(
             updateQuery,
             [imagePath, requestNumber]
         );
-
         if ((updateResult as any).affectedRows === 0) {
             await connection.rollback();
             logEvents(`Failed to upload reference document - No records updated for request: ${requestNumber}`, "requestLog.log");
@@ -1884,19 +1926,16 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             });
             return;
         }
-
         await connection.commit();
-
         logEvents(`Successfully uploaded reference document for request: ${requestNumber}. Updated ${(updateResult as any).affectedRows} records.`, "requestLog.log");
-        
         res.status(200).json({
             message: 'Reference document uploaded successfully',
             requestNumber: requestNumber,
             imagePath: imagePath,
             updatedRecords: (updateResult as any).affectedRows
         });
-
-    } catch (error) {
+    }
+    catch (error) {
         await connection.rollback();
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         logEvents(`Error uploading reference document: ${errorMessage}`, "requestLog.log");
@@ -1904,7 +1943,8 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
             error: 'Internal Server Error',
             message: 'An error occurred while uploading reference document'
         });
-    } finally {
+    }
+    finally {
         connection.release();
     }
 };

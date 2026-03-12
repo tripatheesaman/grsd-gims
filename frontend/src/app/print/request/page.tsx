@@ -23,8 +23,13 @@ export default function PrintRequestPage() {
         request: RequestSearchResult;
         imagePath: string;
     } | null>(null);
+    const [pendingUpload, setPendingUpload] = useState<{
+        request: RequestSearchResult;
+        file: File;
+        previewUrl: string;
+    } | null>(null);
     const [isUploading, setIsUploading] = useState(false);
-    const { results, isLoading, error, currentPage, totalCount, totalPages, handleSearch, handlePageChange, setResults, } = useRequestSearch();
+    const { results, isLoading, error, currentPage, totalCount, totalPages, searchParams, handleSearch, handlePageChange, setResults, } = useRequestSearch();
     const handlePreview = (request: RequestSearchResult) => {
         setPreviewRequest(request);
     };
@@ -49,7 +54,15 @@ export default function PrintRequestPage() {
             });
         }
     };
-    const handleUploadReferenceDoc = async (request: RequestSearchResult, file: File) => {
+    const handleUploadReferenceDoc = (request: RequestSearchResult, file: File) => {
+        const previewUrl = URL.createObjectURL(file);
+        setPendingUpload({ request, file, previewUrl });
+    };
+    const confirmUploadReferenceDoc = async () => {
+        if (!pendingUpload) {
+            return;
+        }
+        const { request, file, previewUrl } = pendingUpload;
         setIsUploading(true);
         try {
             const formData = new FormData();
@@ -91,6 +104,8 @@ export default function PrintRequestPage() {
         }
         finally {
             setIsUploading(false);
+            URL.revokeObjectURL(previewUrl);
+            setPendingUpload(null);
         }
     };
     const handlePreviewReferenceDoc = (request: RequestSearchResult) => {
@@ -142,7 +157,7 @@ export default function PrintRequestPage() {
       </div>
       
       <div className="mb-8 bg-white rounded-lg shadow-xl border-[#002a6e]/10 p-6">
-        <PrintRequestSearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')}/>
+        <PrintRequestSearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')} referenceStatus={searchParams.referenceStatus} onReferenceStatusChange={handleSearch('referenceStatus')}/>
       </div>
 
       <div className="bg-white rounded-lg shadow-xl border-[#002a6e]/10 overflow-hidden">
@@ -171,6 +186,44 @@ export default function PrintRequestPage() {
             }}/>)) : (<div className="text-center text-gray-500 p-8">
                 No reference document available
               </div>)}
+          </div>
+        </ModalContent>
+      </Modal>
+
+      <Modal open={!!pendingUpload} onOpenChange={(open) => {
+            if (!open && pendingUpload) {
+                URL.revokeObjectURL(pendingUpload.previewUrl);
+                setPendingUpload(null);
+            }
+        }}>
+        <ModalContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <ModalHeader>
+            <ModalTitle>Confirm Reference Document Upload</ModalTitle>
+          </ModalHeader>
+          <div className="p-4 space-y-4">
+            <p className="text-sm text-gray-700">
+              Request {pendingUpload?.request.requestNumber}
+            </p>
+            <div className="flex justify-center items-center">
+              {pendingUpload && pendingUpload.file.type === 'application/pdf' ? (
+                <iframe src={pendingUpload.previewUrl} className="w-full h-[60vh] border rounded-lg" />
+              ) : pendingUpload ? (
+                <Image src={pendingUpload.previewUrl} alt="Reference Preview" width={800} height={600} className="max-w-full max-h-[60vh] object-contain rounded-lg" />
+              ) : null}
+            </div>
+            <div className="flex justify-end space-x-2 pt-2">
+              <button type="button" className="px-4 py-2 text-sm border rounded-md" onClick={() => {
+                if (pendingUpload) {
+                    URL.revokeObjectURL(pendingUpload.previewUrl);
+                }
+                setPendingUpload(null);
+            }}>
+                Cancel
+              </button>
+              <button type="button" className="px-4 py-2 text-sm bg-[#003594] text-white rounded-md disabled:opacity-50" disabled={isUploading} onClick={confirmUploadReferenceDoc}>
+                {isUploading ? 'Uploading...' : 'Confirm Upload'}
+              </button>
+            </div>
           </div>
         </ModalContent>
       </Modal>

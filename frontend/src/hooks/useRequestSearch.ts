@@ -7,6 +7,7 @@ interface RequestSearchParams {
     universal: string;
     equipmentNumber: string;
     partNumber: string;
+    referenceStatus?: string;
 }
 export function useRequestSearch() {
     const [results, setResults] = useState<RequestSearchResult[]>([]);
@@ -20,6 +21,7 @@ export function useRequestSearch() {
         universal: '',
         equipmentNumber: '',
         partNumber: '',
+        referenceStatus: undefined,
     });
     const debouncedUniversal = useDebounce(searchParams.universal, 500);
     const debouncedEquipmentNumber = useDebounce(searchParams.equipmentNumber, 500);
@@ -32,7 +34,8 @@ export function useRequestSearch() {
         };
         if (currentParams.universal === '' &&
             currentParams.equipmentNumber === '' &&
-            currentParams.partNumber === '') {
+            currentParams.partNumber === '' &&
+            !searchParams.referenceStatus) {
             setResults([]);
             setTotalCount(0);
             setTotalPages(0);
@@ -47,6 +50,7 @@ export function useRequestSearch() {
                 universal?: string;
                 equipmentNumber?: string;
                 partNumber?: string;
+                referenceStatus?: string;
             } = {};
             if (currentParams.universal) {
                 apiParams.universal = currentParams.universal;
@@ -56,6 +60,9 @@ export function useRequestSearch() {
             }
             if (currentParams.partNumber) {
                 apiParams.partNumber = currentParams.partNumber;
+            }
+            if (searchParams.referenceStatus) {
+                apiParams.referenceStatus = searchParams.referenceStatus;
             }
             const response = await API.get('/api/request/search', {
                 params: { ...apiParams, page, pageSize }
@@ -85,7 +92,7 @@ export function useRequestSearch() {
         finally {
             setIsLoading(false);
         }
-    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, pageSize]);
+    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, searchParams.referenceStatus, pageSize]);
     const fetchAllRequests = useCallback(async (page: number = 1) => {
         setIsLoading(true);
         setError(null);
@@ -121,13 +128,13 @@ export function useRequestSearch() {
         }
     }, [pageSize]);
     useEffect(() => {
-        if (debouncedUniversal || debouncedEquipmentNumber || debouncedPartNumber) {
+        if (debouncedUniversal || debouncedEquipmentNumber || debouncedPartNumber || searchParams.referenceStatus) {
             fetchSearchResults(1);
         }
         else {
             fetchAllRequests(1);
         }
-    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, fetchSearchResults, fetchAllRequests]);
+    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, searchParams.referenceStatus, fetchSearchResults, fetchAllRequests]);
     useEffect(() => {
         fetchAllRequests(1);
     }, [fetchAllRequests]);
@@ -136,13 +143,13 @@ export function useRequestSearch() {
     }, []);
     const handlePageChange = useCallback((page: number) => {
         setCurrentPage(page);
-        if (debouncedUniversal || debouncedEquipmentNumber || debouncedPartNumber) {
+        if (debouncedUniversal || debouncedEquipmentNumber || debouncedPartNumber || searchParams.referenceStatus) {
             fetchSearchResults(page);
         }
         else {
             fetchAllRequests(page);
         }
-    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, fetchSearchResults, fetchAllRequests]);
+    }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, searchParams.referenceStatus, fetchSearchResults, fetchAllRequests]);
     const handlePageSizeChange = useCallback((newPageSize: number) => {
         setPageSize(newPageSize);
         setCurrentPage(1);
@@ -161,6 +168,7 @@ export function useRequestSearch() {
         pageSize,
         totalCount,
         totalPages,
+        searchParams,
         handleSearch,
         handlePageChange,
         handlePageSizeChange,
