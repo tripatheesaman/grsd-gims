@@ -1,5 +1,5 @@
 import express from 'express';
-import { createRequest, getPendingRequests, getRequestItems, updateRequest, approveRequest, rejectRequest, forceCloseRequest, getRequestById, searchRequests, getLastRequestInfo, uploadReferenceDocument, checkDuplicateRequest, getNextRequestNumber, deleteReferenceDocument } from '../controllers/requestController';
+import { createRequest, getPendingRequests, getRequestItems, updateRequest, approveRequest, rejectRequest, forceCloseRequest, getRequestById, searchRequests, getLastRequestInfo, uploadReferenceDocument, checkDuplicateRequest, getNextRequestNumber, deleteReferenceDocument, markRequestAsSkippable } from '../controllers/requestController';
 import verifyJWT from '../middlewares/verifyJWT';
 import { printRequest } from '../controllers/printController';
 const router = express.Router();
@@ -17,5 +17,6 @@ router.put('/:requestNumber/force-close', verifyJWT, forceCloseRequest);
 router.get('/:id', verifyJWT, getRequestById);
 router.get('/:requestNumber/print', printRequest);
 router.post('/upload-ref-doc', verifyJWT, uploadReferenceDocument);
+router.put('/:requestNumber/mark-skippable', verifyJWT, markRequestAsSkippable);
 router.delete('/:requestNumber/reference-doc', verifyJWT, deleteReferenceDocument);
 export default router;

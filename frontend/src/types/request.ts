@@ -40,6 +40,8 @@ export interface RequestSearchResult {
     approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
     items: RequestItem[];
     referenceDoc?: string | null;
+    referenceUploadSkipUntil?: string | null;
+    isReferenceUploadSkipped?: boolean;
 }
 export interface RequestSearchParams {
     universal: string;

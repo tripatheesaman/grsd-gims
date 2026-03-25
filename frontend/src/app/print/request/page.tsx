@@ -17,6 +17,7 @@ export default function PrintRequestPage() {
     const canUploadRefDoc = permissions?.includes('can_upload_reference_documents');
     const canEditRefDoc = permissions?.includes('can_edit_reference_documents');
     const canDeleteRefDoc = permissions?.includes('can_delete_reference_documents');
+    const canBypassFileUploads = permissions?.includes('can_bypass_file_uploads');
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const [previewRequest, setPreviewRequest] = useState<RequestSearchResult | null>(null);
     const [referenceDocPreview, setReferenceDocPreview] = useState<{
@@ -57,6 +58,32 @@ export default function PrintRequestPage() {
     const handleUploadReferenceDoc = (request: RequestSearchResult, file: File) => {
         const previewUrl = URL.createObjectURL(file);
         setPendingUpload({ request, file, previewUrl });
+    };
+    const handleMarkSkippable = async (request: RequestSearchResult, skipHours: number) => {
+        try {
+            const response = await API.put(`/api/request/${encodeURIComponent(request.requestNumber)}/mark-skippable`, {
+                skipHours,
+            });
+            if (response.status === 200) {
+                const skipUntil = response.data?.skipUntil || null;
+                setResults(prevResults => prevResults?.map(result => result.requestNumber === request.requestNumber
+                    ? {
+                        ...result,
+                        referenceUploadSkipUntil: skipUntil,
+                        isReferenceUploadSkipped: !!skipUntil && new Date(skipUntil) > new Date(),
+                    }
+                    : result) ?? null);
+                showSuccessToast({
+                    title: 'Success',
+                    message: response.data?.message || 'Request marked as skippable.',
+                });
+            }
+        } catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to mark request as skippable.'),
+            });
+        }
     };
     const confirmUploadReferenceDoc = async () => {
         if (!pendingUpload) {
@@ -161,7 +188,7 @@ export default function PrintRequestPage() {
       </div>
 
       <div className="bg-white rounded-lg shadow-xl border-[#002a6e]/10 overflow-hidden">
-      <PrintRequestResults results={results} isLoading={isLoading} error={error} onPreview={handlePreview} onPrint={handlePrint} onUploadReferenceDoc={handleUploadReferenceDoc} onPreviewReferenceDoc={handlePreviewReferenceDoc} isUploading={isUploading} canUploadRefDoc={canUploadRefDoc} canEditRefDoc={canEditRefDoc} canDeleteRefDoc={canDeleteRefDoc} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={handlePageChange}/>
+      <PrintRequestResults results={results} isLoading={isLoading} error={error} onPreview={handlePreview} onPrint={handlePrint} onUploadReferenceDoc={handleUploadReferenceDoc} onPreviewReferenceDoc={handlePreviewReferenceDoc} isUploading={isUploading} canUploadRefDoc={canUploadRefDoc} canEditRefDoc={canEditRefDoc} canDeleteRefDoc={canDeleteRefDoc} canBypassFileUploads={canBypassFileUploads} onMarkSkippable={handleMarkSkippable} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={handlePageChange}/>
       </div>
 
       <PrintRequestPreviewModal request={previewRequest} isOpen={!!previewRequest} onClose={() => setPreviewRequest(null)}/>
