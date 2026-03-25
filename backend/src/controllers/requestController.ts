@@ -67,6 +67,10 @@ interface RejectRequestDTO {
     rejectionReason: string;
 }
 
+interface MarkRequestSkippableDTO {
+    skipHours: number;
+}
+
 interface RequestWithItems extends RowDataPacket {
     id: number;
     request_number: string;
@@ -98,7 +102,34 @@ interface SearchRequestResult extends RowDataPacket {
     equipment_number: string;
     requested_quantity: number;
     approval_status: string;
+    reference_doc: string | null;
+    reference_upload_skip_until?: Date | null;
 }
+
+const MAX_REFERENCE_SKIP_HOURS = 4;
+
+const ensureRequestReferenceSkipColumns = async () => {
+    const [columnRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'request_details'
+           AND COLUMN_NAME IN ('reference_upload_skip_until', 'reference_upload_skip_marked_by')`
+    );
+    const columns = new Set(columnRows.map((row) => row.COLUMN_NAME as string));
+    if (!columns.has('reference_upload_skip_until')) {
+        await pool.query(
+            `ALTER TABLE request_details
+             ADD COLUMN reference_upload_skip_until DATETIME NULL`
+        );
+    }
+    if (!columns.has('reference_upload_skip_marked_by')) {
+        await pool.query(
+            `ALTER TABLE request_details
+             ADD COLUMN reference_upload_skip_marked_by VARCHAR(255) NULL`
+        );
+    }
+};
 
 const getStockDetails = async (nacCode: string): Promise<StockDetail | null> => {
     try {
@@ -1506,6 +1537,8 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                         requestedBy: result.requested_by,
                         approvalStatus: result.approval_status,
                         referenceDoc: result.reference_doc,
+                        referenceUploadSkipUntil: result.reference_upload_skip_until,
+                        isReferenceUploadSkipped: !!result.reference_upload_skip_until && new Date(result.reference_upload_skip_until) > new Date(),
                         items: []
                     };
                 }
@@ -1683,6 +1716,8 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                     requestedBy: result.requested_by,
                     approvalStatus: result.approval_status,
                     referenceDoc: result.reference_doc,
+                    referenceUploadSkipUntil: result.reference_upload_skip_until,
+                    isReferenceUploadSkipped: !!result.reference_upload_skip_until && new Date(result.reference_upload_skip_until) > new Date(),
                     items: []
                 };
             }
@@ -1834,6 +1869,7 @@ export const checkDuplicateRequest = async (req: Request, res: Response): Promis
 export const uploadReferenceDocument = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
+        await ensureRequestReferenceSkipColumns();
         const userPermissions = req.permissions || [];
         const { requestNumber, imagePath } = req.body;
         const [existingDoc] = await connection.query<RowDataPacket[]>(
@@ -1875,7 +1911,9 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
                  FROM request_details rd 
                  WHERE rd.request_date < ? 
                    AND rd.request_number != ?
+                   AND rd.approval_status != 'REJECTED'
                    AND (rd.reference_doc IS NULL OR rd.reference_doc = '') 
+                   AND (rd.reference_upload_skip_until IS NULL OR rd.reference_upload_skip_until < NOW())
                  GROUP BY rd.request_number
                  ORDER BY last_request_date DESC,
                    CAST(
@@ -1916,11 +1954,15 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         const updateQuery = isEdit
             ? `UPDATE request_details 
                SET reference_doc = ?, 
+                   reference_upload_skip_until = NULL,
+                   reference_upload_skip_marked_by = NULL,
                    updated_at = CURRENT_TIMESTAMP
                WHERE request_number = ?`
             : `UPDATE request_details 
                SET reference_doc = ?, 
                    reference_document_uploaded_date = NOW(),
+                   reference_upload_skip_until = NULL,
+                   reference_upload_skip_marked_by = NULL,
                    updated_at = CURRENT_TIMESTAMP
                WHERE request_number = ?`;
         const [updateResult] = await connection.query(
@@ -2015,6 +2057,112 @@ export const deleteReferenceDocument = async (req: Request, res: Response): Prom
         res.status(500).json({
             error: 'Internal Server Error',
             message: 'An error occurred while deleting reference document'
+        });
+    } finally {
+        connection.release();
+    }
+};
+
+export const markRequestAsSkippable = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        await ensureRequestReferenceSkipColumns();
+        const userPermissions = req.permissions || [];
+        if (!userPermissions.includes('can_bypass_file_uploads')) {
+            res.status(403).json({
+                error: 'Forbidden',
+                message: 'You do not have permission to bypass file uploads'
+            });
+            return;
+        }
+
+        const { requestNumber } = req.params;
+        const { skipHours } = req.body as MarkRequestSkippableDTO;
+
+        if (!requestNumber) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Request number is required'
+            });
+            return;
+        }
+
+        const parsedHours = Number(skipHours);
+        if (!Number.isFinite(parsedHours) || parsedHours <= 0 || parsedHours > MAX_REFERENCE_SKIP_HOURS) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: `Skip duration must be between 1 and ${MAX_REFERENCE_SKIP_HOURS} hours`
+            });
+            return;
+        }
+
+        await connection.beginTransaction();
+
+        const [requestRows] = await connection.query<RowDataPacket[]>(
+            `SELECT request_number, approval_status, reference_doc
+             FROM request_details
+             WHERE request_number = ?
+             LIMIT 1`,
+            [requestNumber]
+        );
+        if (requestRows.length === 0) {
+            await connection.rollback();
+            res.status(404).json({
+                error: 'Not Found',
+                message: 'Request not found'
+            });
+            return;
+        }
+
+        const requestRow = requestRows[0];
+        if (requestRow.approval_status === 'REJECTED') {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Rejected requests do not require reference document upload'
+            });
+            return;
+        }
+        if (requestRow.reference_doc) {
+            await connection.rollback();
+            res.status(409).json({
+                error: 'Conflict',
+                message: 'Reference document is already uploaded for this request'
+            });
+            return;
+        }
+
+        await connection.query(
+            `UPDATE request_details
+             SET reference_upload_skip_until = DATE_ADD(NOW(), INTERVAL ? HOUR),
+                 reference_upload_skip_marked_by = ?,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE request_number = ?`,
+            [parsedHours, req.user || null, requestNumber]
+        );
+
+        await connection.commit();
+
+        const [resultRows] = await connection.query<RowDataPacket[]>(
+            `SELECT reference_upload_skip_until
+             FROM request_details
+             WHERE request_number = ?
+             LIMIT 1`,
+            [requestNumber]
+        );
+
+        res.status(200).json({
+            message: `Request marked as skippable for ${parsedHours} hour(s)`,
+            requestNumber,
+            skipUntil: resultRows[0]?.reference_upload_skip_until || null
+        });
+    } catch (error) {
+        await connection.rollback();
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error marking request as skippable: ${errorMessage}`, 'requestLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: 'An error occurred while marking request as skippable'
         });
     } finally {
         connection.release();

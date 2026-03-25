@@ -14,13 +14,15 @@ interface PrintRequestResultsTableProps {
     canUploadRefDoc?: boolean;
     canEditRefDoc?: boolean;
     canDeleteRefDoc?: boolean;
+    canBypassFileUploads?: boolean;
+    onMarkSkippable?: (request: RequestSearchResult, skipHours: number) => void;
     className?: string;
     currentPage?: number;
     totalCount?: number;
     totalPages?: number;
     onPageChange?: (page: number) => void;
 }
-export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onUploadReferenceDoc, onPreviewReferenceDoc, isUploading, canUploadRefDoc = false, canEditRefDoc = false, canDeleteRefDoc = false, className, currentPage = 1, totalCount = 0, totalPages = 0, onPageChange, }: PrintRequestResultsTableProps) => {
+export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onUploadReferenceDoc, onPreviewReferenceDoc, isUploading, canUploadRefDoc = false, canEditRefDoc = false, canDeleteRefDoc = false, canBypassFileUploads = false, onMarkSkippable, className, currentPage = 1, totalCount = 0, totalPages = 0, onPageChange, }: PrintRequestResultsTableProps) => {
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
     const safeResults = Array.isArray(results) ? results : [];
     const handlePageChange = (newPage: number) => {
@@ -46,6 +48,21 @@ export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onU
             onUploadReferenceDoc(request, file);
         }
     };
+    const handleMarkSkippable = (request: RequestSearchResult) => {
+        if (!onMarkSkippable) {
+            return;
+        }
+        const rawValue = window.prompt('Skip upload for how many hours? (1-4)', '1');
+        if (rawValue === null) {
+            return;
+        }
+        const skipHours = Number(rawValue);
+        if (!Number.isFinite(skipHours) || skipHours < 1 || skipHours > 4) {
+            window.alert('Please enter a valid number between 1 and 4.');
+            return;
+        }
+        onMarkSkippable(request, skipHours);
+    };
     if (safeResults.length === 0) {
         return (<div className="text-center py-8 text-gray-500">
         No results found
@@ -64,7 +81,9 @@ export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onU
             </tr>
           </thead>
           <tbody>
-            {safeResults.map((request) => (<React.Fragment key={request.requestNumber}>
+            {safeResults.map((request) => {
+                const isSkipActive = !!request.referenceUploadSkipUntil && new Date(request.referenceUploadSkipUntil) > new Date();
+                return (<React.Fragment key={request.requestNumber}>
                 <tr className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => toggleRow(request.requestNumber)}>
                   <td className="px-4 py-3 font-medium flex items-center">
                     {expandedRows.has(request.requestNumber) ? (<ChevronUp className="h-4 w-4 mr-2"/>) : (<ChevronDown className="h-4 w-4 mr-2"/>)}
@@ -138,27 +157,38 @@ export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onU
                         }}>
                                   Delete
                                 </Button>)}
-                            </div>) : (canUploadRefDoc && (<div className="relative">
-                                <input type="file" accept="image/*,.pdf" onChange={(e) => {
+                            </div>) : ((canUploadRefDoc || canBypassFileUploads) && (<div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                                {canUploadRefDoc && <div className="relative">
+                                  <input type="file" accept="image/*,.pdf" onChange={(e) => {
                         e.stopPropagation();
                         handleFileUpload(request, e);
                     }} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" id={`upload-${request.requestNumber}`} disabled={!!isUploading}/>
-                                <Button variant="outline" size="sm" className="border-blue-500 text-blue-600 hover:bg-blue-50" disabled={!!isUploading}>
-                                  {isUploading ? (<>
-                                      Uploading...
-                                      <Loader2 className="ml-2 h-4 w-4 animate-spin"/>
-                                    </>) : (<>
-                                      Upload Ref Doc
-                                    <Upload className="h-4 w-4 ml-2"/>
-                                  </>)}
-                              </Button>
-                            </div>))}
+                                  <Button variant="outline" size="sm" className="border-blue-500 text-blue-600 hover:bg-blue-50" disabled={!!isUploading}>
+                                    {isUploading ? (<>
+                                        Uploading...
+                                        <Loader2 className="ml-2 h-4 w-4 animate-spin"/>
+                                      </>) : (<>
+                                        Upload Ref Doc
+                                      <Upload className="h-4 w-4 ml-2"/>
+                                    </>)}
+                                  </Button>
+                                </div>}
+                                {canBypassFileUploads && onMarkSkippable && !isSkipActive && (<Button variant="outline" size="sm" className="border-orange-500 text-orange-600 hover:bg-orange-50" disabled={!!isUploading} onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkSkippable(request);
+                    }}>
+                                    Skip (1-4h)
+                                  </Button>)}
+                              </div>))}
                         </>)}
                     </div>
                   </td>
                 </tr>
                 {expandedRows.has(request.requestNumber) && (<tr className="bg-gray-50">
                     <td colSpan={5} className="px-4 py-3">
+                      {isSkipActive && request.referenceUploadSkipUntil ? (<div className="mb-3 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-700">
+                          Reference upload is currently skipped until {new Date(request.referenceUploadSkipUntil).toLocaleString()}.
+                        </div>) : null}
                       <table className="w-full">
                         <thead>
                           <tr className="text-xs uppercase text-gray-500">
@@ -181,7 +211,8 @@ export const PrintRequestResultsTable = ({ results = [], onPreview, onPrint, onU
                       </table>
                     </td>
                   </tr>)}
-              </React.Fragment>))}
+              </React.Fragment>);
+            })}
           </tbody>
         </table>
       </div>

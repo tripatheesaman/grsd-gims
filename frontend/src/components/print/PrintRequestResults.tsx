@@ -13,12 +13,14 @@ export interface PrintRequestResultsProps {
     canUploadRefDoc?: boolean;
     canEditRefDoc?: boolean;
     canDeleteRefDoc?: boolean;
+    canBypassFileUploads?: boolean;
+    onMarkSkippable?: (request: RequestSearchResult, skipHours: number) => void;
     currentPage?: number;
     totalCount?: number;
     totalPages?: number;
     onPageChange?: (page: number) => void;
 }
-export function PrintRequestResults({ results, isLoading, error, onPreview, onPrint, onUploadReferenceDoc, onPreviewReferenceDoc, isUploading, canUploadRefDoc = false, canEditRefDoc = false, canDeleteRefDoc = false, currentPage = 1, totalCount = 0, totalPages = 0, onPageChange, }: PrintRequestResultsProps) {
+export function PrintRequestResults({ results, isLoading, error, onPreview, onPrint, onUploadReferenceDoc, onPreviewReferenceDoc, isUploading, canUploadRefDoc = false, canEditRefDoc = false, canDeleteRefDoc = false, canBypassFileUploads = false, onMarkSkippable, currentPage = 1, totalCount = 0, totalPages = 0, onPageChange, }: PrintRequestResultsProps) {
     if (error) {
         return (<div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
         {error}
@@ -42,7 +44,7 @@ export function PrintRequestResults({ results, isLoading, error, onPreview, onPr
       </div>);
     }
     if (results && results.length > 0) {
-        return (<PrintRequestResultsTable results={results} onPreview={onPreview} onPrint={onPrint} onUploadReferenceDoc={onUploadReferenceDoc} onPreviewReferenceDoc={onPreviewReferenceDoc} isUploading={isUploading} canUploadRefDoc={canUploadRefDoc} canEditRefDoc={canEditRefDoc} canDeleteRefDoc={canDeleteRefDoc} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={onPageChange}/>);
+        return (<PrintRequestResultsTable results={results} onPreview={onPreview} onPrint={onPrint} onUploadReferenceDoc={onUploadReferenceDoc} onPreviewReferenceDoc={onPreviewReferenceDoc} isUploading={isUploading} canUploadRefDoc={canUploadRefDoc} canEditRefDoc={canEditRefDoc} canDeleteRefDoc={canDeleteRefDoc} canBypassFileUploads={canBypassFileUploads} onMarkSkippable={onMarkSkippable} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={onPageChange}/>);
     }
     return null;
 }

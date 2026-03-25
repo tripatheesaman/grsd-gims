@@ -1306,6 +1306,7 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
                  FROM rrp_details 
                  WHERE date < ? 
                    AND rrp_number != ?
+                   AND approval_status != 'REJECTED'
                    AND reference_doc IS NULL 
                    AND rrp_number LIKE ?
                    AND rrp_number != 'Code Transfer' 
