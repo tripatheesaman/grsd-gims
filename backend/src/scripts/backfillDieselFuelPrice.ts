@@ -29,12 +29,9 @@ async function main() {
   try {
     await connection.beginTransaction();
 
-    const [counts] = await connection.query<
-      Array<{
-        total: number;
-        mismatched: number;
-      }>
-    >(
+    // Avoid strict generic typing here: mysql2 typings can reject the
+    // custom aggregate row shape during `tsc`.
+    const [counts] = await (connection.query as any)(
       `SELECT
          COUNT(*) as total,
          SUM(
@@ -57,16 +54,7 @@ async function main() {
     console.log(`[Diesel backfill] Rows with diesel linkage: ${total}`);
     console.log(`[Diesel backfill] Rows detected mismatched: ${mismatched}`);
 
-    const [sample] = await connection.query<
-      Array<{
-        fuel_record_id: number;
-        stored_price: number | null;
-        issue_quantity: number | null;
-        issue_cost: number | null;
-        derived_price: number;
-        issue_id: number;
-      }>
-    >(
+    const [sample] = await (connection.query as any)(
       `SELECT
          fr.id as fuel_record_id,
          fr.fuel_price as stored_price,
