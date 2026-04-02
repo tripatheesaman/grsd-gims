@@ -18,7 +18,9 @@ export default function WeeklyDieselReportPage() {
     const [startDate, setStartDate] = useState<Date>(new Date());
     const [endDate, setEndDate] = useState<Date>(new Date());
     const [isLoading, setIsLoading] = useState(false);
+    const [isFixingDieselPrices, setIsFixingDieselPrices] = useState(false);
     const [showFlightDialog, setShowFlightDialog] = useState(false);
+    const [showFixDieselDialog, setShowFixDieselDialog] = useState(false);
     const [flightCount, setFlightCount] = useState<number>(0);
     const [pendingReportMode, setPendingReportMode] = useState<'plain' | 'charts' | null>(null);
     const { showErrorToast, showSuccessToast } = useCustomToast();
@@ -209,6 +211,31 @@ export default function WeeklyDieselReportPage() {
         }
         setPendingReportMode(null);
     };
+
+    const handleFixPastDieselFuelPrices = async () => {
+        setIsFixingDieselPrices(true);
+        try {
+            const response = await API.post('/api/fuel/backfill/diesel-fuel-prices', {
+                dryRun: false,
+                confirm: true,
+            });
+
+            showSuccessToast({
+                title: 'Success',
+                message: `Diesel unit prices fixed. Updated ${response.data?.updatedRows ?? 0} records.`,
+            });
+            setShowFixDieselDialog(false);
+        }
+        catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to fix diesel fuel prices'),
+            });
+        }
+        finally {
+            setIsFixingDieselPrices(false);
+        }
+    };
     return (<div className="container mx-auto py-10">
       <Card className="shadow-lg rounded-xl border border-gray-200 bg-white max-w-2xl mx-auto">
         <CardHeader>
@@ -246,6 +273,18 @@ export default function WeeklyDieselReportPage() {
                 </Popover>
               </div>
             </div>
+            <div className="flex items-center justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowFixDieselDialog(true)}
+                disabled={isLoading || isFixingDieselPrices}
+                className="w-full md:w-auto border-[#d2293b] text-[#d2293b] hover:bg-[#d2293b] hover:text-white transition-colors"
+              >
+                {isFixingDieselPrices ? <Spinner size="sm" className="mr-2" /> : null}
+                Fix Past Diesel Fuel Prices
+              </Button>
+            </div>
             <div className="flex flex-col md:flex-row gap-3">
               <Button onClick={handleGenerateReport} disabled={isLoading} className="w-full md:w-1/2 bg-[#003594] text-white font-semibold hover:bg-[#d2293b] transition-colors">
                 {isLoading ? <Spinner size="sm" variant="white" className="mr-2"/> : null}
@@ -276,6 +315,41 @@ export default function WeeklyDieselReportPage() {
             </Button>
           </DialogFooter>
           {isLoading && <ContentSpinner />}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={showFixDieselDialog} onOpenChange={setShowFixDieselDialog}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-[#003594]">Fix Past Diesel Fuel Prices</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-2">
+            <p className="text-sm text-gray-700">
+              This updates <code className="px-1 py-0.5 bg-gray-100 rounded">fuel_records.fuel_price</code> for diesel only,
+              using the authoritative unit price from <code className="px-1 py-0.5 bg-gray-100 rounded">issue_details</code>:
+              <code className="px-1 py-0.5 bg-gray-100 rounded">issue_cost / issue_quantity</code>.
+            </p>
+            <p className="text-sm text-gray-600">
+              Leave petrol untouched.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowFixDieselDialog(false)}
+              disabled={isFixingDieselPrices}
+              className="border-[#d2293b] text-[#d2293b] hover:bg-[#003594] hover:text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleFixPastDieselFuelPrices}
+              disabled={isFixingDieselPrices}
+              className="bg-[#d2293b] hover:bg-[#d2293b]/90 text-white transition-colors"
+            >
+              {isFixingDieselPrices ? <Spinner size="sm" variant="white" className="mr-2" /> : null}
+              Fix Now
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>);

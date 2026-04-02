@@ -528,15 +528,32 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
     }
 
     try {
-      const [priceResult] = await connection.query<RowDataPacket[]>(
-        `SELECT fuel_price 
-         FROM fuel_records 
-         WHERE fuel_type = ?
-         ORDER BY created_datetime DESC 
-         LIMIT 1`,
-        [type]
-      );
-      latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
+      const fuelTypeLower = type.toLowerCase();
+      if (fuelTypeLower === 'diesel') {
+        // Diesel unit prices must come from the authoritative ledger:
+        // issue_cost / issue_quantity (fuel_records.fuel_price may be stale/wrong).
+        const [priceResult] = await connection.query<RowDataPacket[]>(
+          `SELECT
+             COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0) as fuel_price
+           FROM fuel_records fr
+           INNER JOIN issue_details i ON fr.issue_fk = i.id
+           WHERE LOWER(TRIM(fr.fuel_type)) = 'diesel'
+           ORDER BY fr.created_datetime DESC
+           LIMIT 1`
+        );
+        latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
+      }
+      else {
+        const [priceResult] = await connection.query<RowDataPacket[]>(
+          `SELECT fuel_price 
+           FROM fuel_records 
+           WHERE fuel_type = ?
+           ORDER BY created_datetime DESC 
+           LIMIT 1`,
+          [type]
+        );
+        latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
+      }
     } catch (priceError) {
       logEvents(`Warning: Failed to fetch fuel price: ${priceError instanceof Error ? priceError.message : 'Unknown error'}`, "fuelLog.log");
     }
@@ -641,3 +658,99 @@ export const getLastReceive = async (req: Request, res: Response): Promise<void>
     connection.release();
   }
 }; 
+
+export const backfillDieselFuelPrices = async (req: Request, res: Response): Promise<void> => {
+  const connection = await pool.getConnection();
+  let startedTransaction = false;
+  try {
+    const nacDiesel = 'GT 07986';
+    const tolerance = 0.00001;
+
+    const dryRun = req.body?.dryRun !== undefined ? Boolean(req.body.dryRun) : true;
+    const confirm = Boolean(req.body?.confirm);
+
+    // Intentionally avoid a strict generic here because the MySQL typings
+    // reject the projected aggregate row shape at compile-time.
+    const [counts] = await (connection.query as any)(
+      `SELECT
+         COUNT(*) as total_diesel_linked_rows,
+         SUM(
+           CASE
+             WHEN fr.fuel_price IS NULL THEN 1
+             WHEN ABS(fr.fuel_price - COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) > ?
+               THEN 1
+             ELSE 0
+           END
+         ) as mismatched_rows
+       FROM fuel_records fr
+       INNER JOIN issue_details i ON fr.issue_fk = i.id
+       WHERE TRIM(i.nac_code) = ?`,
+      [tolerance, nacDiesel]
+    );
+
+    const total_diesel_linked_rows = Number((counts?.[0] as any)?.total_diesel_linked_rows) || 0;
+    const mismatched_rows = Number((counts?.[0] as any)?.mismatched_rows) || 0;
+
+    if (dryRun) {
+      res.status(200).json({
+        dryRun: true,
+        totalDieselLinkedFuelRecords: total_diesel_linked_rows,
+        mismatchedDieselFuelPriceRows: mismatched_rows,
+      });
+      return;
+    }
+
+    if (!confirm) {
+      res.status(400).json({
+        dryRun: false,
+        message: 'Refusing to write without `confirm: true`',
+        totalDieselLinkedFuelRecords: total_diesel_linked_rows,
+        mismatchedDieselFuelPriceRows: mismatched_rows,
+      });
+      return;
+    }
+
+    await connection.beginTransaction();
+    startedTransaction = true;
+
+    const [updateResult] = await connection.query<any>(
+      `UPDATE fuel_records fr
+       INNER JOIN issue_details i ON fr.issue_fk = i.id
+       SET fr.fuel_price = COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
+       WHERE TRIM(i.nac_code) = ?
+         AND (fr.fuel_price IS NULL
+              OR ABS(fr.fuel_price - COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) > ?)`,
+      [nacDiesel, tolerance]
+    );
+
+    await connection.commit();
+
+    logEvents(
+      `Backfilled diesel fuel prices: updatedRows=${updateResult?.affectedRows ?? 'unknown'} mismatchedRows=${mismatched_rows}`,
+      'fuelLog.log'
+    );
+
+    res.status(200).json({
+      dryRun: false,
+      totalDieselLinkedFuelRecords: total_diesel_linked_rows,
+      mismatchedDieselFuelPriceRows: mismatched_rows,
+      updatedRows: updateResult?.affectedRows ?? 0,
+    });
+  } catch (error) {
+    if (startedTransaction) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Ignore rollback errors; we still want to return the original failure response.
+      }
+    }
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    logEvents(`Failed to backfill diesel fuel prices: ${errorMessage}`, 'fuelLog.log');
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: errorMessage,
+    });
+  } finally {
+    connection.release();
+  }
+};

@@ -130,7 +130,10 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
         i.issued_by,
         i.approval_status,
         f.fuel_type,
-        f.fuel_price,
+        CASE 
+          WHEN TRIM(i.nac_code) = 'GT 07986' THEN COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
+          ELSE f.fuel_price
+        END as fuel_price,
         f.kilometers,
         f.is_kilometer_reset,
         f.week_number,
@@ -189,7 +192,10 @@ export const getFuelIssueRecordById = async (req: Request, res: Response): Promi
         i.issued_by,
         i.approval_status,
         f.fuel_type,
-        f.fuel_price,
+        CASE 
+          WHEN TRIM(i.nac_code) = 'GT 07986' THEN COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
+          ELSE f.fuel_price
+        END as fuel_price,
         f.kilometers,
         f.is_kilometer_reset,
         f.week_number,
