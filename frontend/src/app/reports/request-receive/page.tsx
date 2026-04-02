@@ -17,6 +17,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/utils/utils';
 import { format } from 'date-fns';
 import { resolveImageUrl } from '@/lib/urls';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface RequestReceiveData {
     requestId: number;
     requestNumber: string;
@@ -391,7 +392,7 @@ export default function RequestReceiveReportPage() {
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-              <Input value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Search by equipment number" className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
+              <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Search by equipment code or name" className="w-full" />
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-medium text-[#003594]">Part Number</Label>

@@ -17,6 +17,7 @@ import { format, startOfDay } from 'date-fns';
 import { CalendarIcon, Download, Loader2, Search, X, ChevronLeft, ChevronRight, Eye, Package, ArrowDownCircle, ArrowUpCircle, TrendingUp, FileText, Clock, ChevronDown, ChevronUp, List, ShoppingCart, DollarSign, Building2, Receipt } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { TimeSeriesChart } from '@/components/dashboard/TimeSeriesChart';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface StockReportItem {
     nac_code: string;
     item_name: string;
@@ -730,7 +731,7 @@ export default function CurrentStockReportPage() {
 
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-                    <Input value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Search by equipment number" className="bg-white border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
+                    <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Search by equipment code or name" className="w-full"/>
                   </div>
 
                   <div className="space-y-2">

@@ -13,6 +13,7 @@ import { formatDate } from '../utils/dateUtils';
 import ExcelJS from 'exceljs';
 import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpReport';
 import archiver from 'archiver';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
     const connection = await pool.getConnection();
@@ -44,16 +45,18 @@ export const getDailyIssueReport = async (req: Request, res: Response): Promise<
         SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       WHERE i.issue_date BETWEEN ? AND ?
       AND i.approval_status = ?
     `;
         const countParams = [String(fromDate), String(toDate), "APPROVED"];
         const dataParams = [String(fromDate), String(toDate), "APPROVED"];
         if (equipmentNumber) {
-            countQuery += ` AND i.issued_for = ?`;
-            dataQuery += ` AND i.issued_for = ?`;
-            countParams.push(String(equipmentNumber));
-            dataParams.push(String(equipmentNumber));
+            const pattern = `%${String(equipmentNumber)}%`;
+            countQuery += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            dataQuery += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            countParams.push(pattern, pattern);
+            dataParams.push(pattern, pattern);
         }
         if (partNumber) {
             countQuery += ` AND i.part_number LIKE ?`;
@@ -123,13 +126,15 @@ export const exportDailyIssueReport = async (req: Request, res: Response): Promi
         SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       WHERE i.issue_date BETWEEN ? AND ?
       AND i.approval_status = ?
     `;
         const queryParams = [String(fromDate), String(toDate), "APPROVED"];
         if (equipmentNumber) {
-            query += ` AND i.issued_for = ?`;
-            queryParams.push(String(equipmentNumber));
+            const pattern = `%${String(equipmentNumber)}%`;
+            query += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            queryParams.push(pattern, pattern);
         }
         if (partNumber) {
             query += ` AND i.part_number LIKE ?`;
@@ -279,10 +284,11 @@ const passesEquipmentAndCreatedFilters = (rawEquipment: string | null | undefine
 const fetchNacCodesByFilters = async (connection: PoolConnection, filters: StockCardRequest): Promise<string[]> => {
     let query = `
     SELECT 
-      nac_code,
-      applicable_equipments,
-      created_at
-    FROM stock_details
+      s.nac_code,
+      COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as applicable_equipments,
+      s.created_at
+    FROM stock_details s
+    LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
     WHERE 1 = 1
   `;
     const params: (string)[] = [];
@@ -294,10 +300,7 @@ const fetchNacCodesByFilters = async (connection: PoolConnection, filters: Stock
         query += ' AND DATE(created_at) <= DATE(?)';
         params.push(String(filters.createdDateTo));
     }
-    if (hasEquipmentNumberFilter(filters)) {
-        query += ' AND LOWER(COALESCE(applicable_equipments, "")) LIKE ?';
-        params.push(`%${String(filters.equipmentNumber).toLowerCase()}%`);
-    }
+    query += ' GROUP BY s.nac_code, s.applicable_equipments, s.created_at';
     const [rows] = await connection.execute<RowDataPacket[]>(query, params);
     return rows
         .filter((row) => passesEquipmentAndCreatedFilters(row.applicable_equipments, row.created_at, filters))
@@ -317,9 +320,14 @@ const fetchAllNacCodes = async (connection: PoolConnection, filters: StockCardRe
     }
     const dateClause = dateConditions.length ? `WHERE ${dateConditions.join(' AND ')}` : '';
     const [rows] = await connection.execute<RowDataPacket[]>(`
-      SELECT nac_code, applicable_equipments, created_at
-      FROM stock_details
+      SELECT 
+        s.nac_code,
+        COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as applicable_equipments,
+        s.created_at
+      FROM stock_details s
+      LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
       ${dateClause}
+      GROUP BY s.nac_code, s.applicable_equipments, s.created_at
     `, params);
     return rows
         .filter((row) => passesEquipmentAndCreatedFilters(row.applicable_equipments, row.created_at, filters))
@@ -336,6 +344,7 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
     if (!targetNaccodes.length) {
         return [];
     }
+    await ensureAssetSpareSchema();
     const dateConditions: string[] = [];
     const dateParams: string[] = [];
     if (filters.createdDateFrom) {
@@ -356,15 +365,17 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
         s.nac_code,
         s.item_name,
         s.part_numbers as part_number,
-        s.applicable_equipments as equipment_number,
+        COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
         s.location,
         s.card_number,
         s.open_quantity,
         s.open_amount,
         s.created_at
       FROM stock_details s
+      LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
       WHERE s.nac_code LIKE ?
       ${dateClause}
+      GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.card_number, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
     `, [searchPattern, ...dateParams]);
         return results;
     }
@@ -376,15 +387,17 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
       s.nac_code,
       s.item_name,
       s.part_numbers as part_number,
-      s.applicable_equipments as equipment_number,
+      COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
       s.location,
       s.card_number,
       s.open_quantity,
       s.open_amount,
       s.created_at
     FROM stock_details s
+    LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
     WHERE s.nac_code IN (${placeholders})
     ${dateClause}
+    GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.card_number, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
   `, [...targetNaccodes, ...dateParams]);
     return results;
 };
@@ -1869,6 +1882,7 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             FROM request_details rd
             LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
             LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
             WHERE 1=1
         `;
         const params: (string | number)[] = [];
@@ -1883,8 +1897,8 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
         }
         if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-            query += ` AND rd.equipment_number LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
+            query += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+            params.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             query += ` AND rd.part_number LIKE ?`;
@@ -1929,6 +1943,7 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 FROM request_details rd
                 LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
                 LEFT JOIN receive_details rec ON rd.id = rec.request_fk
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
                 WHERE 1=1
             `;
             const countParams: (string | number)[] = [];
@@ -1943,8 +1958,8 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
             }
             if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery += ` AND rd.equipment_number LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
+                countQuery += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+                countParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
             }
             if (partNumber && partNumber.toString().trim() !== '') {
                 countQuery += ` AND rd.part_number LIKE ?`;
@@ -2389,6 +2404,7 @@ export const exportRequestReceiveReport = async (req: Request, res: Response): P
                 FROM request_details rd
                 LEFT JOIN receive_details rec ON rd.id = rec.request_fk
                 LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
                 WHERE 1=1
             `;
             const params: (string | number)[] = [];
@@ -2405,8 +2421,8 @@ export const exportRequestReceiveReport = async (req: Request, res: Response): P
                     logEvents(`Added universal filter: ${universal}`, "reportLog.log");
                 }
                 if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                    query += ` AND rd.equipment_number LIKE ?`;
-                    params.push(`%${equipmentNumber}%`);
+                    query += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+                    params.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
                     logEvents(`Added equipmentNumber filter: ${equipmentNumber}`, "reportLog.log");
                 }
                 if (partNumber && partNumber.toString().trim() !== '') {
@@ -2835,8 +2851,9 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
             params.push(`%${nacCode}%`);
         }
         if (equipmentNumber) {
-            whereClause += ' AND rq.equipment_number LIKE ?';
-            params.push(`%${equipmentNumber}%`);
+            const pattern = `%${equipmentNumber}%`;
+            whereClause += ' AND (rq.equipment_number LIKE ? OR a.name LIKE ?)';
+            params.push(pattern, pattern);
         }
         if (supplierName) {
             whereClause += ' AND rrp.supplier_name LIKE ?';
@@ -2846,6 +2863,7 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
             SELECT COUNT(*) as total
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
         `;
@@ -2896,6 +2914,7 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
                 rrp.created_by as rrp_created_by
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
             ORDER BY rd.receive_date DESC, rd.id DESC
@@ -2964,8 +2983,9 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
             params.push(`%${nacCode}%`);
         }
         if (equipmentNumber) {
-            whereClause += ' AND rq.equipment_number LIKE ?';
-            params.push(`%${equipmentNumber}%`);
+            const pattern = `%${equipmentNumber}%`;
+            whereClause += ' AND (rq.equipment_number LIKE ? OR a.name LIKE ?)';
+            params.push(pattern, pattern);
         }
         if (supplierName) {
             whereClause += ' AND rrp.supplier_name LIKE ?';
@@ -3018,6 +3038,7 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
                 rrp.created_by as rrp_created_by
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
             ORDER BY rd.receive_date DESC, rd.id DESC
@@ -3127,6 +3148,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
     try {
+        await ensureAssetSpareSchema();
         const defaultFromDate = '2025-07-17';
         const defaultToDate = new Date().toISOString().split('T')[0];
         const reportFromDate = fromDate ? String(fromDate) : defaultFromDate;
@@ -3146,8 +3168,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             params.push(`%${String(partNumber)}%`);
         }
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('s.applicable_equipments LIKE ?');
-            params.push(`%${String(equipmentNumber)}%`);
+            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
+            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3329,6 +3351,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
     try {
+        await ensureAssetSpareSchema();
         const ExcelJS = require('exceljs');
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Stock Report');
@@ -3361,8 +3384,8 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             params.push(`%${String(partNumber)}%`);
         }
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('s.applicable_equipments LIKE ?');
-            params.push(`%${String(equipmentNumber)}%`);
+            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
+            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');

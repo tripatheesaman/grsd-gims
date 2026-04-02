@@ -104,8 +104,8 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
             queryParams.push(searchParam, searchParam, searchParam, searchParam, searchParam);
         }
         if (equipmentNumber) {
-            whereConditions.push(`COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) LIKE ?`);
-            queryParams.push(`%${equipmentNumber}%`);
+            whereConditions.push(`(COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) LIKE ? OR a.name LIKE ?)`);
+            queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
             whereConditions.push(`rd.part_number LIKE ?`);
@@ -127,7 +127,7 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
             });
             whereClause = `WHERE ${whereClauseWithValues}`;
         }
-        const countQuery = `SELECT COUNT(*) as total FROM receive_details rd LEFT JOIN request_details req ON rd.request_fk = req.id ${whereClause}`;
+        const countQuery = `SELECT COUNT(*) as total FROM receive_details rd LEFT JOIN request_details req ON rd.request_fk = req.id LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) COLLATE utf8mb4_unicode_ci ${whereClause}`;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery);
         const totalCount = countResult[0].total;
         const totalPages = Math.ceil(totalCount / Number(pageSize));
@@ -152,6 +152,7 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
         pm.calculated_at AS predicted_calculated_at
       FROM receive_details rd
       LEFT JOIN request_details req ON rd.request_fk = req.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) COLLATE utf8mb4_unicode_ci
       LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
       ${whereClause}
       ORDER BY rd.created_at DESC

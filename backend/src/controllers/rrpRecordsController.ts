@@ -89,8 +89,8 @@ export const getAllRRPRecords = async (req: Request, res: Response): Promise<voi
             queryParams.push(searchParam, searchParam, searchParam, searchParam);
         }
         if (equipmentNumber) {
-            whereConditions.push(`rqd.equipment_number LIKE ?`);
-            queryParams.push(`%${equipmentNumber}%`);
+            whereConditions.push(`(rqd.equipment_number LIKE ? OR a.name LIKE ?)`);
+            queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
             whereConditions.push(`red.part_number LIKE ?`);
@@ -113,6 +113,7 @@ export const getAllRRPRecords = async (req: Request, res: Response): Promise<voi
       FROM rrp_details rd
       LEFT JOIN receive_details red ON rd.receive_fk = red.id
       LEFT JOIN request_details rqd ON red.request_fk = rqd.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rqd.equipment_number COLLATE utf8mb4_unicode_ci
       ${whereClause}
     `;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, queryParams);
@@ -163,6 +164,7 @@ export const getAllRRPRecords = async (req: Request, res: Response): Promise<voi
       FROM rrp_details rd
       LEFT JOIN receive_details red ON rd.receive_fk = red.id
       LEFT JOIN request_details rqd ON red.request_fk = rqd.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rqd.equipment_number COLLATE utf8mb4_unicode_ci
       ${whereClause}
       ORDER BY rd.created_at DESC
       LIMIT ${Number(pageSize)} OFFSET ${offset}

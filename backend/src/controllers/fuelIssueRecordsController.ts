@@ -90,8 +90,8 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
             queryParams.push(weekNumber);
         }
         if (equipmentNumber) {
-            searchConditions += ' AND i.issued_for LIKE ?';
-            queryParams.push(`%${equipmentNumber}%`);
+            searchConditions += ' AND (i.issued_for LIKE ? OR a.name LIKE ?)';
+            queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (search) {
             searchConditions += ` AND (
@@ -109,6 +109,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
       SELECT COUNT(*) as total 
       FROM fuel_records f
       JOIN issue_details i ON f.issue_fk = i.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.nac_code IN (?, ?)
       ${searchConditions}
@@ -140,6 +141,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
         f.fy
       FROM fuel_records f
       JOIN issue_details i ON f.issue_fk = i.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.nac_code IN (?, ?)
       ${searchConditions}

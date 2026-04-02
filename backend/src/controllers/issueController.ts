@@ -4,6 +4,7 @@ import { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 interface IssueItem {
     nacCode: string;
     quantity: number;
@@ -32,6 +33,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
+        await ensureAssetSpareSchema();
         const formattedIssueDate = formatDateForDB(issueDate);
         const issuedByName = issuedBy.name;
         const [configRows] = await connection.query<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
@@ -49,9 +51,33 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
             message: string;
             originalIndex: number;
         }[] = [];
+
+        const expandEquipmentTokens = (input: string): string[] => {
+            const parts = String(input || '')
+                .split(',')
+                .map(p => p.trim())
+                .filter(Boolean);
+            const out: string[] = [];
+            for (const part of parts) {
+                const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+                if (rangeMatch) {
+                    const start = parseInt(rangeMatch[1], 10);
+                    const end = parseInt(rangeMatch[2], 10);
+                    const step = start <= end ? 1 : -1;
+                    for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
+                        out.push(String(n));
+                    }
+                    continue;
+                }
+                out.push(part);
+            }
+            return out;
+        };
+
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            const [stockResults] = await connection.query<RowDataPacket[]>('SELECT current_balance FROM stock_details WHERE nac_code = ?', [item.nacCode]);
+            const equipmentTokens = expandEquipmentTokens(item.equipmentNumber);
+            const [stockResults] = await connection.query<RowDataPacket[]>('SELECT current_balance, applicable_equipments FROM stock_details WHERE nac_code = ?', [item.nacCode]);
             if (stockResults.length === 0) {
                 validationErrors.push({
                     nacCode: item.nacCode,
@@ -61,6 +87,32 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 continue;
             }
             const stockDetails = stockResults[0];
+            const applicableTokens = expandEquipmentTokens(String(stockDetails.applicable_equipments || ''));
+            const [compatRows] = await connection.query<RowDataPacket[]>(
+                `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
+                [item.nacCode, equipmentTokens]
+            );
+            const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
+
+            let isCompatible = true;
+            for (const equipmentCode of equipmentTokens) {
+                if (compatSet.has(equipmentCode)) {
+                    continue;
+                }
+                if (!applicableTokens.includes(equipmentCode)) {
+                    isCompatible = false;
+                    break;
+                }
+            }
+
+            if (!isCompatible) {
+                validationErrors.push({
+                    nacCode: item.nacCode,
+                    message: `Selected equipment ${item.equipmentNumber} is not compatible with this spare`,
+                    originalIndex: i
+                });
+                continue;
+            }
             if (item.quantity > stockDetails.current_balance) {
                 validationErrors.push({
                     nacCode: item.nacCode,

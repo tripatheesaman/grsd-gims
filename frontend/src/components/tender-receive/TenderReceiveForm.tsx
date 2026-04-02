@@ -11,6 +11,8 @@ import { Loader2 } from 'lucide-react';
 import { PartNumberSelect } from '@/components/request/PartNumberSelect';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { processItemName } from '@/utils/utils';
+import { EquipmentMultiSelect } from '@/components/request/EquipmentMultiSelect';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface TenderReceiveItemFormProps {
     isOpen: boolean;
     onClose: () => void;
@@ -213,11 +215,7 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
 
                 <div>
                   <Label htmlFor="equipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-                
-                    <Input id="equipmentNumber" value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Enter equipment number (e.g., 1000-1024 or 1000,1001,1002)" className={`mt-1 ${errors.equipmentNumber ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"}`}/>
-
-
-                  {errors.equipmentNumber && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
+                  {isManualEntry || !item ? (<EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Enter equipment code or ranges (e.g., 1000-1024)" className="mt-1" error={errors.equipmentNumber}/>) : (<EquipmentMultiSelect equipmentList={item?.equipmentNumber || ''} value={equipmentNumber} onChange={setEquipmentNumber} error={errors.equipmentNumber}/>)}
                 </div>
               </div>
 

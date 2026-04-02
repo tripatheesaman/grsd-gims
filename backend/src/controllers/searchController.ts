@@ -38,6 +38,56 @@ interface SearchError extends Error {
     sqlState?: string;
     sqlMessage?: string;
 }
+
+const expandEquipmentTokens = (input: string): string[] => {
+    const normalized = String(input || '')
+        .replace(/\b(ge|GE)\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) {
+        return [];
+    }
+    const parts = normalized.split(',').map(p => p.trim()).filter(Boolean);
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const part of parts) {
+        const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+        if (rangeMatch) {
+            const start = parseInt(rangeMatch[1], 10);
+            const end = parseInt(rangeMatch[2], 10);
+            const step = start <= end ? 1 : -1;
+            for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
+                const token = String(n);
+                if (!seen.has(token)) {
+                    seen.add(token);
+                    out.push(token);
+                }
+            }
+            continue;
+        }
+        if (/^\d+$/.test(part)) {
+            if (!seen.has(part)) {
+                seen.add(part);
+                out.push(part);
+            }
+            continue;
+        }
+        if (/^[A-Za-z\s]+$/.test(part)) {
+            const token = part.replace(/\s+/g, ' ').trim();
+            if (!seen.has(token)) {
+                seen.add(token);
+                out.push(token);
+            }
+            continue;
+        }
+        const token = part;
+        if (!seen.has(token)) {
+            seen.add(token);
+            out.push(token);
+        }
+    }
+    return out;
+};
 export const getItemDetails = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     if (!id) {
@@ -252,30 +302,32 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
             });
             return;
         }
+        const useSpareCompatibility = tableName === 'stock_details';
         let query = `
       SELECT 
-        id,
-        nac_code as nacCode,
-        item_name as itemName,
-        part_numbers as partNumber,
-        applicable_equipments as equipmentNumber,
-        current_balance as currentBalance,
+        ${useSpareCompatibility ? 'sd.id' : 'id'} as id,
+        ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} as nacCode,
+        ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} as itemName,
+        ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} as partNumber,
+        ${useSpareCompatibility ? 'COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR \',\'), sd.applicable_equipments)' : 'applicable_equipments'} as equipmentNumber,
+        ${useSpareCompatibility ? 'sd.current_balance' : 'current_balance'} as currentBalance,
         location,
-        unit,
-        card_number as cardNumber
-      FROM ${tableName}
+        ${useSpareCompatibility ? 'sd.unit' : 'unit'} as unit,
+        ${useSpareCompatibility ? 'sd.card_number' : 'card_number'} as cardNumber
+      FROM ${tableName} ${useSpareCompatibility ? 'sd' : ''}
+      ${useSpareCompatibility ? 'LEFT JOIN spare_compatibility sc ON sc.nac_code = sd.nac_code LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci' : ''}
       WHERE 1=1
     `;
         logEvents(`Base query: ${query}`, "searchLog.log");
-        const params: (string | number)[] = [];
+        const params: any[] = [];
         let hasSearchConditions = false;
         if (universal && universal.toString().trim() !== '') {
             hasSearchConditions = true;
             query += ` AND (
-        nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-        item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-        part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-        applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?
+        ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.applicable_equipments' : 'applicable_equipments'} COLLATE utf8mb4_unicode_ci LIKE ?
       )`;
             params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
             logEvents(`Using LIKE search for universal parameter: ${universal}`, "searchLog.log");
@@ -290,18 +342,34 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
             hasSearchConditions = true;
-            query += ` AND applicable_equipments LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
+            if (useSpareCompatibility) {
+                const tokens = expandEquipmentTokens(String(equipmentNumber));
+                if (tokens.length > 0) {
+                    query += ` AND (sd.applicable_equipments LIKE ? OR sc.equipment_code IN (?) OR a.name LIKE ?)`;
+                    params.push(`%${equipmentNumber}%`, tokens, `%${equipmentNumber}%`);
+                }
+                else {
+                    query += ` AND (sd.applicable_equipments LIKE ? OR a.name LIKE ?)`;
+                    params.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
+                }
+            }
+            else {
+                query += ` AND applicable_equipments LIKE ?`;
+                params.push(`%${equipmentNumber}%`);
+            }
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             hasSearchConditions = true;
-            query += ` AND part_numbers LIKE ?`;
+            query += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
             params.push(`%${partNumber}%`);
         }
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
-        query += ` ORDER BY id ASC LIMIT ${limit} OFFSET ${offset}`;
+        if (useSpareCompatibility) {
+            query += ` GROUP BY sd.id, sd.nac_code, sd.item_name, sd.part_numbers, sd.applicable_equipments, sd.current_balance, sd.location, sd.unit, sd.card_number`;
+        }
+        query += ` ORDER BY ${useSpareCompatibility ? 'sd.id' : 'id'} ASC LIMIT ${limit} OFFSET ${offset}`;
         logEvents(`Executing RRP search query: ${query} with params: ${JSON.stringify(params)}`, "searchLog.log");
         let results: SearchResult[] = [];
         try {
@@ -341,23 +409,38 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         let totalCount = 0;
         try {
-            let countQuery = `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
-            const countParams: (string | number)[] = [];
+            let countQuery = useSpareCompatibility
+                ? `SELECT COUNT(DISTINCT sd.id) as total FROM ${tableName} sd LEFT JOIN spare_compatibility sc ON sc.nac_code = sd.nac_code LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE 1=1`
+                : `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
+            const countParams: any[] = [];
             if (universal && universal.toString().trim() !== '') {
                 countQuery += ` AND (
-          nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-          item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-          part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-          applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?
+          ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.applicable_equipments' : 'applicable_equipments'} COLLATE utf8mb4_unicode_ci LIKE ?
         )`;
                 countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
             }
             if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery += ` AND applicable_equipments LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
+                if (useSpareCompatibility) {
+                    const tokens = expandEquipmentTokens(String(equipmentNumber));
+                    if (tokens.length > 0) {
+                        countQuery += ` AND (sd.applicable_equipments LIKE ? OR sc.equipment_code IN (?) OR a.name LIKE ?)`;
+                        countParams.push(`%${equipmentNumber}%`, tokens, `%${equipmentNumber}%`);
+                    }
+                    else {
+                        countQuery += ` AND (sd.applicable_equipments LIKE ? OR a.name LIKE ?)`;
+                        countParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
+                    }
+                }
+                else {
+                    countQuery += ` AND applicable_equipments LIKE ?`;
+                    countParams.push(`%${equipmentNumber}%`);
+                }
             }
             if (partNumber && partNumber.toString().trim() !== '') {
-                countQuery += ` AND part_numbers LIKE ?`;
+                countQuery += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
                 countParams.push(`%${partNumber}%`);
             }
             const [countResult] = await pool.execute<CountResult[]>(countQuery, countParams);

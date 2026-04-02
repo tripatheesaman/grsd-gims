@@ -131,7 +131,6 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
     };
     if (!item)
         return null;
-    const isConsumable = item.equipmentNumber.toLowerCase().includes('consumable');
     const hasActiveBorrows = activeBorrows.length > 0;
     const validateForm = (): boolean => {
         const newErrors: {
@@ -283,7 +282,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
                 </div>
               </Label>
               <div className="relative">
-                {isConsumable ? (<Input value={selectedEquipment} onChange={(e) => setSelectedEquipment(e.target.value)} placeholder="Enter equipment number" className={`w-full ${errors.equipment ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"}`}/>) : (<EquipmentRangeSelect equipmentList={item.equipmentNumber} value={selectedEquipment} onChange={setSelectedEquipment} error={errors.equipment}/>)}
+                <EquipmentRangeSelect equipmentList={item.equipmentNumber} value={selectedEquipment} onChange={setSelectedEquipment} error={errors.equipment}/>
               </div>
               {errors.equipment && (<p className="text-sm text-red-500 mt-1 flex items-center gap-1">
                   <AlertCircle className="h-3 w-3"/>

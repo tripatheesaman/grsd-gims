@@ -5,6 +5,7 @@ import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { refreshPredictionMetrics } from '../services/predictionService';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
     request_number: string;
@@ -277,6 +278,7 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
+        await ensureAssetSpareSchema();
         const formattedDate = formatDateForDB(receiveData.receiveDate);
         const receiveIds: number[] = [];
         const expandEquipmentTokens = (input: string): string[] => {

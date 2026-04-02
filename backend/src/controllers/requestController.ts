@@ -7,6 +7,7 @@ import { logEvents } from '../middlewares/logger';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { generateRequestPdf } from '../services/excelService';
 import fs from 'fs';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
@@ -661,6 +662,7 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
     
     try {
         await connection.beginTransaction();
+        await ensureAssetSpareSchema();
         
         const requestData: CreateRequestDTO = req.body;
         if (!requestData.requestedBy) {
@@ -733,6 +735,77 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             res.status(400).json({ 
                 error: 'Bad Request',
                 message: validationResult.errorMessage || 'An error occurred while validating request date.'
+            });
+            return;
+        }
+
+        const expandEquipmentTokens = (input: string): string[] => {
+            const parts = String(input || '')
+                .split(',')
+                .map(p => p.trim())
+                .filter(Boolean);
+            const out: string[] = [];
+            for (const part of parts) {
+                const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+                if (rangeMatch) {
+                    const start = parseInt(rangeMatch[1], 10);
+                    const end = parseInt(rangeMatch[2], 10);
+                    const step = start <= end ? 1 : -1;
+                    for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
+                        out.push(String(n));
+                    }
+                    continue;
+                }
+                out.push(part);
+            }
+            return out;
+        };
+
+        const nacCodesNeeded = Array.from(new Set(requestData.items.map(i => i.nacCode).filter(n => n && n !== 'N/A')));
+        const applicableByNacCode = new Map<string, string>();
+        if (nacCodesNeeded.length > 0) {
+            const [stockRows] = await connection.query<RowDataPacket[]>(`SELECT nac_code, applicable_equipments FROM stock_details WHERE nac_code IN (?)`, [nacCodesNeeded]);
+            for (const row of stockRows as any[]) {
+                applicableByNacCode.set(row.nac_code, String(row.applicable_equipments || ''));
+            }
+        }
+
+        const compatibilityErrors: Array<{ nacCode: string; message: string; originalIndex: number }> = [];
+        for (let i = 0; i < requestData.items.length; i++) {
+            const item = requestData.items[i];
+            if (!item.nacCode || item.nacCode === 'N/A') {
+                continue;
+            }
+            const equipmentTokens = expandEquipmentTokens(item.equipmentNumber);
+            const [compatRows] = await connection.query<RowDataPacket[]>(
+                `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
+                [item.nacCode, equipmentTokens]
+            );
+            const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
+            const applicableEquipments = applicableByNacCode.get(item.nacCode) || '';
+            const applicableTokens = expandEquipmentTokens(applicableEquipments);
+
+            for (const equipmentCode of equipmentTokens) {
+                if (compatSet.has(equipmentCode)) {
+                    continue;
+                }
+                if (!applicableTokens.includes(equipmentCode)) {
+                    compatibilityErrors.push({
+                        nacCode: item.nacCode,
+                        message: `Selected equipment ${item.equipmentNumber} is not compatible with this spare`,
+                        originalIndex: i
+                    });
+                    break;
+                }
+            }
+        }
+
+        if (compatibilityErrors.length > 0) {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Validation Failed',
+                message: 'Some items have incompatible equipment selections',
+                validationErrors: compatibilityErrors
             });
             return;
         }
@@ -1873,11 +1946,19 @@ export const uploadReferenceDocument = async (req: Request, res: Response): Prom
         const userPermissions = req.permissions || [];
         const { requestNumber, imagePath } = req.body;
         const [existingDoc] = await connection.query<RowDataPacket[]>(
-            'SELECT reference_doc, request_date FROM request_details WHERE request_number = ? ORDER BY request_date DESC LIMIT 1',
+            'SELECT reference_doc, request_date, approval_status FROM request_details WHERE request_number = ? ORDER BY request_date DESC LIMIT 1',
             [requestNumber]
         );
         const currentReferenceDoc = existingDoc.length > 0 ? existingDoc[0].reference_doc : null;
         const currentRequestDate = existingDoc.length > 0 ? new Date(existingDoc[0].request_date) : null;
+        const currentApprovalStatus = existingDoc.length > 0 ? (existingDoc[0].approval_status as string | undefined) : undefined;
+        if (currentApprovalStatus === 'REJECTED') {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Rejected requests do not require reference document upload'
+            });
+            return;
+        }
         const isEdit = !!currentReferenceDoc;
         if (isEdit) {
             if (!userPermissions.includes('can_edit_reference_documents')) {

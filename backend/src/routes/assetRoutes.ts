@@ -1,8 +1,12 @@
 import express from 'express';
-import { getAllAssets, getAssetById, createAsset, updateAsset, deleteAsset } from '../controllers/assetController';
+import { getAllAssets, getAssetById, createAsset, updateAsset, deleteAsset, deleteAllAssets, getAssetsImportTemplate, importAssetsFromExcel, backfillSpareCompatibility } from '../controllers/assetController';
 const router = express.Router();
 router.get('/', getAllAssets);
 router.get('/:id', getAssetById);
+router.get('/template', getAssetsImportTemplate);
+router.post('/import', importAssetsFromExcel);
+router.post('/compatibility/backfill', backfillSpareCompatibility);
+router.delete('/all', deleteAllAssets);
 router.post('/', createAsset);
 router.put('/:id', updateAsset);
 router.delete('/:id', deleteAsset);

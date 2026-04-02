@@ -1267,11 +1267,19 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
         const userPermissions = req.permissions || [];
         const { rrpNumber, imagePath } = req.body;
         const [existingDoc] = await pool.query<RowDataPacket[]>(
-            'SELECT reference_doc, date FROM rrp_details WHERE rrp_number = ? LIMIT 1',
+            'SELECT reference_doc, date, approval_status FROM rrp_details WHERE rrp_number = ? LIMIT 1',
             [rrpNumber]
         );
         const currentReferenceDoc = existingDoc.length > 0 ? existingDoc[0].reference_doc : null;
         const currentDate = existingDoc.length > 0 ? existingDoc[0].date : null;
+        const currentApprovalStatus = existingDoc.length > 0 ? (existingDoc[0].approval_status as string | undefined) : undefined;
+        if (currentApprovalStatus === 'REJECTED') {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Rejected RRPs do not require reference document upload'
+            });
+            return;
+        }
         const { type } = getRRPType(rrpNumber);
         const isEdit = !!currentReferenceDoc;
         if (isEdit) {

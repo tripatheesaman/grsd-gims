@@ -17,6 +17,7 @@ import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '@/types/rrpRepor
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, } from '@/components/ui/dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 export default function ReceiveRRPReportPage() {
     const { permissions } = useAuthContext();
     const canAccessReport = permissions?.includes('can_access_rrp_reports');
@@ -238,7 +239,7 @@ export default function ReceiveRRPReportPage() {
 
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-                    <Input value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Search by equipment number" className="bg-white border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
+                    <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Search by equipment code or name" className="w-full" />
                   </div>
 
                   <div className="space-y-2">
