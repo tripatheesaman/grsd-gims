@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Search, Eye, ChevronLeft, ChevronRight, Download, Calendar as CalendarIcon } from 'lucide-react';
+import { Search, Eye, ChevronLeft, ChevronRight, Download, Calendar as CalendarIcon, Bell } from 'lucide-react';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, } from '@/components/ui/modal';
 import Image from 'next/image';
@@ -105,6 +105,7 @@ export default function RequestReceiveReportPage() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [receiveDetailsList, setReceiveDetailsList] = useState<ReceiveDetailItem[] | null>(null);
     const [loadingDetails, setLoadingDetails] = useState<boolean>(false);
+    const [reminderSendingId, setReminderSendingId] = useState<number | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
     const [exportType, setExportType] = useState<string>('all');
     const [fromDate, setFromDate] = useState<Date | undefined>(undefined);
@@ -194,6 +195,42 @@ export default function RequestReceiveReportPage() {
     const handleViewDetails = (item: RequestReceiveData) => {
         setSelectedItem(item);
         setIsDetailsOpen(true);
+    };
+    const handleSendUrgentReminder = async (requestDetailId: number) => {
+        try {
+            setReminderSendingId(requestDetailId);
+            const response = await API.post(`/api/request-records/${requestDetailId}/reminder/urgent`);
+            if (response.status === 200 && response.data?.sent) {
+                showSuccessToast({
+                    title: 'Success',
+                    message: 'Urgent reminder sent',
+                    duration: 3000,
+                });
+            } else if (response.status === 200 && !response.data?.sent) {
+                showErrorToast({
+                    title: 'Skipped',
+                    message: response.data?.skippedReason || 'Urgent reminder skipped',
+                    duration: 3000,
+                });
+            } else {
+                showErrorToast({
+                    title: 'Error',
+                    message: 'Failed to send urgent reminder',
+                    duration: 3000,
+                });
+            }
+            fetchDataRef.current?.();
+        }
+        catch {
+            showErrorToast({
+                title: 'Error',
+                message: 'Failed to send urgent reminder',
+                duration: 3000,
+            });
+        }
+        finally {
+            setReminderSendingId(null);
+        }
     };
     useEffect(() => {
         const loadDetails = async () => {
@@ -429,6 +466,9 @@ export default function RequestReceiveReportPage() {
                   <tbody>
                     {data.map((item) => {
                 const receiveStatusDisplay = getReceiveStatusDisplay(item);
+                const receiveLabel = (item.receiveStatus || '').toLowerCase();
+                const isFullyReceived = receiveLabel === 'received' || Boolean(item.isReceived);
+                const canSendUrgentReminder = !isFullyReceived;
                 return (<tr key={item.requestId} className="border-b border-[#002a6e]/10 hover:bg-[#003594]/5 transition-colors">
                           <td className="p-3 text-sm break-words">{item.requestNumber}</td>
                           <td className="p-3 text-sm">{new Date(item.requestDate).toLocaleDateString()}</td>
@@ -468,6 +508,16 @@ export default function RequestReceiveReportPage() {
                             </span>
                           </td>
                           <td className="p-3 text-sm">
+                            {canSendUrgentReminder && (<Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleSendUrgentReminder(item.requestId)}
+                                disabled={reminderSendingId === item.requestId}
+                                className="mr-2"
+                              >
+                                <Bell className="h-4 w-4 mr-1"/>
+                                {reminderSendingId === item.requestId ? 'Sending...' : 'Send Urgent Reminder'}
+                              </Button>)}
                             <Button variant="outline" size="sm" onClick={() => handleViewDetails(item)} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594]">
                               <Eye className="h-4 w-4 mr-1"/>
                               View
