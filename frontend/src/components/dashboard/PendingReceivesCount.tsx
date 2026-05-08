@@ -1,7 +1,10 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/queryKeys';
+import { usePendingReceivesQuery } from '@/hooks/api/usePendingReceives';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Eye, X, Pencil, Check, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -28,6 +31,27 @@ interface PendingReceive {
     borrowSourceCode?: string;
     requestFk?: number;
 }
+const normalizePendingReceives = (payload: unknown): PendingReceive[] => {
+    const rows = Array.isArray(payload)
+        ? payload
+        : (payload &&
+            typeof payload === 'object' &&
+            'items' in payload &&
+            Array.isArray((payload as { items: unknown[] }).items)
+            ? (payload as { items: unknown[] }).items
+            : []);
+    const uniqueById = new Map<number, PendingReceive>();
+    rows.forEach((row) => {
+        if (!row || typeof row !== 'object')
+            return;
+        const candidate = row as Partial<PendingReceive>;
+        const id = Number(candidate.id);
+        if (!Number.isFinite(id))
+            return;
+        uniqueById.set(id, candidate as PendingReceive);
+    });
+    return Array.from(uniqueById.values());
+};
 interface ReceiveDetails {
     id: number;
     requestNumber: string;
@@ -65,9 +89,8 @@ interface EditData {
 const FALLBACK_IMAGE = '/images/nepal_airlines_logo.jpeg';
 export function PendingReceivesCount() {
     const { permissions, user } = useAuthContext();
+    const queryClient = useQueryClient();
     const { showSuccessToast, showErrorToast } = useCustomToast();
-    const [pendingCount, setPendingCount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isImagePreviewOpen, setIsImagePreviewOpen] = useState(false);
@@ -76,36 +99,12 @@ export function PendingReceivesCount() {
     const [isSaving, setIsSaving] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [selectedImage, setSelectedImage] = useState<string>('');
-    const [pendingReceives, setPendingReceives] = useState<PendingReceive[]>([]);
     const [selectedReceive, setSelectedReceive] = useState<ReceiveDetails | null>(null);
     const [editData, setEditData] = useState<EditData | null>(null);
-    const fetchPendingCount = useCallback(async () => {
-        if (!permissions?.includes('can_approve_receive')) {
-            setIsLoading(false);
-            return;
-        }
-        try {
-            const response = await API.get('/api/receive/pending');
-            setPendingReceives(response.data);
-            setPendingCount(response.data.length);
-        }
-        catch {
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [permissions]);
-    useEffect(() => {
-        fetchPendingCount();
-    }, [fetchPendingCount]);
-    useEffect(() => {
-        if (isDetailsOpen || isEditOpen || isRejectOpen || isImagePreviewOpen)
-            return;
-        const interval = setInterval(() => {
-            fetchPendingCount();
-        }, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPendingCount, isDetailsOpen, isEditOpen, isRejectOpen, isImagePreviewOpen]);
+    const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen && !isImagePreviewOpen;
+    const { data: pendingRes, isLoading } = usePendingReceivesQuery(Boolean(permissions?.includes('can_approve_receive') && shouldPoll));
+    const pendingReceives = normalizePendingReceives(pendingRes?.data);
+    const pendingCount = pendingReceives.length;
     const handleViewDetails = async (receiveId: number) => {
         try {
             const response = await API.get(`/api/receive/${receiveId}/details`);
@@ -287,14 +286,13 @@ export function PendingReceivesCount() {
                 rejectionReason: rejectionReason.trim()
             });
             if (response.status === 200) {
+                await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                 showSuccessToast({
                     title: 'Success',
                     message: "Receive rejected successfully",
                     duration: 3000,
                 });
-                const pendingResponse = await API.get('/api/receive/pending');
-                setPendingReceives(pendingResponse.data);
-                setPendingCount(pendingResponse.data.length);
+                await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                 setIsDetailsOpen(false);
                 setIsRejectOpen(false);
                 setRejectionReason('');
@@ -317,14 +315,13 @@ export function PendingReceivesCount() {
         try {
             const response = await API.put(`/api/receive/${selectedReceive.id}/approve`);
             if (response.status === 200) {
+                await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                 showSuccessToast({
                     title: 'Success',
                     message: "Receive approved successfully",
                     duration: 3000,
                 });
-                const pendingResponse = await API.get('/api/receive/pending');
-                setPendingReceives(pendingResponse.data);
-                setPendingCount(pendingResponse.data.length);
+                await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                 setIsDetailsOpen(false);
             }
             else {
@@ -455,14 +452,13 @@ export function PendingReceivesCount() {
                 try {
                     const response = await API.put(`/api/receive/${selectedReceive.id}/approve-and-close`);
                     if (response.status === 200) {
+                        await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                         showSuccessToast({
                             title: 'Success',
                             message: 'Receive approved and request force-closed',
                             duration: 3000,
                         });
-                        const pendingResponse = await API.get('/api/receive/pending');
-                        setPendingReceives(pendingResponse.data);
-                        setPendingCount(pendingResponse.data.length);
+                        await queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() });
                         setIsDetailsOpen(false);
                     }
                     else {
