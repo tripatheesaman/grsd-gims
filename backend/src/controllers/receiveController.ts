@@ -82,6 +82,9 @@ interface StockDetailResult extends RowDataPacket {
 }
 export const getPendingReceives = async (req: Request, res: Response): Promise<void> => {
     try {
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         const [results] = await pool.execute<PendingReceiveItem[]>(`SELECT 
                 rd.id,
                 COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) as nac_code,
@@ -96,6 +99,11 @@ export const getPendingReceives = async (req: Request, res: Response): Promise<v
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
             WHERE rd.approval_status = 'PENDING'
+              AND (
+                rd.request_fk IS NULL
+                OR req.id IS NULL
+                OR req.is_received = 0
+              )
             ORDER BY rd.created_at DESC`);
         const pendingReceives = results.map(item => ({
             id: item.id,
@@ -271,14 +279,36 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
         await connection.beginTransaction();
         const formattedDate = formatDateForDB(receiveData.receiveDate);
         const receiveIds: number[] = [];
+        const expandEquipmentTokens = (input: string): string[] => {
+            const parts = String(input || '')
+                .split(',')
+                .map(p => p.trim())
+                .filter(Boolean);
+            const out: string[] = [];
+            for (const part of parts) {
+                const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+                if (rangeMatch) {
+                    const start = parseInt(rangeMatch[1], 10);
+                    const end = parseInt(rangeMatch[2], 10);
+                    const step = start <= end ? 1 : -1;
+                    for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
+                        out.push(String(n));
+                    }
+                    continue;
+                }
+                out.push(part);
+            }
+            return out;
+        };
         for (const item of receiveData.items) {
-            const [requestCheck] = await connection.execute(`SELECT id, request_number FROM request_details 
+            const [requestCheck] = await connection.execute(`SELECT id, request_number, equipment_number FROM request_details 
                 WHERE id = ?`, [item.requestId]);
             if (!(requestCheck as any[]).length) {
                 logEvents(`Failed to create receive - Request not found: ${item.requestId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
                 throw new Error(`Request ID ${item.requestId} not found`);
             }
             const requestNumber = (requestCheck as any[])[0].request_number;
+            const requestEquipmentNumber = (requestCheck as any[])[0].equipment_number || '';
             let finalNacCode = item.nacCode;
             if (!finalNacCode || finalNacCode.trim() === '' || finalNacCode === 'N/A') {
                 logEvents(`Warning: Empty/null nacCode received for request ${item.requestId}. Fetching from request_details...`, "receiveLog.log");
@@ -295,6 +325,29 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
             if (!finalNacCode || finalNacCode.trim() === '') {
                 logEvents(`Failed to create receive - Final nacCode is empty for request ${item.requestId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
                 throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the item has a valid NAC Code.`);
+            }
+
+            if (requestEquipmentNumber && requestEquipmentNumber.trim() !== '' && finalNacCode && finalNacCode !== 'N/A') {
+                const equipmentTokens = expandEquipmentTokens(requestEquipmentNumber);
+                const [stockRows] = await connection.execute<RowDataPacket[]>(
+                    `SELECT applicable_equipments FROM stock_details WHERE nac_code = ? LIMIT 1`,
+                    [finalNacCode]
+                );
+                const applicableEquipments = stockRows.length > 0 ? String((stockRows as any)[0].applicable_equipments || '') : '';
+                const [compatRows] = await connection.query<RowDataPacket[]>(
+                    `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
+                    [finalNacCode, equipmentTokens]
+                );
+                const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
+                const applicableTokens = expandEquipmentTokens(applicableEquipments);
+                for (const equipmentCode of equipmentTokens) {
+                    if (compatSet.has(equipmentCode)) {
+                        continue;
+                    }
+                    if (!applicableTokens.includes(equipmentCode)) {
+                        throw new Error('Incompatible equipment selection for this received spare');
+                    }
+                }
             }
             logEvents(`Creating receive for request ${item.requestId} with final nacCode: "${finalNacCode}"`, "receiveLog.log");
             const [duplicateCheck] = await connection.execute<RowDataPacket[]>(`SELECT id FROM receive_details 
@@ -370,6 +423,7 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
             errorMessage.includes('Cannot receive') ||
             errorMessage.includes('Quantity must be a positive number') ||
             errorMessage.includes('has already been received') ||
+            errorMessage.includes('Incompatible equipment selection') ||
             errorMessage.includes('NAC Code is required') ||
             errorMessage.includes('NAC Code is missing')) {
             res.status(400).json({
