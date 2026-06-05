@@ -3,16 +3,13 @@ import pool from '../config/db';
 import { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
+import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 const getExistingDateForSlipNumber = async (connection: PoolConnection, issueSlipNumber: string): Promise<string | null> => {
     const [results] = await connection.execute<RowDataPacket[]>('SELECT issue_date FROM issue_details WHERE issue_slip_number = ? LIMIT 1', [issueSlipNumber]);
     return results.length > 0 ? results[0].issue_date : null;
 };
 const generateIssueSlipNumber = async (connection: PoolConnection, issueDate: string): Promise<string> => {
-    const [configRows] = await connection.execute<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
-    if (configRows.length === 0) {
-        throw new Error('Current FY configuration not found');
-    }
-    const currentFY = configRows[0].config_value;
+    const currentFY = await resolveCurrentFiscalYear(connection);
     const [dayNumberResult] = await connection.execute<RowDataPacket[]>(`SELECT 
       CASE 
         WHEN MIN(issue_date) IS NULL THEN 1
@@ -52,8 +49,10 @@ interface SpareIssueFormData {
 export const getAllSpareIssueRecords = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        const { page = 1, limit = 10, search = '', issueSlipNumber = '', partNumber = '', itemName = '', nacCode = '', issuedFor = '', status = '', issuedBy = '', sortBy = 'issue_date', sortOrder = 'DESC' } = req.query;
+        const { page = 1, limit = 10, search = '', issueSlipNumber = '', partNumber = '', itemName = '', nacCode = '', issuedFor = '', status = '', issuedBy = '', sortBy = 'issue_date', sortOrder = 'DESC', fiscalYear: fiscalYearQuery } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const fyFilter = resolveFilterFiscalYear(fiscalYearQuery as string | undefined, currentFY);
         const allowedSortFields = ['issue_slip_number', 'issue_date', 'nac_code', 'issue_quantity', 'issue_cost', 'approval_status'];
         const validSortBy = allowedSortFields.includes(sortBy as string) ? sortBy as string : 'issue_date';
         const validSortOrder = (sortOrder as string).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
@@ -91,6 +90,10 @@ export const getAllSpareIssueRecords = async (req: Request, res: Response): Prom
         if (issuedBy) {
             searchConditions += ' AND JSON_UNQUOTE(JSON_EXTRACT(i.issued_by, "$.name")) = ?';
             searchParams.push(issuedBy);
+        }
+        if (fyFilter) {
+            searchConditions += ' AND i.current_fy = ?';
+            searchParams.push(fyFilter);
         }
         const countQuery = 'SELECT COUNT(*) as total FROM issue_details i LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci WHERE i.nac_code NOT IN (?, ?)' + searchConditions;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, ['GT 07986', 'GT 00000', ...searchParams]);

@@ -41,7 +41,8 @@ export default function PrintRRPPage() {
             const excelUrl = URL.createObjectURL(response.data);
             const link = document.createElement('a');
             link.href = excelUrl;
-            link.download = `rrp_${rrp.rrpNumber}.xlsx`;
+            const isCapital = rrp.type === 'capital' || rrp.rrpNumber.startsWith('C');
+            link.download = isCapital ? `RRCP_${rrp.rrpNumber}.xlsx` : `rrp_${rrp.rrpNumber}.xlsx`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -153,7 +154,9 @@ export default function PrintRRPPage() {
     return (<div className="container mx-auto px-4 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">Print RRP</h1>
-        <p className="text-gray-600 mt-2">Search and print RRP documents</p>
+        <p className="text-gray-600 mt-2">
+          Search and print spare (L/F) and capital RRCP (C) documents. Upload reference documents after approval.
+        </p>
       </div>
       
       <div className="mb-8 bg-white rounded-lg shadow-xl border-[#002a6e]/10 p-6">

@@ -8,8 +8,13 @@ interface EquipmentRangeSelectProps {
     value: string;
     onChange: (value: string) => void;
     error?: string;
+    /** Codes that are sections rather than equipment numbers — shown with a "Section" badge */
+    sectionCodes?: string[];
+    /** Map from section code to display name */
+    sectionLabels?: Record<string, string>;
 }
-export function EquipmentRangeSelect({ equipmentList, value, onChange, error }: EquipmentRangeSelectProps) {
+export function EquipmentRangeSelect({ equipmentList, value, onChange, error, sectionCodes = [], sectionLabels = {} }: EquipmentRangeSelectProps) {
+    const sectionSet = useMemo(() => new Set(sectionCodes.map(c => c.toUpperCase())), [sectionCodes]);
     const [open, setOpen] = useState(false);
     const [inputValue, setInputValue] = useState("");
     const parseInput = (input: string): {
@@ -114,11 +119,15 @@ export function EquipmentRangeSelect({ equipmentList, value, onChange, error }: 
         if (!equipmentList)
             return [];
         const rangesList = generateRanges(equipmentList);
-        return rangesList.map(range => ({
-            value: range,
-            label: range
-        }));
-    }, [equipmentList, generateRanges]);
+        return rangesList.map(range => {
+            const upper = range.toUpperCase();
+            const isSection = sectionSet.has(upper);
+            const label = isSection
+                ? `${sectionLabels[upper] || range} (Section)`
+                : range;
+            return { value: range, label, isSection };
+        });
+    }, [equipmentList, generateRanges, sectionSet, sectionLabels]);
     const filteredSuggestions = useMemo(() => {
         const query = inputValue.toLowerCase();
         return suggestions.filter(suggestion => suggestion.label.toLowerCase().includes(query));
@@ -132,20 +141,23 @@ export function EquipmentRangeSelect({ equipmentList, value, onChange, error }: 
     return (<div className="flex flex-col gap-1.5">
       <div className="relative">
         <Button type="button" variant="outline" role="combobox" aria-expanded={open} className={cn("w-full justify-between", error ? "border-red-500" : "")} onClick={() => setOpen(!open)}>
-          {selectedItem ? selectedItem.label : "Select equipment number..."}
+          {selectedItem ? selectedItem.label : "Select equipment / section..."}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50"/>
         </Button>
         {open && (<div className="absolute w-full z-[9999] bg-white rounded-md border shadow-md mt-1">
             <div className="w-full">
               <div className="flex w-full items-center border-b px-3">
-                <input className="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50" placeholder="Search equipment number..." value={inputValue} onChange={(e) => setInputValue(e.target.value)}/>
+                <input className="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50" placeholder="Search equipment or section..." value={inputValue} onChange={(e) => setInputValue(e.target.value)}/>
               </div>
               {filteredSuggestions.length === 0 ? (<p className="p-4 text-sm text-center text-muted-foreground">
                   No equipment numbers found.
                 </p>) : (<div className="max-h-[200px] overflow-y-auto">
                   {filteredSuggestions.map((suggestion) => (<div key={suggestion.value} onClick={() => handleSelect(suggestion.value)} className={cn("relative flex w-full cursor-pointer select-none items-center rounded-sm px-3 py-2 text-sm outline-none", "hover:bg-accent hover:text-accent-foreground", value === suggestion.value && "bg-accent text-accent-foreground")}>
                       <Check className={cn("mr-2 h-4 w-4 flex-shrink-0", value === suggestion.value ? "opacity-100" : "opacity-0")}/>
-                      {suggestion.label}
+                      <span className="flex-1">{suggestion.label}</span>
+                      {suggestion.isSection && (
+                        <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Section</span>
+                      )}
                     </div>))}
                 </div>)}
             </div>

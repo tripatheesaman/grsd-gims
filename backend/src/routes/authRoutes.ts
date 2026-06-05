@@ -1,7 +1,10 @@
 import express from 'express';
-import { login, checkResetEligibility, resetPassword } from '../controllers/authController';
+import verifyJWT from '../middlewares/verifyJWT';
+import { login, checkResetEligibility, resetPassword, refreshToken, getMyPermissions } from '../controllers/authController';
 const router = express.Router();
 router.post('/login', login);
+router.get('/permissions', verifyJWT, getMyPermissions);
+router.post('/refresh', verifyJWT, refreshToken);
 router.post('/check-reset-eligibility', checkResetEligibility);
 router.post('/reset-password', resetPassword);
 export default router;

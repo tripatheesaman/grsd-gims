@@ -375,10 +375,10 @@ export default function RRPItemsPage() {
                     ...selectedItem,
                     currency: value
                 })}>
-                        <SelectTrigger className="border-[#002a6e]/10 focus:ring-[#003594]">
+                        <SelectTrigger className="border-[#002a6e]/10 bg-white focus:ring-[#003594]">
                           <SelectValue placeholder="Select currency"/>
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white">
                           {getCurrencies().map((currency) => (<SelectItem key={currency} value={currency}>
                               {currency}
                             </SelectItem>))}

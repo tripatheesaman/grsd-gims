@@ -13,6 +13,7 @@ import { formatDate } from '../utils/dateUtils';
 import ExcelJS from 'exceljs';
 import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpReport';
 import archiver from 'archiver';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
     const connection = await pool.getConnection();
@@ -44,16 +45,18 @@ export const getDailyIssueReport = async (req: Request, res: Response): Promise<
         SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       WHERE i.issue_date BETWEEN ? AND ?
       AND i.approval_status = ?
     `;
         const countParams = [String(fromDate), String(toDate), "APPROVED"];
         const dataParams = [String(fromDate), String(toDate), "APPROVED"];
         if (equipmentNumber) {
-            countQuery += ` AND i.issued_for = ?`;
-            dataQuery += ` AND i.issued_for = ?`;
-            countParams.push(String(equipmentNumber));
-            dataParams.push(String(equipmentNumber));
+            const pattern = `%${String(equipmentNumber)}%`;
+            countQuery += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            dataQuery += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            countParams.push(pattern, pattern);
+            dataParams.push(pattern, pattern);
         }
         if (partNumber) {
             countQuery += ` AND i.part_number LIKE ?`;
@@ -123,13 +126,15 @@ export const exportDailyIssueReport = async (req: Request, res: Response): Promi
         SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       WHERE i.issue_date BETWEEN ? AND ?
       AND i.approval_status = ?
     `;
         const queryParams = [String(fromDate), String(toDate), "APPROVED"];
         if (equipmentNumber) {
-            query += ` AND i.issued_for = ?`;
-            queryParams.push(String(equipmentNumber));
+            const pattern = `%${String(equipmentNumber)}%`;
+            query += ` AND (i.issued_for LIKE ? OR a.name LIKE ?)`;
+            queryParams.push(pattern, pattern);
         }
         if (partNumber) {
             query += ` AND i.part_number LIKE ?`;
@@ -279,10 +284,11 @@ const passesEquipmentAndCreatedFilters = (rawEquipment: string | null | undefine
 const fetchNacCodesByFilters = async (connection: PoolConnection, filters: StockCardRequest): Promise<string[]> => {
     let query = `
     SELECT 
-      nac_code,
-      applicable_equipments,
-      created_at
-    FROM stock_details
+      s.nac_code,
+      COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as applicable_equipments,
+      s.created_at
+    FROM stock_details s
+    LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
     WHERE 1 = 1
   `;
     const params: (string)[] = [];
@@ -294,10 +300,7 @@ const fetchNacCodesByFilters = async (connection: PoolConnection, filters: Stock
         query += ' AND DATE(created_at) <= DATE(?)';
         params.push(String(filters.createdDateTo));
     }
-    if (hasEquipmentNumberFilter(filters)) {
-        query += ' AND LOWER(COALESCE(applicable_equipments, "")) LIKE ?';
-        params.push(`%${String(filters.equipmentNumber).toLowerCase()}%`);
-    }
+    query += ' GROUP BY s.nac_code, s.applicable_equipments, s.created_at';
     const [rows] = await connection.execute<RowDataPacket[]>(query, params);
     return rows
         .filter((row) => passesEquipmentAndCreatedFilters(row.applicable_equipments, row.created_at, filters))
@@ -317,9 +320,14 @@ const fetchAllNacCodes = async (connection: PoolConnection, filters: StockCardRe
     }
     const dateClause = dateConditions.length ? `WHERE ${dateConditions.join(' AND ')}` : '';
     const [rows] = await connection.execute<RowDataPacket[]>(`
-      SELECT nac_code, applicable_equipments, created_at
-      FROM stock_details
+      SELECT 
+        s.nac_code,
+        COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as applicable_equipments,
+        s.created_at
+      FROM stock_details s
+      LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
       ${dateClause}
+      GROUP BY s.nac_code, s.applicable_equipments, s.created_at
     `, params);
     return rows
         .filter((row) => passesEquipmentAndCreatedFilters(row.applicable_equipments, row.created_at, filters))
@@ -336,6 +344,7 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
     if (!targetNaccodes.length) {
         return [];
     }
+    await ensureAssetSpareSchema();
     const dateConditions: string[] = [];
     const dateParams: string[] = [];
     if (filters.createdDateFrom) {
@@ -356,15 +365,16 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
         s.nac_code,
         s.item_name,
         s.part_numbers as part_number,
-        s.applicable_equipments as equipment_number,
+        COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
         s.location,
-        s.card_number,
         s.open_quantity,
         s.open_amount,
         s.created_at
       FROM stock_details s
+      LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
       WHERE s.nac_code LIKE ?
       ${dateClause}
+      GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
     `, [searchPattern, ...dateParams]);
         return results;
     }
@@ -376,15 +386,16 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
       s.nac_code,
       s.item_name,
       s.part_numbers as part_number,
-      s.applicable_equipments as equipment_number,
+      COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
       s.location,
-      s.card_number,
       s.open_quantity,
       s.open_amount,
       s.created_at
     FROM stock_details s
+    LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
     WHERE s.nac_code IN (${placeholders})
     ${dateClause}
+    GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
   `, [...targetNaccodes, ...dateParams]);
     return results;
 };
@@ -724,7 +735,6 @@ export const previewStockCard = async (req: Request, res: Response): Promise<voi
                 part_number: stock.part_number,
                 equipment_number: stock.equipment_number,
                 location: stock.location,
-                card_number: stock.card_number,
                 open_quantity: stock.open_quantity,
                 open_amount: stock.open_amount,
                 openingBalanceDate: (stock as any).openingBalanceDate instanceof Date
@@ -784,7 +794,7 @@ export const getWeeklyDieselSummary = async (req: Request, res: Response): Promi
         MAX(f.week_number) as week_number,
         MAX(f.number_of_flights) as number_of_flights,
         SUM(i.issue_quantity) as total_quantity,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+        SUM(i.issue_quantity * f.fuel_price) as total_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel'
@@ -796,7 +806,7 @@ export const getWeeklyDieselSummary = async (req: Request, res: Response): Promi
         MAX(f.week_number) as week_number,
         MAX(f.number_of_flights) as number_of_flights,
         SUM(i.issue_quantity) as total_quantity,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+        SUM(i.issue_quantity * f.fuel_price) as total_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel'
@@ -887,17 +897,17 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
         DATE(i.issue_date) as date,
         DAYNAME(i.issue_date) as day_name,
         i.issued_for,
-        COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0) as fuel_price,
+        f.fuel_price,
         MAX(f.week_number) as week_number,
         SUM(i.issue_quantity) as issue_quantity,
         MAX(f.kilometers) as kilometers,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as daily_cost
+        SUM(i.issue_quantity * f.fuel_price) as daily_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel' 
       AND i.issue_date BETWEEN ? AND ?
       AND i.approval_status = 'APPROVED'
-      GROUP BY DATE(i.issue_date), DAYNAME(i.issue_date), i.issued_for, COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
+      GROUP BY DATE(i.issue_date), DAYNAME(i.issue_date), i.issued_for, f.fuel_price
       ORDER BY date, i.issued_for`, [start_date, end_date]);
         interface EquipmentData {
             quantity: number;
@@ -907,7 +917,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
         interface DailyData {
             date: string;
             day_name: string;
-            fuel_price: number | null;
+            fuel_price: number;
             equipmentData: Map<string, EquipmentData>;
         }
         interface EquipmentTotal {
@@ -995,7 +1005,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
           MAX(f.week_number) as week_number,
           MAX(f.number_of_flights) as number_of_flights,
           SUM(i.issue_quantity) as total_quantity,
-          SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+          SUM(i.issue_quantity * f.fuel_price) as total_cost
          FROM fuel_records f
          JOIN issue_details i ON f.issue_fk = i.id
          WHERE f.fuel_type = 'diesel'
@@ -1007,7 +1017,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
           MAX(f.week_number) as week_number,
           MAX(f.number_of_flights) as number_of_flights,
           SUM(i.issue_quantity) as total_quantity,
-          SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+          SUM(i.issue_quantity * f.fuel_price) as total_cost
          FROM fuel_records f
          JOIN issue_details i ON f.issue_fk = i.id
          WHERE f.fuel_type = 'diesel'
@@ -1812,7 +1822,6 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 rd.is_received,
                 rd.receive_fk,
                 COALESCE(sd.location, '') as location,
-                COALESCE(sd.card_number, '') as card_number,
                 pm.weighted_average_days AS predicted_days,
                 pm.percentile_10_days AS predicted_range_lower,
                 pm.percentile_90_days AS predicted_range_upper,
@@ -1869,6 +1878,7 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             FROM request_details rd
             LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
             LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
             WHERE 1=1
         `;
         const params: (string | number)[] = [];
@@ -1883,8 +1893,8 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
         }
         if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-            query += ` AND rd.equipment_number LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
+            query += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+            params.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             query += ` AND rd.part_number LIKE ?`;
@@ -1929,6 +1939,7 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 FROM request_details rd
                 LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
                 LEFT JOIN receive_details rec ON rd.id = rec.request_fk
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
                 WHERE 1=1
             `;
             const countParams: (string | number)[] = [];
@@ -1943,8 +1954,8 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
             }
             if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery += ` AND rd.equipment_number LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
+                countQuery += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+                countParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
             }
             if (partNumber && partNumber.toString().trim() !== '') {
                 countQuery += ` AND rd.part_number LIKE ?`;
@@ -2005,7 +2016,6 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             latestReceiveId: row.latest_receive_id,
             receiveIdsCsv: row.receive_ids_csv,
             location: row.location,
-            cardNumber: row.card_number,
             receivedTotalPendingApproved: Number(row.total_pending_approved) || 0,
             receivedTotalApproved: Number(row.total_approved) || 0,
             remainingQuantity: Number(row.remaining_quantity) || 0,
@@ -2056,7 +2066,6 @@ export const generateTenderReceiveReport = async (req: Request, res: Response): 
                 rd.approval_status,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.tender_reference_number,
                 rd.created_at,
                 rd.updated_at,
@@ -2151,7 +2160,6 @@ export const generateTenderReceiveReport = async (req: Request, res: Response): 
             derivedReceiveStatus: item.derived_receive_status,
             imagePath: item.image_path,
             location: item.location,
-            cardNumber: item.card_number,
             tenderReferenceNumber: item.tender_reference_number,
             createdAt: item.created_at,
             updatedAt: item.updated_at
@@ -2197,7 +2205,6 @@ export const generateBorrowHistoryReport = async (req: Request, res: Response): 
                 rd.borrow_reference_number,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.created_at,
                 rd.updated_at,
                 bs.source_name,
@@ -2335,7 +2342,6 @@ export const generateBorrowHistoryReport = async (req: Request, res: Response): 
             borrowSourceCode: item.source_code,
             imagePath: item.image_path,
             location: item.location,
-            cardNumber: item.card_number,
             createdAt: item.created_at,
             updatedAt: item.updated_at
         }));
@@ -2389,6 +2395,7 @@ export const exportRequestReceiveReport = async (req: Request, res: Response): P
                 FROM request_details rd
                 LEFT JOIN receive_details rec ON rd.id = rec.request_fk
                 LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
                 WHERE 1=1
             `;
             const params: (string | number)[] = [];
@@ -2405,8 +2412,8 @@ export const exportRequestReceiveReport = async (req: Request, res: Response): P
                     logEvents(`Added universal filter: ${universal}`, "reportLog.log");
                 }
                 if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                    query += ` AND rd.equipment_number LIKE ?`;
-                    params.push(`%${equipmentNumber}%`);
+                    query += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
+                    params.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
                     logEvents(`Added equipmentNumber filter: ${equipmentNumber}`, "reportLog.log");
                 }
                 if (partNumber && partNumber.toString().trim() !== '') {
@@ -2738,7 +2745,21 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
         const processedRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status <> 'REJECTED'`);
         const voidRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status = 'REJECTED'`);
         const issueClauseWithAlias = applyAliasToIssueClause('i');
-        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, sparesTotalsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult] = await Promise.all([
+        let capitalRrpValueClause = `WHERE rd.rrp_category = 'capital' AND rd.approval_status = 'APPROVED' AND rd.asset_fk IS NOT NULL`;
+        const capitalRrpValueParams: string[] = [];
+        if (fromDate && toDate) {
+            capitalRrpValueClause += ' AND rd.date BETWEEN ? AND ?';
+            capitalRrpValueParams.push(fromDate, toDate);
+        }
+        else if (fromDate) {
+            capitalRrpValueClause += ' AND rd.date >= ?';
+            capitalRrpValueParams.push(fromDate);
+        }
+        else if (toDate) {
+            capitalRrpValueClause += ' AND rd.date <= ?';
+            capitalRrpValueParams.push(toDate);
+        }
+        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, sparesTotalsResult, assetsTotalsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult] = await Promise.all([
             pool.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT request_number) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM receive_details ${receiveWhereClause}`, receiveParams.length > 0 ? receiveParams : undefined),
@@ -2755,6 +2776,11 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
                     COALESCE(SUM(current_balance), 0) as totalQuantity,
                     COALESCE(SUM(open_amount), 0) as totalValue
                  FROM stock_details`),
+            pool.query<RowDataPacket[]>(
+                `SELECT COALESCE(SUM(a.current_value), 0) as totalValue
+                 FROM assets a
+                 WHERE a.current_value IS NOT NULL AND a.current_value > 0`
+            ),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(issue_quantity), 0) as totalQuantity FROM issue_details ${issueWhereClause}`, issueParams.length > 0 ? issueParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(i.issue_quantity), 0) as totalQuantity
                  FROM issue_details i
@@ -2783,6 +2809,10 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
             processedForeignRRPs: processedForeignRRPsResult[0][0]?.count || 0,
             totalSparesQuantity: Number(sparesTotalsResult[0][0]?.totalQuantity) || 0,
             totalSparesValue: Number(sparesTotalsResult[0][0]?.totalValue) || 0,
+            totalAssetsValue: Number(assetsTotalsResult[0][0]?.totalValue) || 0,
+            grandTotalValue:
+                (Number(sparesTotalsResult[0][0]?.totalValue) || 0) +
+                (Number(assetsTotalsResult[0][0]?.totalValue) || 0),
             totalItemsIssued: Number(totalItemsIssuedResult[0][0]?.totalQuantity) || 0,
             petrolIssuedQuantity: Number(petrolIssuedQuantityResult[0][0]?.totalQuantity) || 0,
             dieselIssuedQuantity: Number(dieselIssuedQuantityResult[0][0]?.totalQuantity) || 0,
@@ -2835,8 +2865,9 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
             params.push(`%${nacCode}%`);
         }
         if (equipmentNumber) {
-            whereClause += ' AND rq.equipment_number LIKE ?';
-            params.push(`%${equipmentNumber}%`);
+            const pattern = `%${equipmentNumber}%`;
+            whereClause += ' AND (rq.equipment_number LIKE ? OR a.name LIKE ?)';
+            params.push(pattern, pattern);
         }
         if (supplierName) {
             whereClause += ' AND rrp.supplier_name LIKE ?';
@@ -2846,6 +2877,7 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
             SELECT COUNT(*) as total
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+                LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
         `;
@@ -2865,7 +2897,6 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
                 rd.received_by,
                 rd.approval_status,
                 rd.location,
-                rd.card_number,
                 rd.request_fk,
                 rd.rrp_fk,
                 rq.request_number,
@@ -2896,6 +2927,7 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
                 rrp.created_by as rrp_created_by
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
             ORDER BY rd.receive_date DESC, rd.id DESC
@@ -2964,8 +2996,9 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
             params.push(`%${nacCode}%`);
         }
         if (equipmentNumber) {
-            whereClause += ' AND rq.equipment_number LIKE ?';
-            params.push(`%${equipmentNumber}%`);
+            const pattern = `%${equipmentNumber}%`;
+            whereClause += ' AND (rq.equipment_number LIKE ? OR a.name LIKE ?)';
+            params.push(pattern, pattern);
         }
         if (supplierName) {
             whereClause += ' AND rrp.supplier_name LIKE ?';
@@ -2989,7 +3022,6 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
                 rd.received_by,
                 rd.approval_status,
                 rd.location,
-                rd.card_number,
                 rq.request_number,
                 rq.request_date,
                 rq.requested_by,
@@ -3018,6 +3050,7 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
                 rrp.created_by as rrp_created_by
             FROM receive_details rd
             LEFT JOIN request_details rq ON rd.request_fk = rq.id
+            LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rq.equipment_number COLLATE utf8mb4_unicode_ci
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
             ${whereClause}
             ORDER BY rd.receive_date DESC, rd.id DESC
@@ -3055,7 +3088,6 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
             'Airway Bill Number': row.airway_bill_number || '-',
             'RRP Approval Status': row.rrp_approval_status || '-',
             'Location': row.location || '-',
-            'Card Number': row.card_number || '-',
             'Received By': row.received_by || '-'
         }));
         const workbook = new ExcelJS.Workbook();
@@ -3121,12 +3153,12 @@ interface StockReportItem {
     true_balance_quantity: number;
     true_balance_amount: number;
     location: string;
-    card_number: string;
 }
 export const getCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
     try {
+        await ensureAssetSpareSchema();
         const defaultFromDate = '2025-07-17';
         const defaultToDate = new Date().toISOString().split('T')[0];
         const reportFromDate = fromDate ? String(fromDate) : defaultFromDate;
@@ -3146,8 +3178,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             params.push(`%${String(partNumber)}%`);
         }
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('s.applicable_equipments LIKE ?');
-            params.push(`%${String(equipmentNumber)}%`);
+            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
+            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3172,7 +3204,6 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 s.part_numbers,
                 s.applicable_equipments,
                 s.location,
-                s.card_number,
                 s.open_quantity,
                 s.open_amount,
                 -- Calculate opening balance (open + receives before fromDate - issues before fromDate)
@@ -3293,8 +3324,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 balance_quantity: balanceQty,
                 true_balance_quantity: trueBalanceQty,
                 true_balance_amount: trueBalanceAmt,
-                location: row.location || '',
-                card_number: row.card_number || ''
+                location: row.location || ''
             };
         });
         const totals = {
@@ -3329,6 +3359,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
     try {
+        await ensureAssetSpareSchema();
         const ExcelJS = require('exceljs');
         const workbook = new ExcelJS.Workbook();
         const worksheet = workbook.addWorksheet('Stock Report');
@@ -3361,8 +3392,8 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             params.push(`%${String(partNumber)}%`);
         }
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('s.applicable_equipments LIKE ?');
-            params.push(`%${String(equipmentNumber)}%`);
+            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
+            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3380,7 +3411,6 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 s.part_numbers,
                 s.applicable_equipments,
                 s.location,
-                s.card_number,
                 s.open_quantity,
                 s.open_amount,
                 (
@@ -3488,8 +3518,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 balance_quantity: balanceQty,
                 true_balance_quantity: trueBalanceQty,
                 true_balance_amount: trueBalanceAmt,
-                location: row.location || '',
-                card_number: row.card_number || ''
+                location: row.location || ''
             };
         });
         worksheet.addRow([
@@ -3509,8 +3538,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             'Balance Quantity',
             'True Balance Quantity',
             'True Balance Amount',
-            'Location',
-            'Card Number'
+            'Location'
         ]);
         const headerRow = worksheet.getRow(1);
         headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -3538,8 +3566,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 item.balance_quantity || 0,
                 item.true_balance_quantity || 0,
                 item.true_balance_amount || 0,
-                item.location || '',
-                item.card_number || ''
+                item.location || ''
             ]);
         });
         worksheet.columns.forEach((column: any) => {
@@ -3723,7 +3750,7 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
         }
         const reportFromDate = String(fromDate);
         const reportToDate = String(toDate);
-        const [stockItem] = await connection.execute<RowDataPacket[]>(`SELECT nac_code, item_name, part_numbers, applicable_equipments, location, card_number 
+        const [stockItem] = await connection.execute<RowDataPacket[]>(`SELECT nac_code, item_name, part_numbers, applicable_equipments, location 
              FROM stock_details 
              WHERE nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci 
              LIMIT 1`, [nacCode]);
@@ -3820,7 +3847,6 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
             worksheet.addRow(['Part Numbers:', item.part_numbers || '']);
             worksheet.addRow(['Equipment Numbers:', item.applicable_equipments || '']);
             worksheet.addRow(['Location:', item.location || '']);
-            worksheet.addRow(['Card Number:', item.card_number || '']);
             worksheet.addRow(['']);
             worksheet.addRow(['Date Range:', `${reportFromDate} to ${reportToDate}`]);
             worksheet.addRow(['']);
@@ -4050,7 +4076,6 @@ interface ReceiveDetailItem {
     receive_source: string;
     tender_reference_number?: string;
     location: string;
-    card_number: string;
     unit: string;
     item_name: string;
 }
@@ -4315,7 +4340,6 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
                 rd.receive_source,
                 rd.tender_reference_number,
                 rd.location,
-                rd.card_number,
                 rd.unit,
                 rd.item_name
             FROM receive_details rd
@@ -4338,7 +4362,6 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
             receive_source: row.receive_source || '',
             tender_reference_number: row.tender_reference_number || '',
             location: row.location || '',
-            card_number: row.card_number || '',
             unit: row.unit || '',
             item_name: row.item_name || ''
         }));

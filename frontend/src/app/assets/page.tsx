@@ -3,6 +3,7 @@ import { useAuthContext } from '@/context/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AssetTypesManagement } from '@/components/assets/AssetTypesManagement';
 import { AssetsManagement } from '@/components/assets/AssetsManagement';
+import { AssetSettingsPanel } from '@/components/assets/AssetSettingsPanel';
 import { AlertCircle } from 'lucide-react';
 export default function AssetsPage() {
     const { permissions } = useAuthContext();
@@ -27,15 +28,19 @@ export default function AssetsPage() {
           </div>
 
           <Tabs defaultValue="assets" className="w-full">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsList className="grid w-full max-w-lg grid-cols-3">
               <TabsTrigger value="assets">Assets</TabsTrigger>
               <TabsTrigger value="types">Asset Types</TabsTrigger>
+              <TabsTrigger value="settings">Settings</TabsTrigger>
             </TabsList>
             <TabsContent value="assets" className="mt-6">
               <AssetsManagement />
             </TabsContent>
             <TabsContent value="types" className="mt-6">
               <AssetTypesManagement />
+            </TabsContent>
+            <TabsContent value="settings" className="mt-6">
+              <AssetSettingsPanel />
             </TabsContent>
           </Tabs>
         </div>

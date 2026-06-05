@@ -1,13 +1,13 @@
 'use client';
-import { createContext, useContext, useMemo, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useMemo, ReactNode } from 'react';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
 import { useAuthContext } from '@/context/AuthContext';
-import { useQueryClient } from '@tanstack/react-query';
 
 interface ApprovalCounts {
     requests: number | null;
     receives: number | null;
+    assetReceives: number | null;
     rrps: number | null;
     issues: number | null;
     fuelIssues: number | null;
@@ -24,6 +24,7 @@ interface ApprovalCountsContextValue {
 const defaultCounts: ApprovalCounts = {
     requests: null,
     receives: null,
+    assetReceives: null,
     rrps: null,
     issues: null,
     fuelIssues: null,
@@ -33,36 +34,15 @@ const defaultCounts: ApprovalCounts = {
 
 const ApprovalCountsContext = createContext<ApprovalCountsContextValue | null>(null);
 
-const computeTotal = (counts: ApprovalCounts) => ['requests', 'receives', 'rrps', 'issues', 'fuelIssues'].reduce((sum, key) => {
+const computeTotal = (counts: ApprovalCounts) => ['requests', 'receives', 'assetReceives', 'rrps', 'issues', 'fuelIssues'].reduce((sum, key) => {
     const value = counts[key as keyof ApprovalCounts];
     return typeof value === 'number' ? sum + value : sum;
 }, 0);
-const normalizePendingReceives = (payload: unknown): Array<{ id: number }> => {
-    const rows = Array.isArray(payload)
-        ? payload
-        : (payload &&
-            typeof payload === 'object' &&
-            'items' in payload &&
-            Array.isArray((payload as { items: unknown[] }).items)
-            ? (payload as { items: unknown[] }).items
-            : []);
-    const unique = new Map<number, { id: number }>();
-    rows.forEach((row) => {
-        if (!row || typeof row !== 'object')
-            return;
-        const id = Number((row as { id?: unknown }).id);
-        if (!Number.isFinite(id))
-            return;
-        unique.set(id, { id });
-    });
-    return Array.from(unique.values());
-};
 
 export const ApprovalCountsProvider = ({ children }: {
     children: ReactNode;
 }) => {
     const { permissions } = useAuthContext();
-    const queryClient = useQueryClient();
     
     const hasAnyApprovalPermission = useMemo(() => {
         if (!permissions)
@@ -70,6 +50,7 @@ export const ApprovalCountsProvider = ({ children }: {
         return [
             'can_approve_request',
             'can_approve_receive',
+            'can_approve_assets_receive',
             'can_approve_rrp',
             'can_approve_issues'
         ].some((perm) => permissions.includes(perm));
@@ -96,10 +77,32 @@ export const ApprovalCountsProvider = ({ children }: {
             staleTime: 1000 * 30,
         }
     );
+
+    const { data: assetReceivesRes, isLoading: assetReceivesLoading } = useApiQuery(
+        queryKeys.assetReceive.pending(),
+        '/api/asset-receive/pending',
+        undefined,
+        {
+            enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_assets_receive'),
+            refetchInterval: 60000,
+            staleTime: 1000 * 30,
+        }
+    );
     
     const { data: rrpsRes, isLoading: rrpsLoading } = useApiQuery(
         queryKeys.rrp.pending(),
         '/api/rrp/pending',
+        undefined,
+        {
+            enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_rrp'),
+            refetchInterval: 60000,
+            staleTime: 1000 * 30,
+        }
+    );
+
+    const { data: capitalRrpsRes, isLoading: capitalRrpsLoading } = useApiQuery(
+        ['capital-rrp', 'pending'],
+        '/api/capital-rrp/pending',
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_rrp'),
@@ -138,6 +141,7 @@ export const ApprovalCountsProvider = ({ children }: {
         const nextCounts: ApprovalCounts = {
             requests: null,
             receives: null,
+            assetReceives: null,
             rrps: null,
             issues: null,
             fuelIssues: null,
@@ -163,29 +167,53 @@ export const ApprovalCountsProvider = ({ children }: {
             }
         
         if (permissions?.includes('can_approve_receive') && receivesRes?.data) {
-            nextCounts.receives = normalizePendingReceives(receivesRes.data).length;
+            if (Array.isArray(receivesRes.data)) {
+                nextCounts.receives = receivesRes.data.length;
+            } else if (
+                typeof receivesRes.data === 'object' &&
+                receivesRes.data !== null &&
+                'items' in receivesRes.data &&
+                Array.isArray((receivesRes.data as { items: unknown }).items)
+            ) {
+                nextCounts.receives = (receivesRes.data as { items: unknown[] }).items.length;
+            } else {
+                nextCounts.receives = 0;
+            }
+        }
+
+        if (permissions?.includes('can_approve_assets_receive') && assetReceivesRes?.data) {
+            nextCounts.assetReceives = Array.isArray(assetReceivesRes.data) ? assetReceivesRes.data.length : 0;
         }
         
-        if (permissions?.includes('can_approve_rrp') && rrpsRes?.data) {
-            const pending = (
-                typeof rrpsRes.data === 'object' &&
+        if (permissions?.includes('can_approve_rrp')) {
+            const unique = new Set<string>();
+            const sparePending = (
+                typeof rrpsRes?.data === 'object' &&
                 rrpsRes.data !== null &&
                 'pendingRRPs' in rrpsRes.data &&
                 Array.isArray((rrpsRes.data as { pendingRRPs: unknown }).pendingRRPs)
             )
                 ? (rrpsRes.data as { pendingRRPs: unknown[] }).pendingRRPs
-                : rrpsRes.data;
-            if (Array.isArray(pending)) {
-                const unique = new Set<string>();
-                pending.forEach((item: { rrp_number?: string }) => {
-                    if (item?.rrp_number) {
-                        unique.add(item.rrp_number);
-                    }
+                : [];
+            if (Array.isArray(sparePending)) {
+                (sparePending as { rrp_number?: string }[]).forEach((item) => {
+                    if (item?.rrp_number) unique.add(item.rrp_number);
                 });
-                nextCounts.rrps = unique.size;
-            } else {
-                nextCounts.rrps = 0;
             }
+            const capitalPending = (
+                typeof capitalRrpsRes?.data === 'object' &&
+                capitalRrpsRes.data !== null &&
+                'pendingRRPs' in capitalRrpsRes.data &&
+                Array.isArray((capitalRrpsRes.data as { pendingRRPs: unknown }).pendingRRPs)
+            )
+                ? (capitalRrpsRes.data as { pendingRRPs: unknown[] }).pendingRRPs
+                : [];
+            if (Array.isArray(capitalPending)) {
+                (capitalPending as { rrp_number?: string }[]).forEach((item) => {
+                    if (item?.rrp_number) unique.add(item.rrp_number);
+                });
+            }
+            nextCounts.rrps = unique.size;
         }
         
         if (permissions?.includes('can_approve_issues') && issuesRes?.data) {
@@ -228,25 +256,18 @@ export const ApprovalCountsProvider = ({ children }: {
         
             nextCounts.total = computeTotal(nextCounts);
         return nextCounts;
-    }, [hasAnyApprovalPermission, permissions, requestsRes?.data, receivesRes?.data, rrpsRes?.data, issuesRes?.data, fuelIssuesRes?.data]);
+    }, [hasAnyApprovalPermission, permissions, requestsRes?.data, receivesRes?.data, assetReceivesRes?.data, rrpsRes?.data, capitalRrpsRes?.data, issuesRes?.data, fuelIssuesRes?.data]);
+
+    const loading = requestsLoading || receivesLoading || assetReceivesLoading || rrpsLoading || capitalRrpsLoading || issuesLoading || fuelIssuesLoading;
     
-    const loading = requestsLoading || receivesLoading || rrpsLoading || issuesLoading || fuelIssuesLoading;
-    
-    const refresh = useCallback(async () => {
-        await Promise.all([
-            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.receive.pending() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.rrp.pending() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.issue.pending() }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.issue.pendingFuel() })
-        ]);
-    }, [queryClient]);
+    const refresh = async () => {
+    };
     
     const value = useMemo<ApprovalCountsContextValue>(() => ({
         counts,
         loading,
         refresh
-    }), [counts, loading, refresh]);
+    }), [counts, loading]);
     
     return <ApprovalCountsContext.Provider value={value}>{children}</ApprovalCountsContext.Provider>;
 };

@@ -29,12 +29,10 @@ export const getPermissions = async (req: Request, res: Response): Promise<void>
             });
             return;
         }
-        const currentUserId = currentUserData[0].id;
         const [permissions] = await pool.query<PermissionWithAccess[]>(`SELECT p.id, p.permission_name, p.permission_readable, p.permission_type,
                     CASE WHEN FIND_IN_SET(?, p.allowed_user_ids) > 0 THEN 1 ELSE 0 END as hasAccess
              FROM user_permissions p
-             WHERE FIND_IN_SET(?, p.allowed_user_ids) > 0
-             ORDER BY p.id ASC`, [userId, currentUserId]);
+             ORDER BY p.id ASC`, [userId]);
         logEvents(`Successfully fetched permissions for user: ${userId} by current user: ${currentUser}`, "permissionLog.log");
         res.status(200).json(permissions);
     }

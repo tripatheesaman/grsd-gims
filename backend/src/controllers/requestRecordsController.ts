@@ -61,13 +61,13 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
         let whereConditions = [];
         let queryParams: any[] = [];
         if (universal) {
-            whereConditions.push(`(rd.request_number LIKE ? OR rd.nac_code LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR rd.equipment_number LIKE ?)`);
+            whereConditions.push(`(rd.request_number LIKE ? OR rd.nac_code LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR rd.equipment_number LIKE ? OR a.name LIKE ?)`);
             const searchParam = `%${universal}%`;
-            queryParams.push(searchParam, searchParam, searchParam, searchParam, searchParam);
+            queryParams.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
         }
         if (equipmentNumber) {
-            whereConditions.push(`rd.equipment_number LIKE ?`);
-            queryParams.push(`%${equipmentNumber}%`);
+            whereConditions.push(`(rd.equipment_number LIKE ? OR a.name LIKE ?)`);
+            queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
             whereConditions.push(`rd.part_number LIKE ?`);
@@ -89,7 +89,7 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
             });
             whereClause = `WHERE ${whereClauseWithValues}`;
         }
-        const countQuery = `SELECT COUNT(*) as total FROM request_details rd ${whereClause}`;
+        const countQuery = `SELECT COUNT(*) as total FROM request_details rd LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci ${whereClause}`;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery);
         const totalCount = countResult[0].total;
         const totalPages = Math.ceil(totalCount / Number(pageSize));
@@ -120,6 +120,7 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
         ), 0) AS total_pending_approved
       FROM request_details rd
       LEFT JOIN prediction_metrics pm ON pm.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci
       ${whereClause}
       ORDER BY rd.created_at DESC
       LIMIT ${Number(pageSize)} OFFSET ${offset}

@@ -29,7 +29,6 @@ interface ReceiveSearchResult {
         equipmentNumber: string;
         imageUrl: string;
         location: string;
-        cardNumber: string;
         unit: string;
         remarks: string;
     }[];

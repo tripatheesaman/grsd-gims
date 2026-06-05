@@ -11,7 +11,6 @@ export interface ReceiveRRPReportItem extends RowDataPacket {
     received_by: string | null;
     approval_status: string;
     location: string | null;
-    card_number: string | null;
     request_fk: number;
     rrp_fk: number | null;
     request_number: string | null;

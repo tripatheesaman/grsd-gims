@@ -1,46 +1,94 @@
 'use client';
+
 import { SearchControls, SearchResults, ItemDetailsModal } from '@/components/search';
 import { useSearch } from '@/hooks/useSearch';
 import { useItemDetails } from '@/hooks/useItemDetails';
 import { useAuthContext } from '@/context/AuthContext';
+import { InventoryPageHeader } from '@/components/inventory/InventoryPageHeader';
+import { SearchResult, ReceiveSearchResult } from '@/types/search';
+
 export default function SearchPage() {
     const { permissions } = useAuthContext();
     const canViewFullDetails = permissions.includes('can_view_full_item_details_in_search');
-    const { results, isLoading, error, currentPage, totalCount, totalPages, handleSearch, handlePageChange, } = useSearch();
-    const { selectedItem, isModalOpen, fetchItemDetails, closeModal, } = useItemDetails();
-    const handleRowDoubleClick = (item: {
-        id: number;
-    }) => {
+    const {
+        searchParams,
+        results,
+        isLoading,
+        error,
+        currentPage,
+        pageSize,
+        totalCount,
+        totalPages,
+        handlePageChange,
+        handlePageSizeChange,
+        clearFilters,
+        handleFilterChange,
+        hasActiveFilters,
+    } = useSearch();
+    const {
+        selectedItem,
+        isModalOpen,
+        isLoading: detailsLoading,
+        error: detailsError,
+        fetchItemDetails,
+        closeModal,
+    } = useItemDetails();
+
+    const handleViewDetails = (item: SearchResult | ReceiveSearchResult) => {
         if (canViewFullDetails) {
             fetchItemDetails(item.id);
         }
     };
-    return (<div className="min-h-screen bg-gray-50">
-    <div className="container mx-auto px-4 py-8">
-        <div className="space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">Search Inventory</h1>
-              <p className="text-gray-600 mt-1">Find items by NAC code, part number, or equipment number</p>
+
+    return (
+        <div className="bg-[#f6f8fc]">
+            <div className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:py-8">
+                <InventoryPageHeader
+                    title="Search inventory"
+                    description="Find spares by NAC code, part number, equipment code, or asset name. Browse all stock when filters are empty."
+                    badge="Live search"
+                />
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                    <SearchControls
+                        values={{
+                            universal: searchParams.universal,
+                            equipment: searchParams.equipmentNumber,
+                            part: searchParams.partNumber,
+                        }}
+                        onChange={handleFilterChange}
+                        onClear={clearFilters}
+                    />
+                </section>
+
+                <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <SearchResults
+                        results={results}
+                        isLoading={isLoading}
+                        error={error}
+                        onViewDetails={handleViewDetails}
+                        onRowDoubleClick={handleViewDetails}
+                        canViewFullDetails={canViewFullDetails}
+                        currentPage={currentPage}
+                        totalCount={totalCount}
+                        totalPages={totalPages}
+                        pageSize={pageSize}
+                        onPageChange={handlePageChange}
+                        onPageSizeChange={handlePageSizeChange}
+                        hasActiveFilters={hasActiveFilters}
+                    />
+                </section>
+
+                {canViewFullDetails && (
+                    <ItemDetailsModal
+                        isOpen={isModalOpen}
+                        onClose={closeModal}
+                        item={selectedItem}
+                        isLoading={detailsLoading}
+                        error={detailsError}
+                    />
+                )}
             </div>
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-[#d2293b] animate-pulse"></div>
-              <span className="text-sm text-gray-600">Live Search</span>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
-        <SearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')}/>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
-            {isLoading ? (<div className="flex items-center justify-center h-24">
-                <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#003594] border-t-transparent"></div>
-              </div>) : (<SearchResults results={results} isLoading={isLoading} error={error} onRowDoubleClick={handleRowDoubleClick} canViewFullDetails={canViewFullDetails} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={handlePageChange}/>)}
         </div>
-
-          {canViewFullDetails && (<ItemDetailsModal isOpen={isModalOpen} onClose={closeModal} item={selectedItem}/>)}
-        </div>
-      </div>
-      </div>);
+    );
 }

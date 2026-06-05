@@ -10,6 +10,7 @@ import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, } from 
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface BalanceTransferRecord {
     id: number;
     rrpNumber: string;
@@ -190,7 +191,7 @@ export default function BalanceTransferRecordsPage() {
                 
                 
                 <div>
-                  <Input placeholder="Equipment Number..." value={equipmentNumberSearch} onChange={(e) => setEquipmentNumberSearch(e.target.value)} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
+                  <EquipmentAssetAutocomplete value={equipmentNumberSearch} onChange={setEquipmentNumberSearch} placeholder="Equipment code or asset name" className="w-full"/>
                 </div>
                 
                 

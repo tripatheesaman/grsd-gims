@@ -310,17 +310,8 @@ export const transferBalance = async (req: Request, res: Response): Promise<void
             });
             return;
         }
-        const [configRows] = await connection.query<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
-        if (configRows.length === 0) {
-            await connection.rollback();
-            logEvents(`Failed to transfer balance - Current FY configuration not found`, "balanceTransferLog.log");
-            res.status(500).json({
-                error: 'Internal Server Error',
-                message: 'Current FY configuration not found'
-            });
-            return;
-        }
-        const currentFY = configRows[0].config_value;
+        const { resolveCurrentFiscalYear } = await import('../services/fiscalYearService');
+        const currentFY = await resolveCurrentFiscalYear(connection);
         const [issueSlipResults] = await connection.query<RowDataPacket[]>(`SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(issue_slip_number, '-', -1) AS UNSIGNED)), 0) + 1 as next_number
        FROM issue_details 
        WHERE DATE(issue_date) = ?`, [formattedTransferDate]);

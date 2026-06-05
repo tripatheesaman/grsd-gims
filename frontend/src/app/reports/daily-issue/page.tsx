@@ -12,6 +12,7 @@ import { CalendarIcon } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { DailyIssueReport, Issue } from '@/components/reports/DailyIssueReport';
 import { getErrorMessage } from '@/lib/errorHandling';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 export default function DailyIssueReportPage() {
     const { showErrorToast } = useCustomToast();
     const [fromDate, setFromDate] = useState<Date>();
@@ -90,8 +91,8 @@ export default function DailyIssueReportPage() {
                     {fromDate ? format(fromDate, "PPP") : "Select date"}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar value={fromDate} onChange={(date) => date && setFromDate(startOfDay(date))} className="rounded-md border"/>
+                <PopoverContent className="w-auto overflow-hidden border border-slate-200 bg-white p-0 shadow-md">
+                  <Calendar value={fromDate} onChange={(date) => date && setFromDate(startOfDay(date))} className="border-0"/>
                 </PopoverContent>
               </Popover>
             </div>
@@ -105,8 +106,8 @@ export default function DailyIssueReportPage() {
                     {toDate ? format(toDate, "PPP") : "Select date"}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar value={toDate} onChange={(date) => date && setToDate(startOfDay(date))} className="rounded-md border"/>
+                <PopoverContent className="w-auto overflow-hidden border border-slate-200 bg-white p-0 shadow-md">
+                  <Calendar value={toDate} onChange={(date) => date && setToDate(startOfDay(date))} className="border-0"/>
                 </PopoverContent>
               </Popover>
             </div>
@@ -115,7 +116,7 @@ export default function DailyIssueReportPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="equipmentNumber">Equipment Number (Optional)</Label>
-              <Input id="equipmentNumber" value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Enter equipment number" className="w-full"/>
+              <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Enter equipment code or name" className="w-full"/>
             </div>
 
             <div className="space-y-2">

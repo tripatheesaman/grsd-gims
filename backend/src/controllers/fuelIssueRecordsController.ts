@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
+import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 interface FuelIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -36,9 +37,11 @@ interface FuelIssueFormData {
     is_kilometer_reset: boolean;
 }
 export const getAllFuelIssueRecords = async (req: Request, res: Response): Promise<void> => {
-    const { page = '1', limit = '10', search = '', sortBy = 'issue_date', sortOrder = 'DESC', issueSlipNumber = '', partNumber = '', itemName = '', nacCode = '', issuedFor = '', status = '', issuedBy = '', fuelType = '', fromDate = '', toDate = '', weekNumber = '', equipmentNumber = '' } = req.query;
+    const { page = '1', limit = '10', search = '', sortBy = 'issue_date', sortOrder = 'DESC', issueSlipNumber = '', partNumber = '', itemName = '', nacCode = '', issuedFor = '', status = '', issuedBy = '', fuelType = '', fromDate = '', toDate = '', weekNumber = '', equipmentNumber = '', fiscalYear: fiscalYearQuery } = req.query;
     const connection = await pool.getConnection();
     try {
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const fyFilter = resolveFilterFiscalYear(fiscalYearQuery as string | undefined, currentFY);
         const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
         const validSortFields = ['issue_date', 'issue_slip_number', 'nac_code', 'part_number', 'issued_for', 'issued_by', 'fuel_type', 'kilometers'];
         const validSortBy = validSortFields.includes(sortBy as string) ? sortBy as string : 'issue_date';
@@ -90,8 +93,12 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
             queryParams.push(weekNumber);
         }
         if (equipmentNumber) {
-            searchConditions += ' AND i.issued_for LIKE ?';
-            queryParams.push(`%${equipmentNumber}%`);
+            searchConditions += ' AND (i.issued_for LIKE ? OR a.name LIKE ?)';
+            queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
+        }
+        if (fyFilter) {
+            searchConditions += ' AND f.fy = ?';
+            queryParams.push(fyFilter);
         }
         if (search) {
             searchConditions += ` AND (
@@ -109,6 +116,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
       SELECT COUNT(*) as total 
       FROM fuel_records f
       JOIN issue_details i ON f.issue_fk = i.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.nac_code IN (?, ?)
       ${searchConditions}
@@ -130,16 +138,14 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
         i.issued_by,
         i.approval_status,
         f.fuel_type,
-        CASE 
-          WHEN TRIM(i.nac_code) = 'GT 07986' THEN COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
-          ELSE f.fuel_price
-        END as fuel_price,
+        f.fuel_price,
         f.kilometers,
         f.is_kilometer_reset,
         f.week_number,
         f.fy
       FROM fuel_records f
       JOIN issue_details i ON f.issue_fk = i.id
+      LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.nac_code IN (?, ?)
       ${searchConditions}
@@ -192,10 +198,7 @@ export const getFuelIssueRecordById = async (req: Request, res: Response): Promi
         i.issued_by,
         i.approval_status,
         f.fuel_type,
-        CASE 
-          WHEN TRIM(i.nac_code) = 'GT 07986' THEN COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
-          ELSE f.fuel_price
-        END as fuel_price,
+        f.fuel_price,
         f.kilometers,
         f.is_kilometer_reset,
         f.week_number,
@@ -234,11 +237,7 @@ export const createFuelIssueRecord = async (req: Request, res: Response): Promis
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [configRows] = await connection.query<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
-        if (configRows.length === 0) {
-            throw new Error('Current FY configuration not found');
-        }
-        const currentFY = configRows[0].config_value;
+        const currentFY = await resolveCurrentFiscalYear(connection);
         const [dayNumberResult] = await connection.query<RowDataPacket[]>(`SELECT 
         CASE 
           WHEN MIN(issue_date) IS NULL THEN 1

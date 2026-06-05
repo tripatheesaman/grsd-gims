@@ -32,15 +32,12 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         image: undefined,
         unit: '',
         location: '',
-        cardNumber: '',
-        isLocationChanged: false,
-        isCardNumberChanged: false
+        isLocationChanged: false
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isCustomPartNumber, setIsCustomPartNumber] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [initialLocation, setInitialLocation] = useState('');
-    const [initialCardNumber, setInitialCardNumber] = useState('');
     const [requestedUnit, setRequestedUnit] = useState<string>('');
     const [previousImagePath, setPreviousImagePath] = useState<string | null>(null);
     const [isLoadingImage, setIsLoadingImage] = useState(false);
@@ -73,17 +70,6 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         }
         const pattern = /^[A-Za-z0-9]+(-[A-Za-z0-9]+)+$/;
         return pattern.test(trimmed);
-    };
-    const isValidCardNumber = (value: string | undefined | null): boolean => {
-        if (!value)
-            return false;
-        const trimmed = value.trim();
-        if (!trimmed)
-            return false;
-        if (!/^\d+$/.test(trimmed))
-            return false;
-        const num = Number(trimmed);
-        return Number.isInteger(num) && num > 0;
     };
     useEffect(() => {
         const fetchAvailableUnits = async () => {
@@ -152,13 +138,10 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
                 requestedUnit: unit,
                 conversionBase: undefined,
                 location: item.location || '',
-                cardNumber: item.cardNumber || '',
-                isLocationChanged: false,
-                isCardNumberChanged: false
+                isLocationChanged: false
             });
             setIsCustomPartNumber(!item.partNumber);
             setInitialLocation(item.location);
-            setInitialCardNumber(item.cardNumber);
             if (item.nacCode && item.nacCode !== 'N/A') {
                 fetchPreviousImage(item.nacCode);
             }
@@ -205,12 +188,6 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         }
         else if (!isValidLocation(formData.location)) {
             newErrors.location = 'Location must be like AAA-BB-CC-11 or be an approved descriptive location.';
-        }
-        if (!formData.cardNumber.trim()) {
-            newErrors.cardNumber = 'Card number is required';
-        }
-        else if (!isValidCardNumber(formData.cardNumber)) {
-            newErrors.cardNumber = 'Card number must be a positive whole number (not 0).';
         }
         if (!formData.image && !formData.imagePath) {
             newErrors.image = 'Item image is required';
@@ -393,19 +370,6 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
                 {errors.location && (<p className="text-sm text-red-500 mt-1">{errors.location}</p>)}
           </div>
 
-              <div>
-                <Label htmlFor="cardNumber" className="text-sm font-medium text-[#003594]">Card Number *</Label>
-                <Input id="cardNumber" value={formData.cardNumber} onChange={(e) => {
-            setFormData(prev => ({
-                ...prev,
-                cardNumber: e.target.value,
-                isCardNumberChanged: true
-            }));
-        }} className={`mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 ${errors.cardNumber ? 'border-red-500' : ''}`} placeholder="Enter card number (positive integer)" required disabled={initialCardNumber
-            ? isValidCardNumber(initialCardNumber)
-            : false} inputMode="numeric"/>
-                {errors.cardNumber && (<p className="text-sm text-red-500 mt-1">{errors.cardNumber}</p>)}
-              </div>
             </div>
           </div>
 

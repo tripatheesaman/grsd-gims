@@ -13,8 +13,9 @@ export default function AppSettingsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const { permissions } = useAuthContext();
     const [fiscalYear, setFiscalYear] = useState<string>("");
+    const [fyStartBs, setFyStartBs] = useState<string>("");
+    const [fyEndBs, setFyEndBs] = useState<string>("");
     const [isLoading, setIsLoading] = useState(false);
-    const canEditFiscalYear = permissions?.includes('can_change_fy') || permissions?.includes('can_access_settings');
     const canConfigureEmails = permissions?.includes('can_configure_request_emails');
     const canToggleMail = permissions?.includes('can_stop_and_start_mail_sending');
     const [mailSendingEnabled, setMailSendingEnabled] = useState(false);
@@ -54,6 +55,8 @@ export default function AppSettingsPage() {
                 const response = await API.get('/api/settings/fiscal-year');
                 if (response.status === 200) {
                     setFiscalYear(response.data.fiscalYear);
+                    setFyStartBs(response.data.startBs || '');
+                    setFyEndBs(response.data.endBs || '');
                 }
             }
             catch {
@@ -99,48 +102,6 @@ export default function AppSettingsPage() {
         };
         fetchEmailConfig();
     }, [showErrorToast]);
-    const handleSave = async () => {
-        if (!canEditFiscalYear) {
-            showErrorToast({
-                title: 'Error',
-                message: "You don't have permission to change fiscal year",
-                duration: 3000,
-            });
-            return;
-        }
-        const fiscalYearRegex = /^\d{4}\/\d{2}$/;
-        if (!fiscalYearRegex.test(fiscalYear)) {
-            showErrorToast({
-                title: 'Error',
-                message: "Fiscal year must be in format YYYY/YY (e.g., 2081/82)",
-                duration: 3000,
-            });
-            return;
-        }
-        try {
-            setIsLoading(true);
-            const response = await API.put('/api/settings/fiscal-year', {
-                fiscalYear
-            });
-            if (response.status === 200) {
-                showSuccessToast({
-                    title: 'Success',
-                    message: "Fiscal year updated successfully",
-                    duration: 3000,
-                });
-            }
-        }
-        catch {
-            showErrorToast({
-                title: 'Error',
-                message: "Failed to update fiscal year",
-                duration: 3000,
-            });
-        }
-        finally {
-            setIsLoading(false);
-        }
-    };
     const handleSaveEmailSettings = async () => {
         if (!canConfigureEmails) {
             showErrorToast({
@@ -265,17 +226,18 @@ export default function AppSettingsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="fiscalYear">Fiscal Year</Label>
-              <Input id="fiscalYear" value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} placeholder="e.g., 2081/82" disabled={!canEditFiscalYear} className="max-w-xs"/>
+            <div className="space-y-2 max-w-lg">
+              <Label>Fiscal year (automatic)</Label>
+              <p className="text-2xl font-semibold text-[#003594]">{fiscalYear || '—'}</p>
+              {fyStartBs && fyEndBs && (
+                <p className="text-sm text-gray-600">
+                  Nepali period: {fyStartBs} through {fyEndBs}. The system updates the running FY on Shrawan 1
+                  (month 4, day 1) and resets issue slip numbers, RRP sequences, and fuel week numbers per FY.
+                </p>
+              )}
               <p className="text-sm text-gray-500">
-                Enter fiscal year in format YYYY/YY (e.g., 2081/82)
+                Manual FY changes are disabled. Historical records keep their original FY stamp.
               </p>
-            </div>
-            <div className="flex justify-end mt-4">
-              <Button onClick={handleSave} disabled={isLoading || !canEditFiscalYear} className="bg-[#003594] text-white hover:bg-[#002a6e]">
-                {isLoading ? "Saving..." : "Save Changes"}
-              </Button>
             </div>
           </div>
         </CardContent>

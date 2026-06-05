@@ -2,15 +2,26 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
+import {
+    SPARE_STOCK_JOIN,
+    SPARE_EQUIPMENT_CODES_SQL,
+    SPARE_EQUIPMENT_DISPLAY_SQL,
+    appendEquipmentFilter,
+    appendUniversalAssetNameFilter,
+    buildSimpleStockListSql,
+    buildSimpleStockCountSql,
+    equipmentDisplaySubquery,
+} from '../services/spareEquipmentDisplay';
+import { enrichEquipmentDisplays } from '../services/spareEquipmentEnrichment';
 interface SearchResult extends RowDataPacket {
     id: number;
     nacCode: string;
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
+    equipmentDisplay?: string;
     currentBalance: number;
     location: string;
-    cardNumber: string;
 }
 interface ItemDetails extends RowDataPacket {
     id: number;
@@ -18,9 +29,9 @@ interface ItemDetails extends RowDataPacket {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
+    equipmentDisplay?: string;
     currentBalance: number;
     location: string;
-    cardNumber: string;
     unit: string;
     openQuantity: number;
     openAmount: number;
@@ -38,6 +49,7 @@ interface SearchError extends Error {
     sqlState?: string;
     sqlMessage?: string;
 }
+
 export const getItemDetails = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     if (!id) {
@@ -60,7 +72,6 @@ export const getItemDetails = async (req: Request, res: Response): Promise<void>
           sd.applicable_equipments,
           sd.current_balance,
           sd.location,
-          sd.card_number,
           sd.unit,
           sd.open_quantity,
           sd.open_amount,
@@ -108,9 +119,9 @@ export const getItemDetails = async (req: Request, res: Response): Promise<void>
         item_name as itemName,
         part_numbers as partNumber,
         applicable_equipments as equipmentNumber,
+        ${equipmentDisplaySubquery('stock_info.nac_code', 'stock_info.applicable_equipments')} as equipmentDisplay,
         current_balance as currentBalance,
         location,
-        card_number as cardNumber,
         unit,
         openQuantity,
         open_amount as openAmount,
@@ -129,7 +140,45 @@ export const getItemDetails = async (req: Request, res: Response): Promise<void>
         END as averageCostPerUnit
       FROM stock_info
     `;
-        const [results] = await pool.execute<ItemDetails[]>(query, [id]);
+        let results: ItemDetails[] = [];
+        try {
+            const [rows] = await pool.execute<ItemDetails[]>(query, [id]);
+            results = rows;
+        }
+        catch (detailsQueryError) {
+            logEvents(`Item details primary query failed: ${JSON.stringify(detailsQueryError)}`, 'searchLog.log');
+            const [fallbackRows] = await pool.execute<ItemDetails[]>(`
+      WITH stock_info AS (
+        SELECT 
+          sd.id, sd.nac_code, sd.item_name, sd.part_numbers, sd.applicable_equipments,
+          sd.current_balance, sd.location, sd.unit, sd.open_quantity, sd.open_amount,
+          sd.image_url,
+          CASE WHEN INSTR(sd.item_name, ',') > 0 THEN SUBSTRING_INDEX(sd.item_name, ',', 1) ELSE sd.item_name END as altText,
+          COALESCE(sd.open_quantity, 0) as openQuantity,
+          (SELECT COALESCE(SUM(rd.received_quantity), 0) FROM receive_details rd
+           WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci AND rd.rrp_fk IS NOT NULL) as rrpQuantity,
+          (SELECT COALESCE(SUM(id.issue_quantity), 0) FROM issue_details id
+           WHERE id.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci) as issueQuantity,
+          (SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM receive_details rd2 JOIN rrp_details rrp2 ON rd2.rrp_fk = rrp2.id
+            WHERE rd2.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
+          ) THEN (SELECT COALESCE(SUM(rrp.total_amount), 0) FROM receive_details rd
+            JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
+            WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci AND rd.rrp_fk IS NOT NULL)
+          ELSE COALESCE(sd.open_amount, 0) END) as totalCost
+        FROM stock_details sd WHERE sd.id = ?
+      )
+      SELECT id, nac_code as nacCode, item_name as itemName, part_numbers as partNumber,
+        applicable_equipments as equipmentNumber, applicable_equipments as equipmentDisplay,
+        current_balance as currentBalance, location, unit,
+        openQuantity, open_amount as openAmount, image_url as imageUrl, altText,
+        openQuantity, rrpQuantity, issueQuantity,
+        (openQuantity + rrpQuantity - issueQuantity) as trueBalance,
+        CASE WHEN rrpQuantity > 0 THEN totalCost / rrpQuantity
+             WHEN openQuantity > 0 THEN totalCost / openQuantity ELSE 0 END as averageCostPerUnit
+      FROM stock_info`, [id]);
+            results = fallbackRows;
+        }
         if (results.length === 0) {
             logEvents(`Item not found for ID: ${id}`, "searchLog.log");
             res.status(404).json({
@@ -196,6 +245,7 @@ export const getItemDetails = async (req: Request, res: Response): Promise<void>
         catch (debugError) {
             logEvents(`Cost debug query failed: ${JSON.stringify(debugError)}`, "searchLog.log");
         }
+        await enrichEquipmentDisplays(results);
         logEvents(`Successfully fetched item details for ID: ${id}`, "searchLog.log");
         res.json(results[0]);
     }
@@ -252,32 +302,38 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
             });
             return;
         }
+        const useSpareCompatibility = tableName === 'stock_details';
         let query = `
       SELECT 
-        id,
-        nac_code as nacCode,
-        item_name as itemName,
-        part_numbers as partNumber,
-        applicable_equipments as equipmentNumber,
-        current_balance as currentBalance,
-        location,
-        unit,
-        card_number as cardNumber
-      FROM ${tableName}
+        ${useSpareCompatibility ? 'sd.id' : 'id'} as id,
+        ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} as nacCode,
+        ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} as itemName,
+        ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} as partNumber,
+        ${useSpareCompatibility ? SPARE_EQUIPMENT_CODES_SQL : 'applicable_equipments'} as equipmentNumber,
+        ${useSpareCompatibility ? SPARE_EQUIPMENT_DISPLAY_SQL : 'applicable_equipments'} as equipmentDisplay,
+        ${useSpareCompatibility ? 'sd.current_balance' : 'current_balance'} as currentBalance,
+        ${useSpareCompatibility ? 'sd.location' : 'location'} as location,
+        ${useSpareCompatibility ? 'sd.unit' : 'unit'} as unit
+      FROM ${tableName} ${useSpareCompatibility ? 'sd' : ''}
+      ${useSpareCompatibility ? SPARE_STOCK_JOIN : ''}
       WHERE 1=1
     `;
         logEvents(`Base query: ${query}`, "searchLog.log");
-        const params: (string | number)[] = [];
+        const params: any[] = [];
         let hasSearchConditions = false;
         if (universal && universal.toString().trim() !== '') {
             hasSearchConditions = true;
             query += ` AND (
-        nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-        item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-        part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-        applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?
-      )`;
+        ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+        ${useSpareCompatibility ? 'sd.applicable_equipments' : 'applicable_equipments'} COLLATE utf8mb4_unicode_ci LIKE ?`;
             params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
+            if (useSpareCompatibility) {
+                query = appendUniversalAssetNameFilter('sd', useSpareCompatibility, query, params);
+                params.push(`%${universal}%`);
+            }
+            query += `)`;
             logEvents(`Using LIKE search for universal parameter: ${universal}`, "searchLog.log");
             logEvents(`Search term: "${universal}", length: ${universal.length}, trimmed: "${universal.toString().trim()}"`, "searchLog.log");
             try {
@@ -290,18 +346,20 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
             hasSearchConditions = true;
-            query += ` AND applicable_equipments LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
+            query = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), query, params);
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             hasSearchConditions = true;
-            query += ` AND part_numbers LIKE ?`;
+            query += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
             params.push(`%${partNumber}%`);
         }
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
-        query += ` ORDER BY id ASC LIMIT ${limit} OFFSET ${offset}`;
+        if (useSpareCompatibility) {
+            query += ` GROUP BY sd.id, sd.nac_code, sd.item_name, sd.part_numbers, sd.applicable_equipments, sd.current_balance, sd.location, sd.unit`;
+        }
+        query += ` ORDER BY ${useSpareCompatibility ? 'sd.id' : 'id'} ASC LIMIT ${limit} OFFSET ${offset}`;
         logEvents(`Executing RRP search query: ${query} with params: ${JSON.stringify(params)}`, "searchLog.log");
         let results: SearchResult[] = [];
         try {
@@ -314,7 +372,25 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         catch (queryError) {
             logEvents(`Main search query failed: ${JSON.stringify(queryError)}`, "searchLog.log");
-            if (universal && universal.toString().trim() !== '') {
+            const hasFilters =
+                Boolean(universal && universal.toString().trim()) ||
+                Boolean(equipmentNumber && equipmentNumber.toString().trim()) ||
+                Boolean(partNumber && partNumber.toString().trim());
+            if (!hasFilters && useSpareCompatibility) {
+                try {
+                    logEvents('Attempting simple stock list fallback (no filters)', 'searchLog.log');
+                    const [fallbackResults] = await pool.execute<SearchResult[]>(
+                        buildSimpleStockListSql(limit, offset)
+                    );
+                    results = fallbackResults;
+                    logEvents(`Simple list fallback returned ${results.length} results`, 'searchLog.log');
+                }
+                catch (fallbackError) {
+                    logEvents(`Simple list fallback failed: ${JSON.stringify(fallbackError)}`, 'searchLog.log');
+                    results = [];
+                }
+            }
+            else if (universal && universal.toString().trim() !== '') {
                 try {
                     logEvents(`Attempting fallback search for: ${universal}`, "searchLog.log");
                     const [fallbackResults] = await pool.execute<SearchResult[]>(`SELECT 
@@ -323,10 +399,10 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
               item_name as itemName,
               part_numbers as partNumber,
               applicable_equipments as equipmentNumber,
+              applicable_equipments as equipmentDisplay,
               current_balance as currentBalance,
               unit,
-              location,
-              card_number as cardNumber
+              location
             FROM ${tableName}
             WHERE nac_code LIKE ? OR item_name LIKE ?
             ORDER BY id ASC LIMIT ${limit} OFFSET ${offset}`, [`%${universal}%`, `%${universal}%`]);
@@ -341,23 +417,28 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         let totalCount = 0;
         try {
-            let countQuery = `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
-            const countParams: (string | number)[] = [];
+            let countQuery = useSpareCompatibility
+                ? `SELECT COUNT(DISTINCT sd.id) as total FROM ${tableName} sd ${SPARE_STOCK_JOIN} WHERE 1=1`
+                : `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
+            const countParams: any[] = [];
             if (universal && universal.toString().trim() !== '') {
                 countQuery += ` AND (
-          nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-          item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-          part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-          applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?
-        )`;
+          ${useSpareCompatibility ? 'sd.nac_code' : 'nac_code'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.item_name' : 'item_name'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} COLLATE utf8mb4_unicode_ci LIKE ? OR
+          ${useSpareCompatibility ? 'sd.applicable_equipments' : 'applicable_equipments'} COLLATE utf8mb4_unicode_ci LIKE ?`;
                 countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
+                if (useSpareCompatibility) {
+                    countQuery = appendUniversalAssetNameFilter('sd', useSpareCompatibility, countQuery, countParams);
+                    countParams.push(`%${universal}%`);
+                }
+                countQuery += `)`;
             }
             if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery += ` AND applicable_equipments LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
+                countQuery = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), countQuery, countParams);
             }
             if (partNumber && partNumber.toString().trim() !== '') {
-                countQuery += ` AND part_numbers LIKE ?`;
+                countQuery += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
                 countParams.push(`%${partNumber}%`);
             }
             const [countResult] = await pool.execute<CountResult[]>(countQuery, countParams);
@@ -365,6 +446,22 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         catch (countError) {
             logEvents(`Count query failed: ${JSON.stringify(countError)}`, "searchLog.log");
+            const hasFilters =
+                Boolean(universal && universal.toString().trim()) ||
+                Boolean(equipmentNumber && equipmentNumber.toString().trim()) ||
+                Boolean(partNumber && partNumber.toString().trim());
+            if (!hasFilters && useSpareCompatibility) {
+                try {
+                    const [simpleCount] = await pool.execute<CountResult[]>(buildSimpleStockCountSql());
+                    totalCount = (simpleCount as CountResult[])[0]?.total || 0;
+                }
+                catch {
+                    totalCount = results.length;
+                }
+            }
+        }
+        if (results.length > 0) {
+            await enrichEquipmentDisplays(results);
         }
         if (results.length === 0) {
             logEvents(`No results found${hasSearchConditions ? ' for search parameters' : ''}`, "searchLog.log");

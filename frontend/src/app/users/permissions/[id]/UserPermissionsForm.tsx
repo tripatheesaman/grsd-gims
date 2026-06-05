@@ -25,7 +25,7 @@ interface UserPermissionsFormProps {
 }
 export default function UserPermissionsForm({ userId }: UserPermissionsFormProps) {
     const router = useRouter();
-    const { user } = useAuthContext();
+    const { user, refreshSession } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -97,6 +97,9 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
                 user_id: parseInt(userId)
             });
             if (response.status === 200) {
+                if (String(user?.UserInfo?.id) === userId) {
+                    await refreshSession();
+                }
                 showSuccessToast({
                     title: 'Success',
                     message: "User permissions updated successfully",
@@ -148,6 +151,7 @@ export default function UserPermissionsForm({ userId }: UserPermissionsFormProps
                         <Label className="text-sm font-medium text-gray-700">
                           {permission.permission_readable}
                         </Label>
+                        <p className="text-xs text-gray-400">{permission.permission_name}</p>
                       </div>
                     </div>))}
                 </div>

@@ -1,126 +1,216 @@
 'use client';
+
+import { Eye, Package } from 'lucide-react';
 import { SearchResult, ReceiveSearchResult } from '@/types/search';
+import { SpareApplicableEquipmentsCell } from '@/components/search/SpareApplicableEquipmentsCell';
+import { DataTablePagination } from '@/components/inventory/DataTablePagination';
+import { InventoryTableStates } from '@/components/inventory/InventoryTableStates';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/utils/utils';
+
 interface SearchResultsProps {
     results: (SearchResult | ReceiveSearchResult)[] | null;
     isLoading: boolean;
     error: string | null;
     onRowClick?: (item: SearchResult | ReceiveSearchResult) => void;
     onRowDoubleClick?: (item: SearchResult | ReceiveSearchResult) => void;
+    onViewDetails?: (item: SearchResult | ReceiveSearchResult) => void;
     canViewFullDetails: boolean;
     selectedItemId?: number | null;
     currentPage?: number;
     totalCount?: number;
     totalPages?: number;
+    pageSize?: number;
     onPageChange?: (page: number) => void;
+    onPageSizeChange?: (size: number) => void;
+    hasActiveFilters?: boolean;
 }
-export const SearchResults = ({ results, isLoading, error, onRowClick, onRowDoubleClick, canViewFullDetails, selectedItemId, currentPage = 1, totalCount = 0, totalPages = 0, onPageChange }: SearchResultsProps) => {
-    if (isLoading) {
-        return (<div className="flex justify-center items-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#003594]"></div>
-      </div>);
-    }
-    if (error) {
-        return (<div className="bg-red-50 border border-[#d2293b]/20 rounded-lg p-4 text-[#d2293b] text-center">
-        <p className="font-medium">Error loading results</p>
-        <p className="text-sm mt-1">{error}</p>
-      </div>);
-    }
-    if (!results || results.length === 0) {
-        return (<div className="bg-gray-50 border border-[#002a6e]/10 rounded-lg p-8 text-center">
-        <p className="text-gray-500">No items found matching your search criteria</p>
-      </div>);
-    }
-    return (<div className="space-y-4">
-      <div className="overflow-x-auto">
-        <table className="w-full table-fixed divide-y divide-[#002a6e]/10">
-          <thead>
-            <tr className="bg-[#003594]/5">
-              <th scope="col" className="w-24 px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider">
-                NAC Code
-              </th>
-              <th scope="col" className="w-32 px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Part Numbers
-              </th>
-              <th scope="col" className="w-48 px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Item Name
-              </th>
-              <th scope="col" className="w-24 px-3 py-3 text-center text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Balance Quantity
-              </th>
-              <th scope="col" className="w-32 px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Applicable Fleet
-              </th>
-              <th scope="col" className="w-24 px-3 py-3 text-center text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Item Location
-              </th>
-              <th scope="col" className="w-24 px-3 py-3 text-center text-xs font-medium text-[#003594] uppercase tracking-wider">
-                Card Number
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-[#002a6e]/10">
-            {results.map((item) => {
-            const isSelected = selectedItemId === item.id;
-            const isInteractive = Boolean(onRowClick || onRowDoubleClick);
-            return (<tr key={item.id} onClick={() => onRowClick?.(item)} onDoubleClick={() => canViewFullDetails && onRowDoubleClick?.(item)} className={`transition-colors group ${isInteractive ? 'cursor-pointer' : ''} ${isSelected ? 'bg-[#003594]/10' : 'hover:bg-[#003594]/5'}`}>
-                <td className="px-3 py-4">
-                  <div className="text-sm font-medium text-[#003594] group-hover:text-[#d2293b] transition-colors break-words">
-                    {item.nacCode}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-gray-900 break-words">
-                    {item.partNumber}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-gray-900 break-words">
-                    {item.itemName}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-center font-medium text-[#003594] group-hover:text-[#d2293b] transition-colors">
-                    {item.currentBalance}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-gray-900 break-words">
-                    {item.equipmentNumber}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-gray-900 text-center break-words">
-                    {item.location}
-                  </div>
-                </td>
-                <td className="px-3 py-4">
-                  <div className="text-sm text-gray-900 text-center break-words">
-                    {item.cardNumber}
-                  </div>
-                </td>
-              </tr>);
-        })}
-          </tbody>
-        </table>
-      </div>
 
-      
-      {onPageChange && results && results.length > 0 && (<div className="flex items-center justify-between px-4 py-3 bg-white border-t border-[#002a6e]/10">
-          <div className="flex items-center text-sm text-gray-700">
-            <span>
-              Page {currentPage} of {totalPages || 1} ({totalCount || results.length} total records)
-            </span>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <button onClick={() => onPageChange(currentPage - 1)} disabled={currentPage <= 1} className="px-3 py-1 text-sm font-medium text-[#003594] bg-white border border-[#003594] rounded-md hover:bg-[#003594] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-              Previous
-            </button>
-            
-            <button onClick={() => onPageChange(currentPage + 1)} disabled={currentPage >= (totalPages || 1)} className="px-3 py-1 text-sm font-medium text-[#003594] bg-white border border-[#003594] rounded-md hover:bg-[#003594] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-              Next
-            </button>
-          </div>
-        </div>)}
-    </div>);
+export const SearchResults = ({
+    results,
+    isLoading,
+    error,
+    onRowClick,
+    onRowDoubleClick,
+    onViewDetails,
+    canViewFullDetails,
+    selectedItemId,
+    currentPage = 1,
+    totalCount = 0,
+    totalPages = 0,
+    pageSize = 10,
+    onPageChange,
+    onPageSizeChange,
+    hasActiveFilters = false,
+}: SearchResultsProps) => {
+    if (isLoading) {
+        return <InventoryTableStates variant="loading" />;
+    }
+
+    if (error) {
+        return <InventoryTableStates variant="error" message={error} />;
+    }
+
+    if (!results || results.length === 0) {
+        return (
+            <InventoryTableStates
+                variant="empty"
+                title={hasActiveFilters ? 'No matching items' : 'No stock records'}
+                message={
+                    hasActiveFilters
+                        ? 'Adjust or clear your filters to broaden the search.'
+                        : 'There are no items in stock to display.'
+                }
+            />
+        );
+    }
+
+    const openDetails = (item: SearchResult | ReceiveSearchResult) => {
+        if (canViewFullDetails && onViewDetails) {
+            onViewDetails(item);
+        }
+    };
+
+    return (
+        <div className="flex flex-col">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+                <div className="flex items-center gap-2">
+                    <Package className="h-4 w-4 text-[#003594]" />
+                    <span className="text-sm font-semibold text-slate-900">
+                        {totalCount.toLocaleString()} item{totalCount === 1 ? '' : 's'}
+                    </span>
+                </div>
+                {canViewFullDetails && (
+                    <span className="text-xs text-slate-500">Click a row or View for full details</span>
+                )}
+            </div>
+
+            <div className="overflow-x-auto">
+                <Table>
+                    <TableHeader className="sticky top-0 z-10 bg-slate-50 shadow-sm">
+                        <TableRow className="hover:bg-transparent border-slate-200">
+                            <TableHead className="min-w-[100px] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                NAC
+                            </TableHead>
+                            <TableHead className="min-w-[120px] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Part no.
+                            </TableHead>
+                            <TableHead className="min-w-[160px] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Item name
+                            </TableHead>
+                            <TableHead className="w-[90px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Balance
+                            </TableHead>
+                            <TableHead className="min-w-[360px] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Applicable for
+                            </TableHead>
+                            <TableHead className="w-[90px] text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Location
+                            </TableHead>
+                            {canViewFullDetails && (
+                                <TableHead className="w-[72px] text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                    Action
+                                </TableHead>
+                            )}
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {results.map((item, index) => {
+                            const isSelected = selectedItemId === item.id;
+                            const balance = Number(item.currentBalance);
+                            const lowStock = Number.isFinite(balance) && balance <= 0;
+
+                            return (
+                                <TableRow
+                                    key={item.id}
+                                    className={cn(
+                                        'cursor-pointer border-slate-100 transition-colors',
+                                        isSelected ? 'bg-[#003594]/8' : index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50',
+                                        'hover:bg-[#003594]/5'
+                                    )}
+                                    onClick={() => {
+                                        onRowClick?.(item);
+                                        openDetails(item);
+                                    }}
+                                    onDoubleClick={() => onRowDoubleClick?.(item)}
+                                >
+                                    <TableCell className="py-3">
+                                        <span className="font-mono text-sm font-semibold text-[#003594]">
+                                            {item.nacCode}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 text-sm text-slate-700">
+                                        {item.partNumber || '—'}
+                                    </TableCell>
+                                    <TableCell className="py-3 max-w-[220px]">
+                                        <span className="line-clamp-2 text-sm text-slate-900" title={item.itemName}>
+                                            {item.itemName}
+                                        </span>
+                                    </TableCell>
+                                    <TableCell className="py-3 text-center">
+                                        <Badge
+                                            variant={lowStock ? 'destructive' : 'secondary'}
+                                            className={cn(
+                                                'tabular-nums font-semibold',
+                                                !lowStock && 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                            )}
+                                        >
+                                            {item.currentBalance}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className="py-3 min-w-[360px] align-top">
+                                        <SpareApplicableEquipmentsCell
+                                            equipmentNumber={item.equipmentNumber}
+                                            equipmentDisplay={item.equipmentDisplay ?? undefined}
+                                            showAll
+                                        />
+                                    </TableCell>
+                                    <TableCell className="py-3 text-sm text-slate-600">
+                                        {item.location || '—'}
+                                    </TableCell>
+                                    {canViewFullDetails && (
+                                        <TableCell className="py-3 text-right">
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onViewDetails?.(item);
+                                                }}
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                                <span className="sr-only">View</span>
+                                            </Button>
+                                        </TableCell>
+                                    )}
+                                </TableRow>
+                            );
+                        })}
+                    </TableBody>
+                </Table>
+            </div>
+
+            {onPageChange && (
+                <DataTablePagination
+                    page={currentPage}
+                    pageSize={pageSize}
+                    totalPages={totalPages}
+                    totalCount={totalCount}
+                    onPageChange={onPageChange}
+                    onPageSizeChange={onPageSizeChange}
+                />
+            )}
+        </div>
+    );
 };

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Edit, Trash2, Plus, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { API } from '@/lib/api';
+import { FiscalYearFilterSelect } from '@/components/fiscal-year/FiscalYearFilterSelect';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 interface FuelIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -58,6 +60,7 @@ interface FuelIssueFilters {
     weekNumber: string;
     equipmentNumber: string;
     issueSlipNumber: string;
+    fiscalYear: string;
 }
 const FuelIssueRecordsPage = () => {
     const { user, permissions } = useAuthContext();
@@ -100,6 +103,8 @@ const FuelIssueRecordsPage = () => {
     });
     const [fuelTypes, setFuelTypes] = useState<string[]>([]);
     const [nacCodes, setNacCodes] = useState<string[]>([]);
+    const { fiscalYear: currentFiscalYear } = useFiscalYear();
+    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     const [appliedFilters, setAppliedFilters] = useState<FuelIssueFilters>({
         search: '',
         fromDate: '',
@@ -107,9 +112,16 @@ const FuelIssueRecordsPage = () => {
         fuelType: '',
         weekNumber: '',
         equipmentNumber: '',
-        issueSlipNumber: ''
+        issueSlipNumber: '',
+        fiscalYear: '',
     });
     const latestRequestRef = useRef<number>(0);
+    useEffect(() => {
+        if (currentFiscalYear && !fiscalYearFilter) {
+            setFiscalYearFilter(currentFiscalYear);
+            setAppliedFilters((prev) => ({ ...prev, fiscalYear: currentFiscalYear }));
+        }
+    }, [currentFiscalYear, fiscalYearFilter]);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -176,7 +188,8 @@ const FuelIssueRecordsPage = () => {
                 fuelType: appliedFilters.fuelType,
                 weekNumber: appliedFilters.weekNumber,
                 equipmentNumber: appliedFilters.equipmentNumber,
-                issueSlipNumber: appliedFilters.issueSlipNumber
+                issueSlipNumber: appliedFilters.issueSlipNumber,
+                ...(appliedFilters.fiscalYear && { fiscalYear: appliedFilters.fiscalYear }),
             });
             const { data } = await API.get(`/api/fuel-issue-records?${params.toString()}`);
             if (requestId !== latestRequestRef.current) {
@@ -228,9 +241,10 @@ const FuelIssueRecordsPage = () => {
             fuelType,
             weekNumber,
             equipmentNumber,
-            issueSlipNumber
+            issueSlipNumber,
+            fiscalYear: fiscalYearFilter,
         });
-    }, [search, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber]);
+    }, [search, fromDate, toDate, fuelType, weekNumber, equipmentNumber, issueSlipNumber, fiscalYearFilter]);
     const setCurrentPage = (page: number) => {
         setPagination(prev => ({ ...prev, page }));
     };
@@ -359,6 +373,8 @@ const FuelIssueRecordsPage = () => {
         setWeekNumber('');
         setEquipmentNumber('');
         setIssueSlipNumber('');
+        const fy = currentFiscalYear || '';
+        setFiscalYearFilter(fy);
         setAppliedFilters({
             search: '',
             fromDate: '',
@@ -366,7 +382,8 @@ const FuelIssueRecordsPage = () => {
             fuelType: '',
             weekNumber: '',
             equipmentNumber: '',
-            issueSlipNumber: ''
+            issueSlipNumber: '',
+            fiscalYear: fy,
         });
         setPagination(prev => ({ ...prev, page: 1 }));
     };
@@ -426,6 +443,10 @@ const FuelIssueRecordsPage = () => {
 
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <FiscalYearFilterSelect
+              value={fiscalYearFilter}
+              onChange={(v) => setFiscalYearFilter(v)}
+            />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">From Date</label>
               <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"/>

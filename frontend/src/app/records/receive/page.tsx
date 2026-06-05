@@ -25,7 +25,6 @@ interface ReceiveRecord {
     received_by: string;
     image_path: string | null;
     location: string | null;
-    card_number: string | null;
     rejection_reason: string | null;
     rrp_fk: number | null;
     created_at: string;
@@ -60,7 +59,6 @@ interface ReceiveFormData {
     received_by: string;
     image_path: string;
     location: string;
-    card_number: string;
 }
 interface FilterOptions {
     statuses: string[];
@@ -118,8 +116,7 @@ export default function ReceiveRecordsPage() {
         approval_status: 'PENDING',
         received_by: '',
         image_path: '',
-        location: '',
-        card_number: ''
+        location: ''
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
@@ -202,8 +199,7 @@ export default function ReceiveRecordsPage() {
             approval_status: 'PENDING',
             received_by: user?.UserInfo?.username || '',
             image_path: '',
-            location: '',
-            card_number: ''
+            location: ''
         });
         setFormErrors({});
         setSelectedImage(null);
@@ -478,8 +474,7 @@ export default function ReceiveRecordsPage() {
             approval_status: record.approval_status,
             received_by: record.received_by,
             image_path: record.image_path || '',
-            location: record.location || '',
-            card_number: record.card_number || ''
+            location: record.location || ''
         };
         setFormData(formDataToSet);
         setSelectedImage(null);

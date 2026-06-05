@@ -39,9 +39,6 @@ function CartItem({ item, onEdit, onDelete }: {
         <p className="text-sm">
           Location: {item.location}
         </p>
-        <p className="text-sm">
-          Card Number: {item.cardNumber}
-        </p>
         {imageUrl && (<div className="mt-2">
             <Image src={imageUrl} alt="Item" width={200} height={200} className="max-w-[200px] h-auto rounded-md" unoptimized/>
           </div>)}
@@ -69,7 +66,6 @@ export function TenderReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit,
             partNumber: item.partNumber,
             equipmentNumber: item.equipmentNumber,
             location: item.location,
-            cardNumber: item.cardNumber,
             receiveQuantity: item.receiveQuantity,
             unit: item.unit,
             image: item.image,
@@ -84,7 +80,6 @@ export function TenderReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit,
             partNumber: editFormData.partNumber,
             equipmentNumber: editFormData.equipmentNumber,
             location: editFormData.location,
-            cardNumber: editFormData.cardNumber,
             image: editFormData.image,
         });
         setIsEditDialogOpen(false);
@@ -162,17 +157,6 @@ export function TenderReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit,
                 isLocationChanged: true
             }));
         }} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" placeholder="Enter location" disabled={editFormData.nacCode !== 'N/A'}/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editCardNumber" className="text-sm font-medium text-[#003594]">Card Number</Label>
-                  <Input id="editCardNumber" value={editFormData.cardNumber} onChange={(e) => {
-            setEditFormData(prev => ({
-                ...prev,
-                cardNumber: e.target.value,
-                isCardNumberChanged: true
-            }));
-        }} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" placeholder="Enter card number" disabled={editFormData.nacCode !== 'N/A'}/>
                 </div>
 
                 <div>

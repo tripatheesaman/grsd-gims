@@ -21,13 +21,14 @@ interface RRPConfig {
     customServiceCharge: number;
 }
 
-export function useRRP() {
+export function useRRP(options?: { enabled?: boolean }) {
     const queryClient = useQueryClient();
     const { data: response, isLoading } = useApiQuery<RRPConfig>(
         queryKeys.rrp.config(),
         '/api/rrp/config',
         undefined,
         {
+            enabled: options?.enabled !== false,
             staleTime: 1000 * 60 * 10,
         }
     );

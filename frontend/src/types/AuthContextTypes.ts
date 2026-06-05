@@ -17,6 +17,7 @@ export interface AuthContextType {
     permissions: string[];
     login: (username: string, password: string) => Promise<void>;
     logout: () => void;
+    refreshSession: () => Promise<boolean>;
 }
 export interface AuthContextProviderProps {
     children: ReactNode;

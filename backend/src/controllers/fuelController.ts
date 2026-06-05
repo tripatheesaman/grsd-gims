@@ -4,6 +4,7 @@ import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 import { createIssue } from './issueController';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -33,16 +34,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     await connection.beginTransaction();
 
     
-    const [configRows] = await connection.query<RowDataPacket[]>(
-      'SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?',
-      ['rrp', 'current_fy']
-    );
-
-    if (configRows.length === 0) {
-      throw new Error('Current FY configuration not found');
-    }
-
-    const currentFY = configRows[0].config_value;
+    const currentFY = await resolveCurrentFiscalYear(connection);
 
     
     const [firstRecordResult] = await connection.query<RowDataPacket[]>(
@@ -528,32 +520,15 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
     }
 
     try {
-      const fuelTypeLower = type.toLowerCase();
-      if (fuelTypeLower === 'diesel') {
-        // Diesel unit prices must come from the authoritative ledger:
-        // issue_cost / issue_quantity (fuel_records.fuel_price may be stale/wrong).
-        const [priceResult] = await connection.query<RowDataPacket[]>(
-          `SELECT
-             COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0) as fuel_price
-           FROM fuel_records fr
-           INNER JOIN issue_details i ON fr.issue_fk = i.id
-           WHERE LOWER(TRIM(fr.fuel_type)) = 'diesel'
-           ORDER BY fr.created_datetime DESC
-           LIMIT 1`
-        );
-        latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
-      }
-      else {
-        const [priceResult] = await connection.query<RowDataPacket[]>(
-          `SELECT fuel_price 
-           FROM fuel_records 
-           WHERE fuel_type = ?
-           ORDER BY created_datetime DESC 
-           LIMIT 1`,
-          [type]
-        );
-        latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
-      }
+      const [priceResult] = await connection.query<RowDataPacket[]>(
+        `SELECT fuel_price 
+         FROM fuel_records 
+         WHERE fuel_type = ?
+         ORDER BY created_datetime DESC 
+         LIMIT 1`,
+        [type]
+      );
+      latestFuelPrice = priceResult.length > 0 ? priceResult[0].fuel_price : 0;
     } catch (priceError) {
       logEvents(`Warning: Failed to fetch fuel price: ${priceError instanceof Error ? priceError.message : 'Unknown error'}`, "fuelLog.log");
     }

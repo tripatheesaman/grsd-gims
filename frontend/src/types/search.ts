@@ -4,8 +4,8 @@ export interface SearchResult {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
+    equipmentDisplay?: string | null;
     location: string;
-    cardNumber: string;
     currentBalance: string;
     unit: string;
     specifications: string;

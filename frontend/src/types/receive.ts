@@ -6,7 +6,6 @@ export interface ReceiveCartItem {
     partNumber: string;
     equipmentNumber: string;
     location: string;
-    cardNumber: string;
     image: File | undefined;
     imagePath?: string;
     unit: string;
@@ -14,7 +13,6 @@ export interface ReceiveCartItem {
     conversionBase?: number;
     requestedQuantity: number;
     isLocationChanged: boolean;
-    isCardNumberChanged: boolean;
 }
 export interface ReceiveData {
     receiveDate: string;
@@ -30,6 +28,5 @@ export interface ReceiveData {
         unit: string;
         requestId: number;
         location?: string;
-        cardNumber?: string;
     }[];
 }

@@ -6,6 +6,8 @@ import { API } from '@/lib/api';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { Button } from '@/components/ui/button';
 import { Plus, Edit, Trash2, RefreshCw, X, Search } from 'lucide-react';
+import { FiscalYearFilterSelect } from '@/components/fiscal-year/FiscalYearFilterSelect';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 interface SpareIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -65,6 +67,13 @@ export default function SpareIssueRecordsPage() {
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
     const latestRequestRef = useRef<number>(0);
+    const { fiscalYear: currentFiscalYear } = useFiscalYear();
+    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
+    useEffect(() => {
+        if (currentFiscalYear && !fiscalYearFilter) {
+            setFiscalYearFilter(currentFiscalYear);
+        }
+    }, [currentFiscalYear, fiscalYearFilter]);
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -130,7 +139,8 @@ export default function SpareIssueRecordsPage() {
                 status: status === 'all' ? '' : status,
                 issuedBy: issuedBy === 'all' ? '' : issuedBy,
                 sortBy,
-                sortOrder
+                sortOrder,
+                ...(fiscalYearFilter && { fiscalYear: fiscalYearFilter }),
             });
             const response = await API.get(`/api/spare-issue-records?${params}`);
             if (requestId !== latestRequestRef.current) {
@@ -156,7 +166,7 @@ export default function SpareIssueRecordsPage() {
                 setLoading(false);
             }
         }
-    }, [currentPage, pageSize, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder]);
+    }, [currentPage, pageSize, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder, fiscalYearFilter]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const response = await API.get('/api/spare-issue-records/filters/options');
@@ -167,7 +177,7 @@ export default function SpareIssueRecordsPage() {
     }, []);
     useEffect(() => {
         fetchData();
-    }, [currentPage, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder, fetchData]);
+    }, [currentPage, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder, fiscalYearFilter, fetchData]);
     useEffect(() => {
         fetchFilterOptions();
     }, [fetchFilterOptions]);
@@ -369,6 +379,13 @@ export default function SpareIssueRecordsPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FiscalYearFilterSelect
+                value={fiscalYearFilter}
+                onChange={(v) => {
+                  setFiscalYearFilter(v);
+                  setCurrentPage(1);
+                }}
+              />
               <div>
                 <label className="block text-sm font-medium text-black mb-1">NAC Code</label>
                 <select value={nacCode} onChange={(e) => {

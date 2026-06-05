@@ -7,7 +7,14 @@ import sharp from 'sharp';
 import dotenv from 'dotenv';
 import { logEvents } from '../middlewares/logger';
 import { normalizeEquipmentNumbers } from '../utils/utils';
+import {
+    insertRowsBeforeFooter,
+    snapshotWorksheetLayout,
+    restoreWorksheetLayout,
+    flattenWorksheetFormulas,
+} from './excelTemplateUtils';
 import { adToBs } from '../utils/dateConverter';
+import { formatRrpDisplayNumber } from '../utils/rrpNumberUtils';
 import PDFDocument from 'pdfkit';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
@@ -93,7 +100,6 @@ export interface StockCardData extends RowDataPacket {
     part_number: string;
     equipment_number: string;
     location: string;
-    card_number: string;
     open_quantity: number;
     open_amount: number;
 }
@@ -711,50 +717,23 @@ export class ExcelService {
             if (!worksheet) {
                 throw new Error(`Template worksheet '${sheetName}' not found`);
             }
-            const templateWorksheet = workbook.getWorksheet(sheetName);
-            if (!templateWorksheet) {
-                throw new Error(`Template worksheet '${sheetName}' not found`);
+            const layoutSnapshot = snapshotWorksheetLayout(worksheet);
+            const itemStartRow = 7;
+            const footerStartRow = rrpType === 'local' ? 22 : 24;
+            const maxItemRows = footerStartRow - itemStartRow;
+            const extraDataRows = Math.max(0, items.length - maxItemRows);
+            if (extraDataRows > 0) {
+                insertRowsBeforeFooter(
+                    worksheet,
+                    footerStartRow,
+                    extraDataRows,
+                    itemStartRow,
+                    rrpType === 'local' ? 10 : 12
+                );
             }
-            worksheet.properties = { ...templateWorksheet.properties };
-            worksheet.views = templateWorksheet.views;
-            worksheet.pageSetup = { ...templateWorksheet.pageSetup };
-            worksheet.headerFooter = { ...templateWorksheet.headerFooter };
-            worksheet.autoFilter = templateWorksheet.autoFilter;
-            worksheet.mergeCells = templateWorksheet.mergeCells;
-            templateWorksheet.columns.forEach((col, index) => {
-                if (col) {
-                    const targetCol = worksheet.getColumn(index + 1);
-                    targetCol.width = col.width || 8.43;
-                    if (col.style) {
-                        targetCol.style = col.style;
-                    }
-                    targetCol.hidden = col.hidden || false;
-                    targetCol.outlineLevel = col.outlineLevel || 0;
-                }
-            });
-            templateWorksheet.eachRow((row, rowNumber) => {
-                const targetRow = worksheet.getRow(rowNumber);
-                targetRow.height = row.height || 15;
-                targetRow.hidden = row.hidden || false;
-                targetRow.outlineLevel = row.outlineLevel || 0;
-                row.eachCell((cell, colNumber) => {
-                    const targetCell = worksheet.getCell(rowNumber, colNumber);
-                    if (cell.style)
-                        targetCell.style = cell.style;
-                    if (cell.numFmt)
-                        targetCell.numFmt = cell.numFmt;
-                    if (cell.font)
-                        targetCell.font = cell.font;
-                    if (cell.alignment)
-                        targetCell.alignment = cell.alignment;
-                    if (cell.border)
-                        targetCell.border = cell.border;
-                    if (cell.fill)
-                        targetCell.fill = cell.fill;
-                });
-            });
             if (rrpType === 'local') {
-                const rrpNumberWithoutPrefix = rrpDetails.rrp_number.substring(1).split('T')[0].padStart(3, '0');
+                const rrpPrefix = (rrpDetails.rrp_number.charAt(0).toUpperCase() === 'F' ? 'F' : 'L') as 'L' | 'F';
+                const rrpNumberWithoutPrefix = formatRrpDisplayNumber(rrpDetails.rrp_number, rrpPrefix);
                 worksheet.getCell('J5').value = `RRLP: ${rrpNumberWithoutPrefix}`;
                 worksheet.getCell('J3').value = `FY: ${rrpDetails.current_fy}`;
                 const formattedDate = ExcelService.formatDate(rrpDetails.date);
@@ -814,7 +793,8 @@ export class ExcelService {
             else {
                 const formattedDate = ExcelService.formatDate(rrpDetails.date);
                 const nepaliDate = adToBs(formattedDate);
-                const rrpNumberWithoutPrefix = rrpDetails.rrp_number.substring(1).split('T')[0].padStart(3, '0');
+                const rrpPrefix = (rrpDetails.rrp_number.charAt(0).toUpperCase() === 'F' ? 'F' : 'L') as 'L' | 'F';
+                const rrpNumberWithoutPrefix = formatRrpDisplayNumber(rrpDetails.rrp_number, rrpPrefix);
                 worksheet.getCell('L4').value = `RRFP: ${rrpNumberWithoutPrefix}`;
                 worksheet.getCell('L3').value = `FY: ${rrpDetails.current_fy}`;
                 worksheet.getCell('A5').value = `DATE: ${nepaliDate} (${formattedDate})`;
@@ -861,6 +841,8 @@ export class ExcelService {
                 worksheet.getCell('K31').value = authorityDetails.quality_check_authority_name;
                 worksheet.getCell('K32').value = authorityDetails.quality_check_authority_designation;
             }
+            restoreWorksheetLayout(worksheet, layoutSnapshot);
+            flattenWorksheetFormulas(worksheet);
             const sheetsToDelete = workbook.worksheets.filter(sheet => sheet.name !== sheetName);
             sheetsToDelete.forEach(sheet => workbook.removeWorksheet(sheet.id));
             worksheet.getCell('C24').value = freightChargeTotal < 1 ? 'NA' : freightChargeTotal;
@@ -892,7 +874,6 @@ export class ExcelService {
         templateSheet.getCell('A8').value = `PartNo: ${(stock as any).primary_part_number}`;
         templateSheet.getCell('A9').value = `Alternate P/N: ${(stock as any).secondary_part_numbers.join(', ')}`;
         templateSheet.getCell('A10').value = `Applicable Fleet: ${stock.equipment_number}`;
-        templateSheet.getCell('J4').value = stock.card_number;
         templateSheet.getCell('J5').value = new Date().toISOString().split('T')[0].replace(/-/g, '/');
         templateSheet.getCell('J6').value = stock.location;
         const referenceRow = templateSheet.getRow(20);

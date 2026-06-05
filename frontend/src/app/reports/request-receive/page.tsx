@@ -17,6 +17,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/utils/utils';
 import { format } from 'date-fns';
 import { resolveImageUrl } from '@/lib/urls';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface RequestReceiveData {
     requestId: number;
     requestNumber: string;
@@ -37,7 +38,6 @@ interface RequestReceiveData {
     isReceived: boolean | number;
     receiveFk: number | null;
     location: string;
-    cardNumber: string;
     receiveId: number | null;
     receiveDate: string | null;
     receivedQuantity: number | null;
@@ -48,7 +48,6 @@ interface RequestReceiveData {
     receiveIdsCsv?: string | null;
     receiveImage: string | null;
     receiveLocation: string | null;
-    receiveCardNumber: string | null;
     receivedBy: string | null;
     rejectedBy: string | null;
     rejectionReason: string | null;
@@ -76,7 +75,6 @@ type ReceiveDetailItem = {
     requestedImage?: string;
     receivedImage?: string;
     location?: string;
-    cardNumber?: string;
 };
 interface ReportResponse {
     data: RequestReceiveData[];
@@ -391,7 +389,7 @@ export default function RequestReceiveReportPage() {
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-              <Input value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Search by equipment number" className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
+              <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Search by equipment code or name" className="w-full" />
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-medium text-[#003594]">Part Number</Label>
@@ -666,13 +664,8 @@ export default function RequestReceiveReportPage() {
                                 <p className="text-sm font-medium text-[#003594]">Location</p>
                                 <p className="text-sm text-gray-900">{rd.location || 'N/A'}</p>
                               </div>
-                              <div>
-                                <p className="text-sm font-medium text-[#003594]">Card Number</p>
-                                <p className="text-sm text-gray-900">{rd.cardNumber || 'N/A'}</p>
-                              </div>
                             </div>
-                            
-                            
+
                             <div className="mt-4 pt-4 border-t border-[#002a6e]/10">
                               <p className="text-sm font-medium text-[#003594] mb-2">Received Image</p>
                               <div className="flex justify-center">
@@ -706,10 +699,6 @@ export default function RequestReceiveReportPage() {
                       {selectedItem.receiveLocation && (<div className="space-y-1">
                           <p className="text-sm font-medium text-[#003594]">Receive Location</p>
                           <p className="text-base text-gray-900">{selectedItem.receiveLocation}</p>
-                        </div>)}
-                      {selectedItem.receiveCardNumber && (<div className="space-y-1">
-                          <p className="text-sm font-medium text-[#003594]">Receive Card Number</p>
-                          <p className="text-base text-gray-900">{selectedItem.receiveCardNumber}</p>
                         </div>)}
                       {selectedItem.rejectionReason && (<div className="space-y-1">
                           <p className="text-sm font-medium text-[#003594]">Rejection Reason</p>

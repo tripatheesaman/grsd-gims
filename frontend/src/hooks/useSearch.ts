@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, SetStateAction } from 'react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useSearchQuery } from '@/hooks/api/useSearch';
 import { SearchResult } from '@/types/search';
-import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
+import { normalizeEquipmentSearchQuery } from '@/utils/equipmentNumbers';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import { getErrorMessage } from '@/lib/errorHandling';
@@ -40,7 +40,7 @@ export const useSearch = () => {
     const { data: response, isLoading, error } = useSearchQuery(
         {
             universal: debouncedUniversal || undefined,
-            equipmentNumber: debouncedEquipmentNumber || undefined,
+            equipmentNumber: normalizeEquipmentSearchQuery(debouncedEquipmentNumber),
             partNumber: debouncedPartNumber || undefined,
             page: currentPage,
             pageSize,
@@ -61,15 +61,7 @@ export const useSearch = () => {
     }, [pagination?.currentPage, currentPage]);
 
     const handleSearch = useCallback((type: keyof SearchParams) => (value: string) => {
-        if (type === 'equipmentNumber') {
-            const expandedEquipmentNumbers = value
-                ? Array.from(expandEquipmentNumbers(value)).join(',')
-                : '';
-            setSearchParams(prev => ({ ...prev, [type]: expandedEquipmentNumbers }));
-        }
-        else {
-            setSearchParams(prev => ({ ...prev, [type]: value }));
-        }
+        setSearchParams((prev) => ({ ...prev, [type]: value }));
         setCurrentPage(1);
     }, []);
 
@@ -82,10 +74,39 @@ export const useSearch = () => {
         setCurrentPage(1);
     }, []);
 
+    const clearFilters = useCallback(() => {
+        setSearchParams({
+            universal: '',
+            equipmentNumber: '',
+            partNumber: '',
+        });
+        setCurrentPage(1);
+    }, []);
+
+    const handleFilterChange = useCallback(
+        (field: 'universal' | 'equipment' | 'part', value: string) => {
+            const key =
+                field === 'equipment'
+                    ? 'equipmentNumber'
+                    : field === 'part'
+                      ? 'partNumber'
+                      : 'universal';
+            setSearchParams((prev) => ({ ...prev, [key]: value }));
+            setCurrentPage(1);
+        },
+        []
+    );
+
+    const hasActiveFilters = Boolean(
+        searchParams.universal.trim() ||
+            searchParams.equipmentNumber.trim() ||
+            searchParams.partNumber.trim()
+    );
+
     const setResults = useCallback((nextResults: SetStateAction<SearchResult[] | null>) => {
         const queryKey = queryKeys.search.stock({
             universal: debouncedUniversal || undefined,
-            equipmentNumber: debouncedEquipmentNumber || undefined,
+            equipmentNumber: normalizeEquipmentSearchQuery(debouncedEquipmentNumber),
             partNumber: debouncedPartNumber || undefined,
             page: currentPage,
             pageSize,
@@ -124,6 +145,9 @@ export const useSearch = () => {
         handleSearch,
         handlePageChange,
         handlePageSizeChange,
+        clearFilters,
+        handleFilterChange,
+        hasActiveFilters,
         setResults,
         setSearchParams,
     };

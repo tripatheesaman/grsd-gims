@@ -9,6 +9,7 @@ import { RequestCartItem } from '@/types/request';
 import { SearchResult } from '@/types/search';
 import { PartNumberSelect } from './PartNumberSelect';
 import { EquipmentMultiSelect } from './EquipmentMultiSelect';
+import { EquipmentAssetAutocomplete } from './EquipmentAssetAutocomplete';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
@@ -249,10 +250,10 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
             </div>
             <div className="space-y-2">
               <Label htmlFor="equipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-              {isManualEntry ? (<Input id="equipmentNumber" value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)} placeholder="Enter equipment number (e.g., 1000-1024 or 1000,1001,1002)" className={`mt-1 ${errors.equipmentNumber ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"}`}/>) : (<EquipmentMultiSelect equipmentList={item?.equipmentNumber
+              {isManualEntry ? (<EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Enter equipment number (code, ranges like 1000-1024)" className={`mt-1 ${errors.equipmentNumber ? "border-red-500" : ""}`} error={errors.equipmentNumber}/>) : (<EquipmentMultiSelect equipmentList={item?.equipmentNumber
                 ? item.equipmentNumber.split(',').map(s => s.trim())
                 : []} value={equipmentNumber} onChange={(value) => setEquipmentNumber(value)} error={errors.equipmentNumber}/>)}
-              {errors.equipmentNumber && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
+              {errors.equipmentNumber && !isManualEntry && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
             </div>
           </div>
 

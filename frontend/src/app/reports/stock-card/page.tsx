@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { cn } from '@/utils/utils';
 import { SearchResult } from '@/types/search';
 import { getErrorMessage } from '@/lib/errorHandling';
+import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
 interface SelectedItem {
     id: number;
     naccode: string;
@@ -38,7 +39,6 @@ interface StockCardPreviewData {
     part_number: string;
     equipment_number: string;
     location: string;
-    card_number: string;
     open_quantity: number;
     open_amount: number;
     openingBalanceDate: string;
@@ -591,7 +591,7 @@ export default function StockCardPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Equipment Number</Label>
-              <Input placeholder="Exact equipment number" value={equipmentNumber} onChange={(e) => setEquipmentNumber(e.target.value)}/>
+                <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Exact equipment code or name" className="w-full"/>
             </div>
             <div className="space-y-2">
               <Label>Equipment Number Range</Label>
@@ -794,10 +794,6 @@ export default function StockCardPage() {
                     <div>
                       <p className="font-semibold text-gray-900">Type of Stock:</p>
                       <p>-</p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">Card No:</p>
-                      <p>{previewData.card_number || '-'}</p>
                     </div>
                     <div>
                       <p className="font-semibold text-gray-900">Nomenclature:</p>

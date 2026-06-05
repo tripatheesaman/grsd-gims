@@ -20,7 +20,6 @@ interface ReceiveSearchResult {
         equipmentNumber: string;
         imageUrl: string;
         location: string;
-        cardNumber: string;
         unit: string;
         remarks: string;
     }[];
@@ -143,7 +142,6 @@ export const PrintReceiveResultsTable = ({ results, currentPage, itemsPerPage, o
                               <th className="text-left p-2">Equipment Number</th>
                               <th className="text-left p-2">Quantity</th>
                               <th className="text-left p-2">Location</th>
-                              <th className="text-left p-2">Card Number</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -153,7 +151,6 @@ export const PrintReceiveResultsTable = ({ results, currentPage, itemsPerPage, o
                                 <td className="p-2">{item.equipmentNumber}</td>
                                 <td className="p-2">{item.receiveQuantity}</td>
                                 <td className="p-2">{item.location}</td>
-                                <td className="p-2">{item.cardNumber}</td>
                               </tr>))}
                           </tbody>
                         </table>

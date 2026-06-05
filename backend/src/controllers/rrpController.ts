@@ -3,13 +3,19 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { formatDate, formatDateForDB, utcToLocalDateString } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
+import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
+import {
+    normalizeRrpBaseNumber,
+    isLocalOrForeignRrpNumber,
+    sqlRrpBaseMatchClause,
+} from '../utils/rrpNumberUtils';
 interface ConfigRow extends RowDataPacket {
     config_name: string;
     config_value: string;
 }
 interface SupplierRow extends RowDataPacket {
     name: string;
-    supplier_type: 'local' | 'foreign';
+    supplier_type: 'local' | 'foreign' | 'capital';
     is_active: number;
 }
 interface CurrencyRow extends RowDataPacket {
@@ -27,7 +33,7 @@ interface AuthorityRow extends RowDataPacket {
     email?: string | null;
     is_active: number;
 }
-const fetchRRPConfigMasters = async () => {
+export const fetchRRPConfigMasters = async () => {
     const [suppliers] = await pool.query<SupplierRow[]>(`SELECT name, supplier_type, is_active FROM suppliers WHERE is_active = 1`);
     const [currencies] = await pool.query<CurrencyRow[]>(`SELECT code, name, sort_order, is_active FROM currencies WHERE is_active = 1 ORDER BY COALESCE(sort_order, 9999), code`);
     const [authorities] = await pool.query<AuthorityRow[]>(`SELECT id, name, designation, staff_id, section_name, email, is_active FROM requesting_receiving_authority WHERE is_active = 1 ORDER BY name`);
@@ -35,6 +41,7 @@ const fetchRRPConfigMasters = async () => {
         suppliers: {
             local: suppliers.filter(s => s.supplier_type === 'local').map(s => s.name),
             foreign: suppliers.filter(s => s.supplier_type === 'foreign').map(s => s.name),
+            capital: suppliers.filter(s => s.supplier_type === 'capital').map(s => s.name),
         },
         currencies: currencies.map(c => c.code),
         authorities: authorities.map(a => ({
@@ -125,7 +132,7 @@ interface RRPUpdateData {
     items: RRPUpdateItem[];
 }
 interface RRPType {
-    type: 'local' | 'foreign';
+    type: 'local' | 'foreign' | 'capital';
 }
 export const getRRPConfig = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -221,53 +228,45 @@ export const createRRP = async (req: Request, res: Response): Promise<void> => {
                 config[row.config_name] = row.config_value;
             }
         });
-        const currentFY = config.current_fy;
-        if (!currentFY) {
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const rrpNumber = normalizeRrpBaseNumber(submissionData.rrp_number);
+        if (!isLocalOrForeignRrpNumber(rrpNumber)) {
             await connection.rollback();
-            logEvents(`Failed to create RRP - Current FY configuration not found`, "rrpLog.log");
-            res.status(500).json({
-                error: 'Internal Server Error',
-                message: 'Current FY configuration not found'
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Invalid RRP number format. Must be L001 or F001',
             });
             return;
         }
-        const inputRRPNumber = submissionData.rrp_number;
-        let rrpNumber = inputRRPNumber;
-        if (inputRRPNumber.includes('T')) {
-            const [existingRRP] = await connection.query<RowDataPacket[]>('SELECT approval_status FROM rrp_details WHERE rrp_number = ?', [inputRRPNumber]);
-            if (existingRRP.length > 0 && existingRRP[0].approval_status !== 'REJECTED') {
+        const [existingRRP] = await connection.query<RowDataPacket[]>(
+            `SELECT rrp_number, approval_status FROM rrp_details
+             WHERE current_fy = ? AND ${sqlRrpBaseMatchClause('rrp_number')}`,
+            [currentFY, rrpNumber, rrpNumber]
+        );
+        if (existingRRP.length > 0) {
+            const allRejected = existingRRP.every((r) => r.approval_status === 'REJECTED');
+            if (!allRejected) {
                 await connection.rollback();
-                logEvents(`Failed to create RRP - Number already exists: ${inputRRPNumber}`, "rrpLog.log");
+                logEvents(`Failed to create RRP - Duplicate in FY ${currentFY}: ${rrpNumber}`, 'rrpLog.log');
                 res.status(400).json({
                     error: 'Bad Request',
-                    message: 'RRP number already exists and is not rejected'
+                    message: 'RRP number already exists in the current fiscal year',
                 });
                 return;
             }
-            if (existingRRP.length > 0) {
-                await connection.query('DELETE FROM rrp_details WHERE rrp_number = ?', [inputRRPNumber]);
-                await connection.query(`UPDATE receive_details rd
+            for (const row of existingRRP) {
+                await connection.query('DELETE FROM rrp_details WHERE rrp_number = ?', [row.rrp_number]);
+                await connection.query(
+                    `UPDATE receive_details rd
                      SET rrp_fk = NULL
                      WHERE EXISTS (
                          SELECT 1 FROM rrp_details rrp
-                         WHERE rrp.receive_fk = rd.id
-                         AND rrp.rrp_number = ?
-                     )`, [inputRRPNumber]);
-                logEvents(`Deleted existing rejected RRP: ${inputRRPNumber}`, "rrpLog.log");
+                         WHERE rrp.receive_fk = rd.id AND rrp.rrp_number = ?
+                     )`,
+                    [row.rrp_number]
+                );
             }
-        }
-        else {
-            const [lastRRP] = await connection.query<RowDataPacket[]>(`SELECT rrp_number FROM rrp_details 
-                WHERE rrp_number LIKE ? 
-                ORDER BY rrp_number DESC LIMIT 1`, [`${inputRRPNumber}T%`]);
-            if (lastRRP.length > 0) {
-                const lastTNumber = parseInt(lastRRP[0].rrp_number.split('T')[1]);
-                rrpNumber = `${inputRRPNumber}T${lastTNumber + 1}`;
-            }
-            else {
-                rrpNumber = `${inputRRPNumber}T1`;
-            }
-            logEvents(`Generated new RRP number: ${rrpNumber}`, "rrpLog.log");
+            logEvents(`Replaced rejected RRP(s) for ${rrpNumber} in FY ${currentFY}`, 'rrpLog.log');
         }
         const requestedByAuthorities = new Map<number, {
             name: string;
@@ -465,6 +464,7 @@ export const getPendingRRPs = async (req: Request, res: Response): Promise<void>
             JOIN receive_details red ON rd.receive_fk = red.id
             JOIN request_details rqd ON red.request_fk = rqd.id
             WHERE rd.approval_status = 'PENDING'
+              AND (rd.rrp_category IS NULL OR rd.rrp_category <> 'capital')
             ORDER BY rd.date DESC`);
         const formattedRows = rows.map(row => ({
             ...row,
@@ -793,22 +793,124 @@ export const updateRRP = async (req: Request, res: Response): Promise<void> => {
 };
 const getRRPType = (rrpNumber: string): RRPType => {
     const firstChar = rrpNumber.charAt(0).toUpperCase();
+    if (firstChar === 'C') {
+        return { type: 'capital' };
+    }
     return {
-        type: firstChar === 'L' ? 'local' : 'foreign'
+        type: firstChar === 'L' ? 'local' : 'foreign',
     };
 };
+
+const RRP_SEARCH_ORDER = `ORDER BY
+    CASE WHEN LEFT(rrp_number, 1) = 'C' THEN 2 WHEN LEFT(rrp_number, 1) = 'L' THEN 0 ELSE 1 END,
+    CAST(
+        CASE
+            WHEN rrp_number LIKE '%T%'
+                THEN SUBSTRING_INDEX(SUBSTRING(rrp_number, 2), 'T', 1)
+            ELSE SUBSTRING(rrp_number, 2)
+        END AS UNSIGNED
+    ) DESC,
+    rrp_number DESC`;
+const parseCapitalItemDataField = (raw: unknown): Record<string, unknown> | null => {
+    if (raw === null || raw === undefined) return null;
+    try {
+        if (Buffer.isBuffer(raw)) {
+            return JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
+        }
+        if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            return trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : null;
+        }
+        if (typeof raw === 'object') {
+            return raw as Record<string, unknown>;
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+};
+
 export const getRRPById = async (req: Request, res: Response): Promise<void> => {
     try {
         const id = req.params.id;
-        const [rrpNumberResult] = await pool.query<RowDataPacket[]>('SELECT rrp_number FROM rrp_details WHERE id = ?', [id]);
-        if (rrpNumberResult.length === 0) {
+        const [metaRows] = await pool.query<RowDataPacket[]>(
+            'SELECT rrp_number, rrp_category FROM rrp_details WHERE id = ?',
+            [id]
+        );
+        if (metaRows.length === 0) {
             res.status(404).json({
                 error: 'Not Found',
                 message: 'RRP not found'
             });
             return;
         }
-        const rrpNumber = rrpNumberResult[0].rrp_number;
+        const rrpNumber = String(metaRows[0].rrp_number);
+        const category = String(metaRows[0].rrp_category || '');
+        const isCapital = category === 'capital' || /^C/i.test(rrpNumber);
+
+        if (isCapital) {
+            const [configRows] = await pool.query<ConfigRow[]>(
+                'SELECT config_name, config_value FROM app_config WHERE config_type = ?',
+                ['rrp']
+            );
+            const config: Record<string, any> = {};
+            configRows.forEach((row) => {
+                try {
+                    config[row.config_name] = JSON.parse(row.config_value);
+                }
+                catch {
+                    config[row.config_name] = row.config_value;
+                }
+            });
+            const masters = await fetchRRPConfigMasters();
+            config.supplier_list_capital = masters.suppliers.capital;
+            config.currency_list = masters.currencies;
+            config.inspection_user_details = masters.authorities;
+
+            const [rows] = await pool.query<RowDataPacket[]>(
+                `SELECT rd.*, ar.model_name, ar.receive_date
+                 FROM rrp_details rd
+                 LEFT JOIN asset_receive_details ar ON ar.id = rd.asset_receive_fk
+                 WHERE rd.rrp_number = ?
+                 ORDER BY rd.id ASC`,
+                [rrpNumber]
+            );
+            if (!rows.length) {
+                res.status(404).json({ error: 'Not Found', message: 'Capital RRP not found' });
+                return;
+            }
+            const formattedRows = rows.map((row) => {
+                let inspectionDetails: Record<string, unknown> = {};
+                try {
+                    const raw = row.inspection_details;
+                    inspectionDetails =
+                        typeof raw === 'string' ? JSON.parse(raw || '{}') : (raw as Record<string, unknown>) || {};
+                }
+                catch {
+                    inspectionDetails = {};
+                }
+                const stored = parseCapitalItemDataField(row.capital_item_data);
+                return {
+                    ...row,
+                    date: formatDate(row.date),
+                    invoice_date: formatDate(row.invoice_date),
+                    receive_date: formatDate(row.receive_date),
+                    customs_date: formatDate(row.customs_date),
+                    po_date: formatDate(row.po_date),
+                    inspection_details: inspectionDetails,
+                    location: stored?.location ? String(stored.location) : '',
+                };
+            });
+            res.status(200).json({
+                config,
+                rrpDetails: formattedRows,
+                type: 'capital',
+                category: 'capital',
+            });
+            return;
+        }
+
         const rrpType = getRRPType(rrpNumber);
         const [configRows] = await pool.query<ConfigRow[]>('SELECT config_name, config_value FROM app_config WHERE config_type = ?', ['rrp']);
         const config: Record<string, any> = {};
@@ -974,68 +1076,138 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
     const offset = (currentPage - 1) * limit;
     logEvents(`searchRRP called with: universal=${universal}, equipmentNumber=${equipmentNumber}, partNumber=${partNumber}, page=${page}, pageSize=${pageSize}`, "rrpLog.log");
     try {
-        let whereClause = "WHERE rrp.rrp_number != 'Code Transfer' AND rrp.rrp_number != 'TENDER-FREE'";
-        const params: any[] = [];
+        const spareBaseWhere =
+            "WHERE rrp.rrp_number != 'Code Transfer' AND rrp.rrp_number != 'TENDER-FREE' AND (rrp.rrp_category IS NULL OR rrp.rrp_category <> 'capital')";
+        const capitalBaseWhere = "WHERE rrp.rrp_category = 'capital'";
+        const spareParams: unknown[] = [];
+        const capitalParams: unknown[] = [];
+        let spareFilter = '';
+        let capitalFilter = '';
+
         if (universal && universal !== '') {
-            whereClause += " AND (rrp.rrp_number LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR COALESCE(rqd.equipment_number, '') LIKE ? OR rd.tender_reference_number LIKE ?)";
-            params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
+            const u = `%${universal}%`;
+            spareFilter +=
+                ' AND (rrp.rrp_number LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR COALESCE(rqd.equipment_number, \'\') LIKE ? OR rd.tender_reference_number LIKE ?)';
+            spareParams.push(u, u, u, u, u);
+            capitalFilter +=
+                ` AND (
+                    rrp.rrp_number LIKE ?
+                    OR ar.model_name LIKE ?
+                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_name')) LIKE ?
+                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) LIKE ?
+                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) LIKE ?
+                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number')) LIKE ?
+                )`;
+            capitalParams.push(u, u, u, u, u, u);
         }
         if (equipmentNumber && equipmentNumber !== '') {
-            whereClause += " AND COALESCE(rqd.equipment_number, '') LIKE ?";
-            params.push(`%${equipmentNumber}%`);
+            const e = `%${equipmentNumber}%`;
+            spareFilter += " AND COALESCE(rqd.equipment_number, '') LIKE ?";
+            spareParams.push(e);
+            capitalFilter += ` AND (
+                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) LIKE ?
+                OR ar.model_name LIKE ?
+            )`;
+            capitalParams.push(e, e);
         }
         if (partNumber && partNumber !== '') {
-            whereClause += " AND rd.part_number LIKE ?";
-            params.push(`%${partNumber}%`);
+            const p = `%${partNumber}%`;
+            spareFilter += ' AND rd.part_number LIKE ?';
+            spareParams.push(p);
+            capitalFilter += ` AND (
+                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) LIKE ?
+                OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number')) LIKE ?
+            )`;
+            capitalParams.push(p, p);
         }
         if (referenceStatus === 'uploaded') {
-            whereClause += " AND rrp.reference_doc IS NOT NULL";
-        } else if (referenceStatus === 'not_uploaded') {
-            whereClause += " AND (rrp.reference_doc IS NULL OR rrp.reference_doc = '')";
+            spareFilter += ' AND rrp.reference_doc IS NOT NULL AND rrp.reference_doc <> \'\'';
+            capitalFilter += ' AND rrp.reference_doc IS NOT NULL AND rrp.reference_doc <> \'\'';
         }
-        const countQuery = `SELECT COUNT(DISTINCT rrp.rrp_number) as total FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id ${whereClause}`;
-        logEvents(`Count query: ${countQuery}`, "rrpLog.log");
-        logEvents(`Count params: ${JSON.stringify(params)}`, "rrpLog.log");
-        const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, params);
-        const totalCount = countResult[0].total;
-        logEvents(`Count result: ${totalCount}`, "rrpLog.log");
-        const distinctQuery = `SELECT DISTINCT rrp.rrp_number, rrp.date as rrp_date FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id ${whereClause} ORDER BY CASE WHEN LEFT(rrp.rrp_number, 1) = 'L' THEN 0 ELSE 1 END, CAST(CASE WHEN rrp.rrp_number LIKE '%T%' THEN SUBSTRING_INDEX(SUBSTRING(rrp.rrp_number, 2), 'T', 1) ELSE SUBSTRING(rrp.rrp_number, 2) END AS UNSIGNED) DESC, rrp.rrp_number DESC LIMIT ${limit} OFFSET ${offset}`;
-        const distinctParams = [...params];
-        logEvents(`Distinct query: ${distinctQuery}`, "rrpLog.log");
-        logEvents(`Distinct params: ${JSON.stringify(distinctParams)}`, "rrpLog.log");
-        const [distinctResults] = await pool.execute<RowDataPacket[]>(distinctQuery, distinctParams);
+        else if (referenceStatus === 'not_uploaded') {
+            spareFilter += ' AND (rrp.reference_doc IS NULL OR rrp.reference_doc = \'\')';
+            capitalFilter += ' AND (rrp.reference_doc IS NULL OR rrp.reference_doc = \'\')';
+        }
+
+        const spareDistinctSql = `SELECT DISTINCT rrp.rrp_number, rrp.date AS rrp_date
+            FROM rrp_details rrp
+            JOIN receive_details rd ON rrp.receive_fk = rd.id
+            LEFT JOIN request_details rqd ON rd.request_fk = rqd.id
+            ${spareBaseWhere}${spareFilter}`;
+        const capitalDistinctSql = `SELECT DISTINCT rrp.rrp_number, rrp.date AS rrp_date
+            FROM rrp_details rrp
+            LEFT JOIN asset_receive_details ar ON ar.id = rrp.asset_receive_fk
+            ${capitalBaseWhere}${capitalFilter}`;
+
+        const countQuery = `SELECT COUNT(*) AS total FROM (
+            (${spareDistinctSql})
+            UNION
+            (${capitalDistinctSql})
+        ) combined`;
+        const countParams = [...spareParams, ...capitalParams];
+        const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, countParams);
+        const totalCount = Number(countResult[0]?.total) || 0;
+
+        const pageQuery = `SELECT rrp_number, rrp_date FROM (
+            (${spareDistinctSql})
+            UNION
+            (${capitalDistinctSql})
+        ) combined ${RRP_SEARCH_ORDER} LIMIT ${limit} OFFSET ${offset}`;
+        const pageParams = [...spareParams, ...capitalParams];
+        const [distinctResults] = await pool.execute<RowDataPacket[]>(pageQuery, pageParams);
+
         if (distinctResults.length === 0) {
-            const emptyResponse = {
+            res.json({
                 data: [],
                 pagination: {
                     currentPage,
                     pageSize: limit,
                     totalCount,
-                    totalPages: Math.ceil(totalCount / limit)
-                }
-            };
-            res.json(emptyResponse);
+                    totalPages: Math.ceil(totalCount / limit),
+                },
+            });
             return;
         }
-        const rrpNumbers = distinctResults.map((r: any) => `'${r.rrp_number}'`).join(',');
-        const detailsQuery = `SELECT rrp.id, rrp.rrp_number, rrp.date as rrp_date, rrp.supplier_name, rrp.currency, rrp.forex_rate, rrp.item_price, rrp.customs_charge, rrp.customs_service_charge, rrp.vat_percentage, rrp.invoice_number, rrp.invoice_date, rrp.po_number, rrp.airway_bill_number, rrp.inspection_details, rrp.approval_status, rrp.created_by, rrp.total_amount, rrp.freight_charge, rrp.customs_date, rrp.customs_number, rrp.reference_doc, rd.item_name, rd.part_number, rd.received_quantity, rd.unit, COALESCE(rqd.equipment_number, 'N/A') as equipment_number, rd.receive_source, rd.tender_reference_number FROM rrp_details rrp JOIN receive_details rd ON rrp.receive_fk = rd.id LEFT JOIN request_details rqd ON rd.request_fk = rqd.id WHERE rrp.rrp_number IN (${rrpNumbers}) ORDER BY CASE WHEN LEFT(rrp.rrp_number, 1) = 'L' THEN 0 ELSE 1 END, CAST(CASE WHEN rrp.rrp_number LIKE '%T%' THEN SUBSTRING_INDEX(SUBSTRING(rrp.rrp_number, 2), 'T', 1) ELSE SUBSTRING(rrp.rrp_number, 2) END AS UNSIGNED) DESC, rrp.rrp_number DESC`;
-        logEvents(`Details query: ${detailsQuery}`, "rrpLog.log");
-        let results: RowDataPacket[];
-        try {
-            [results] = await pool.execute<RowDataPacket[]>(detailsQuery);
-            logEvents(`Details query executed successfully, got ${results.length} results`, "rrpLog.log");
-        }
-        catch (mainError) {
-            logEvents(`Details query error: ${mainError}`, "rrpLog.log");
-            throw mainError;
-        }
-        const groupedResults = results.reduce((acc, result) => {
-            if (!acc[result.rrp_number]) {
-                acc[result.rrp_number] = {
-                    rrpNumber: result.rrp_number,
+
+        const pageNumbers = distinctResults.map((r) => String(r.rrp_number));
+        const placeholders = pageNumbers.map(() => '?').join(',');
+        const groupedResults: Record<string, Record<string, unknown>> = {};
+
+        const [spareRows] = await pool.execute<RowDataPacket[]>(
+            `SELECT rrp.id, rrp.rrp_number, rrp.date AS rrp_date, rrp.supplier_name, rrp.currency, rrp.forex_rate,
+                rrp.item_price, rrp.customs_charge, rrp.customs_service_charge, rrp.vat_percentage,
+                rrp.invoice_number, rrp.invoice_date, rrp.po_number, rrp.airway_bill_number, rrp.inspection_details,
+                rrp.approval_status, rrp.created_by, rrp.total_amount, rrp.freight_charge, rrp.customs_date,
+                rrp.customs_number, rrp.reference_doc, rd.item_name, rd.part_number, rd.received_quantity, rd.unit,
+                COALESCE(rqd.equipment_number, 'N/A') AS equipment_number, rd.receive_source, rd.tender_reference_number
+             FROM rrp_details rrp
+             JOIN receive_details rd ON rrp.receive_fk = rd.id
+             LEFT JOIN request_details rqd ON rd.request_fk = rqd.id
+             WHERE rrp.rrp_number IN (${placeholders})
+               AND (rrp.rrp_category IS NULL OR rrp.rrp_category <> 'capital')
+             ORDER BY rrp.id ASC`,
+            pageNumbers
+        );
+
+        for (const result of spareRows) {
+            const rrpNo = String(result.rrp_number);
+            if (!groupedResults[rrpNo]) {
+                let inspectionDetails: Record<string, unknown> = {};
+                try {
+                    inspectionDetails =
+                        typeof result.inspection_details === 'string'
+                            ? JSON.parse(result.inspection_details || '{}')
+                            : (result.inspection_details as Record<string, unknown>) || {};
+                }
+                catch {
+                    inspectionDetails = {};
+                }
+                groupedResults[rrpNo] = {
+                    rrpNumber: rrpNo,
                     rrpDate: formatDateForDB(result.rrp_date),
                     supplierName: result.supplier_name || '',
-                    type: getRRPType(result.rrp_number).type,
+                    type: getRRPType(rrpNo).type,
+                    category: 'spare',
                     currency: result.currency,
                     forexRate: result.forex_rate?.toString() || '0',
                     invoiceNumber: result.invoice_number || '',
@@ -1043,15 +1215,15 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
                     poNumber: result.po_number,
                     airwayBillNumber: result.airway_bill_number,
                     customsNumber: result.customs_number,
-                    inspectionDetails: JSON.parse(result.inspection_details),
+                    inspectionDetails,
                     approvalStatus: result.approval_status,
                     createdBy: result.created_by || '',
                     customsDate: result.customs_date ? formatDateForDB(result.customs_date) : null,
                     referenceDoc: result.reference_doc,
-                    items: []
+                    items: [] as Record<string, unknown>[],
                 };
             }
-            acc[result.rrp_number].items.push({
+            (groupedResults[rrpNo].items as Record<string, unknown>[]).push({
                 id: result.id,
                 itemName: result.item_name,
                 partNumber: result.part_number,
@@ -1065,135 +1237,134 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
                 customsServiceCharge: result.customs_service_charge?.toString() || '0',
                 vatPercentage: result.vat_percentage?.toString() || '0',
                 freightCharge: result.freight_charge?.toString() || '0',
-                totalAmount: result.total_amount?.toString() || '0'
+                totalAmount: result.total_amount?.toString() || '0',
             });
-            return acc;
-        }, {} as Record<string, any>);
-        const response = {
-            data: Object.values(groupedResults),
+        }
+
+        const [capitalRows] = await pool.execute<RowDataPacket[]>(
+            `SELECT rrp.id, rrp.rrp_number, rrp.date AS rrp_date, rrp.supplier_name, rrp.currency, rrp.forex_rate,
+                rrp.item_price, rrp.vat_percentage, rrp.invoice_number, rrp.invoice_date, rrp.po_number,
+                rrp.inspection_details, rrp.approval_status, rrp.created_by, rrp.total_amount,
+                rrp.customs_date, rrp.customs_number, rrp.reference_doc, rrp.capital_item_data,
+                ar.model_name
+             FROM rrp_details rrp
+             LEFT JOIN asset_receive_details ar ON ar.id = rrp.asset_receive_fk
+             WHERE rrp.rrp_number IN (${placeholders}) AND rrp.rrp_category = 'capital'
+             ORDER BY rrp.id ASC`,
+            pageNumbers
+        );
+
+        for (const result of capitalRows) {
+            const rrpNo = String(result.rrp_number);
+            const stored = parseCapitalItemDataField(result.capital_item_data);
+            if (!groupedResults[rrpNo]) {
+                let inspectionDetails: Record<string, unknown> = {};
+                try {
+                    inspectionDetails =
+                        typeof result.inspection_details === 'string'
+                            ? JSON.parse(result.inspection_details || '{}')
+                            : (result.inspection_details as Record<string, unknown>) || {};
+                }
+                catch {
+                    inspectionDetails = {};
+                }
+                groupedResults[rrpNo] = {
+                    rrpNumber: rrpNo,
+                    rrpDate: formatDateForDB(result.rrp_date),
+                    supplierName: result.supplier_name || '',
+                    type: 'capital',
+                    category: 'capital',
+                    currency: result.currency,
+                    forexRate: result.forex_rate?.toString() || '0',
+                    invoiceNumber: result.invoice_number || '',
+                    invoiceDate: formatDateForDB(result.invoice_date),
+                    poNumber: result.po_number,
+                    airwayBillNumber: null,
+                    customsNumber: result.customs_number,
+                    inspectionDetails,
+                    approvalStatus: result.approval_status,
+                    createdBy: result.created_by || '',
+                    customsDate: result.customs_date ? formatDateForDB(result.customs_date) : null,
+                    referenceDoc: result.reference_doc,
+                    items: [] as Record<string, unknown>[],
+                };
+            }
+            (groupedResults[rrpNo].items as Record<string, unknown>[]).push({
+                id: result.id,
+                itemName: String(stored?.equipment_name || result.model_name || ''),
+                partNumber: String(stored?.model_number || stored?.serial_number || '—'),
+                equipmentNumber: String(stored?.equipment_code || '—'),
+                receivedQuantity: String(stored?.quantity ?? '1'),
+                unit: String(stored?.unit || 'EA'),
+                itemPrice: result.item_price?.toString() || '0',
+                customsCharge: '0',
+                receiveSource: 'capital',
+                tenderReferenceNumber: '',
+                customsServiceCharge: '0',
+                vatPercentage: result.vat_percentage?.toString() || '0',
+                freightCharge: '0',
+                totalAmount: result.total_amount?.toString() || '0',
+            });
+        }
+
+        const orderedData = pageNumbers
+            .map((n) => groupedResults[n])
+            .filter(Boolean);
+
+        res.json({
+            data: orderedData,
             pagination: {
                 currentPage,
                 pageSize: limit,
                 totalCount,
-                totalPages: Math.ceil(totalCount / limit)
-            }
-        };
-        logEvents(`Successfully fetched ${response.data.length} RRPs (page ${currentPage})`, "rrpLog.log");
-        res.json(response);
+                totalPages: Math.ceil(totalCount / limit),
+            },
+        });
+        logEvents(`Successfully fetched ${orderedData.length} RRPs (page ${currentPage})`, 'rrpLog.log');
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error searching RRPs: ${errorMessage}`, "rrpLog.log");
+        logEvents(`Error searching RRPs: ${errorMessage}`, 'rrpLog.log');
         res.status(500).json({
             error: 'Internal Server Error',
-            message: errorMessage
+            message: errorMessage,
         });
     }
 };
 export const verifyRRPNumber = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
     try {
-        const { rrpNumber } = req.params;
+        const { rrpNumber: rawNumber } = req.params;
         const { date } = req.query;
-        if (!rrpNumber || !rrpNumber.match(/^[LF]\d{3}(T\d+)?$/)) {
-            logEvents(`Failed to verify RRP number - Invalid format: ${rrpNumber}`, "rrpLog.log");
+        const rrpNumber = normalizeRrpBaseNumber(rawNumber || '');
+        if (!isLocalOrForeignRrpNumber(rrpNumber)) {
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'Invalid RRP number format. Must be in format L001 or L001T1'
+                message: 'Invalid RRP number format. Must be L001 or F001',
             });
             return;
         }
         if (!date) {
-            logEvents(`Failed to verify RRP number - Missing date parameter`, "rrpLog.log");
+            res.status(400).json({ error: 'Bad Request', message: 'RRP date is required' });
+            return;
+        }
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const [rows] = await connection.query<RowDataPacket[]>(
+            `SELECT rrp_number, approval_status, current_fy, date
+             FROM rrp_details
+             WHERE current_fy = ? AND ${sqlRrpBaseMatchClause('rrp_number')}
+             ORDER BY date DESC, id DESC`,
+            [currentFY, rrpNumber, rrpNumber]
+        );
+        const active = rows.filter((r) => r.approval_status !== 'REJECTED');
+        if (active.length > 0) {
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'RRP date is required'
+                message: 'Duplicate RRP number in current fiscal year',
             });
             return;
         }
-        if (rrpNumber.includes('T')) {
-            const [rejectedRecord] = await pool.query<RowDataPacket[]>(`SELECT rrp_number, date 
-                 FROM rrp_details 
-                 WHERE rrp_number = ? AND approval_status = 'REJECTED'`, [rrpNumber]);
-            if (rejectedRecord.length === 0) {
-                logEvents(`Failed to verify RRP number - Not found or not rejected: ${rrpNumber}`, "rrpLog.log");
-                res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'Invalid RRP Number'
-                });
-                return;
-            }
-            const baseNumber = rrpNumber.split('T')[0];
-            const currentTNumber = parseInt(rrpNumber.split('T')[1]);
-            const [previousRecord] = await pool.query<RowDataPacket[]>(`SELECT rrp_number, date 
-                 FROM rrp_details 
-                 WHERE rrp_number LIKE ? 
-                 AND CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) < ?
-                 ORDER BY CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) DESC
-                 LIMIT 1`, [`${baseNumber}T%`, currentTNumber]);
-            const [nextRecord] = await pool.query<RowDataPacket[]>(`SELECT rrp_number, date 
-                 FROM rrp_details 
-                 WHERE rrp_number LIKE ? 
-                 AND CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) > ?
-                 ORDER BY CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) ASC
-                 LIMIT 1`, [`${baseNumber}T%`, currentTNumber]);
-            const inputDate = new Date(date as string);
-            if (previousRecord.length > 0) {
-                const previousDate = new Date(previousRecord[0].date);
-                if (inputDate < previousDate) {
-                    logEvents(`Failed to verify RRP number - Date before previous RRP: ${rrpNumber}`, "rrpLog.log");
-                    res.status(400).json({
-                        error: 'Bad Request',
-                        message: 'RRP date cannot be before the previous RRP date'
-                    });
-                    return;
-                }
-            }
-            if (nextRecord.length > 0) {
-                const nextDate = new Date(nextRecord[0].date);
-                if (inputDate > nextDate) {
-                    logEvents(`Failed to verify RRP number - Date after next RRP: ${rrpNumber}`, "rrpLog.log");
-                    res.status(400).json({
-                        error: 'Bad Request',
-                        message: 'RRP date cannot be greater than the next RRP date'
-                    });
-                    return;
-                }
-            }
-            logEvents(`Successfully verified RRP number: ${rrpNumber}`, "rrpLog.log");
-            res.status(200).json({
-                rrpNumber: rrpNumber
-            });
-        }
-        else {
-            const [configRows] = await pool.query<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
-            if (configRows.length === 0) {
-                logEvents(`Failed to verify RRP number - Current FY configuration not found`, "rrpLog.log");
-                res.status(500).json({
-                    error: 'Internal Server Error',
-                    message: 'Current FY configuration not found'
-                });
-                return;
-            }
-            const currentFY = configRows[0].config_value;
-            const [rows] = await pool.query<RowDataPacket[]>(`SELECT rrp_number, approval_status, current_fy
-                 FROM rrp_details 
-                 WHERE rrp_number LIKE ?
-                 ORDER BY CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) DESC
-                 LIMIT 1`, [`${rrpNumber}T%`]);
-            if (rows.length > 0) {
-                const recordFY = rows[0].current_fy;
-                if (recordFY === currentFY) {
-                    logEvents(`Failed to verify RRP number - Duplicate in current FY: ${rrpNumber}`, "rrpLog.log");
-                    res.status(400).json({
-                        error: 'Bad Request',
-                        message: 'Duplicate RRP number in current fiscal year'
-                    });
-                    return;
-                }
-            }
-            logEvents(`Successfully verified RRP number: ${rrpNumber}`, "rrpLog.log");
-            res.status(200).json({});
-        }
+        res.status(200).json({ rrpNumber });
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -1203,63 +1374,63 @@ export const verifyRRPNumber = async (req: Request, res: Response): Promise<void
             message: error instanceof Error ? error.message : 'An error occurred while verifying RRP number'
         });
     }
+    finally {
+        connection.release();
+    }
 };
 export const getLatestRRPDetails = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
     try {
         const { type } = req.params;
         if (!type || (type !== 'local' && type !== 'foreign')) {
-            logEvents(`Failed to fetch latest RRP details - Invalid type: ${type}`, "rrpLog.log");
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'Invalid RRP type. Must be either "local" or "foreign"'
+                message: 'Invalid RRP type. Must be either "local" or "foreign"',
             });
             return;
         }
         const prefix = type === 'local' ? 'L' : 'F';
-        const [numberRows] = await pool.query<RowDataPacket[]>(`SELECT 
-                rrp_number,
-                date as rrp_date
-             FROM rrp_details 
-             WHERE rrp_number LIKE ?
-             ORDER BY 
-                CAST(SUBSTRING(rrp_number, 2, 3) AS UNSIGNED) DESC,
-                CASE 
-                    WHEN rrp_number LIKE '%T%' 
-                    THEN CAST(SUBSTRING_INDEX(rrp_number, 'T', -1) AS UNSIGNED) 
-                    ELSE 0 
-                END DESC
-             LIMIT 1`, [`${prefix}%`]);
-        const [dateRows] = await pool.query<RowDataPacket[]>(`SELECT 
-                rrp_number,
-                date as rrp_date
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const [numberRows] = await connection.query<RowDataPacket[]>(
+            `SELECT rrp_number, date AS rrp_date
              FROM rrp_details
-             WHERE rrp_number LIKE ?
-             AND approval_status <> 'REJECTED'
+             WHERE current_fy = ? AND rrp_number LIKE ? AND approval_status <> 'REJECTED'
+             ORDER BY CAST(SUBSTRING(rrp_number, 2, 3) AS UNSIGNED) DESC
+             LIMIT 1`,
+            [currentFY, `${prefix}%`]
+        );
+        const [dateRows] = await connection.query<RowDataPacket[]>(
+            `SELECT rrp_number, date AS rrp_date
+             FROM rrp_details
+             WHERE current_fy = ? AND rrp_number LIKE ? AND approval_status <> 'REJECTED'
              ORDER BY date DESC, id DESC
-             LIMIT 1`, [`${prefix}%`]);
+             LIMIT 1`,
+            [currentFY, `${prefix}%`]
+        );
         let nextRRPNumber = `${prefix}001`;
         if (numberRows.length > 0 && numberRows[0].rrp_number) {
-            const latestNumber = numberRows[0].rrp_number as string;
-            const basePart = latestNumber.includes('T') ? latestNumber.split('T')[0] : latestNumber;
+            const basePart = normalizeRrpBaseNumber(numberRows[0].rrp_number as string);
             const numericPart = parseInt(basePart.slice(1), 10) || 0;
-            const incremented = numericPart + 1;
-            nextRRPNumber = `${prefix}${incremented.toString().padStart(3, '0')}`;
+            nextRRPNumber = `${prefix}${(numericPart + 1).toString().padStart(3, '0')}`;
         }
         const latestRRP = {
             rrpNumber: dateRows.length > 0 ? dateRows[0].rrp_number : (numberRows[0]?.rrp_number ?? null),
             rrpDate: dateRows.length > 0 ? dateRows[0].rrp_date : null,
             nextRRPNumber
         };
-        logEvents(`Successfully fetched latest ${type} RRP details: ${latestRRP.rrpNumber || 'None found'} | Next: ${nextRRPNumber}`, "rrpLog.log");
-        res.status(200).json(latestRRP);
+        logEvents(`Successfully fetched latest ${type} RRP details (FY ${currentFY}): ${latestRRP.rrpNumber || 'None'} | Next: ${nextRRPNumber}`, 'rrpLog.log');
+        res.status(200).json({ ...latestRRP, fiscalYear: currentFY });
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error fetching latest RRP details for type ${req.params.type}: ${errorMessage}`, "rrpLog.log");
+        logEvents(`Error fetching latest RRP details for type ${req.params.type}: ${errorMessage}`, 'rrpLog.log');
         res.status(500).json({
             error: 'Internal Server Error',
-            message: error instanceof Error ? error.message : 'An error occurred while fetching latest RRP details'
+            message: error instanceof Error ? error.message : 'An error occurred while fetching latest RRP details',
         });
+    }
+    finally {
+        connection.release();
     }
 };
 export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promise<void> => {
@@ -1267,11 +1438,19 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
         const userPermissions = req.permissions || [];
         const { rrpNumber, imagePath } = req.body;
         const [existingDoc] = await pool.query<RowDataPacket[]>(
-            'SELECT reference_doc, date FROM rrp_details WHERE rrp_number = ? LIMIT 1',
+            'SELECT reference_doc, date, approval_status FROM rrp_details WHERE rrp_number = ? LIMIT 1',
             [rrpNumber]
         );
         const currentReferenceDoc = existingDoc.length > 0 ? existingDoc[0].reference_doc : null;
         const currentDate = existingDoc.length > 0 ? existingDoc[0].date : null;
+        const currentApprovalStatus = existingDoc.length > 0 ? (existingDoc[0].approval_status as string | undefined) : undefined;
+        if (currentApprovalStatus === 'REJECTED') {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Rejected RRPs do not require reference document upload'
+            });
+            return;
+        }
         const { type } = getRRPType(rrpNumber);
         const isEdit = !!currentReferenceDoc;
         if (isEdit) {
@@ -1299,7 +1478,7 @@ export const uploadRRPReferenceDoc = async (req: Request, res: Response): Promis
             });
             return;
         }
-        if (currentDate) {
+        if (currentDate && type !== 'capital') {
             const prefix = type === 'local' ? 'L' : 'F';
             const [pendingPrevious] = await pool.query<RowDataPacket[]>(
                 `SELECT rrp_number, MAX(date) AS last_date

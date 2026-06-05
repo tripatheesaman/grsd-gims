@@ -18,9 +18,16 @@ export const routes: RouteConfig[] = [
         permissions: [
             'can_approve_request',
             'can_approve_receive',
+            'can_approve_assets_receive',
             'can_approve_rrp',
             'can_approve_issues',
         ],
+    },
+    {
+        path: '/asset-receive',
+        requiresAuth: true,
+        title: 'Assets Receive',
+        permissions: ['can_receive_assets'],
     },
     {
         path: '/search',
@@ -113,10 +120,22 @@ export const routes: RouteConfig[] = [
         permissions: ['can_print_rrp'],
     },
     {
+        path: '/rrp/capital/items',
+        requiresAuth: true,
+        title: 'Capital RRP Items',
+        permissions: ['can_create_assets_rrp'],
+    },
+    {
+        path: '/rrp/capital/new',
+        requiresAuth: true,
+        title: 'New Capital RRP',
+        permissions: ['can_create_assets_rrp'],
+    },
+    {
         path: '/rrp',
         requiresAuth: true,
         title: 'RRP',
-        permissions: ['can_create_rrp'],
+        permissions: ['can_create_rrp', 'can_create_assets_rrp'],
     },
     {
         path: '/rrp/new',
@@ -312,7 +331,13 @@ export const routes: RouteConfig[] = [
     }
 ];
 export const getRouteConfig = (path: string): RouteConfig | undefined => {
-    return routes.find(route => path.startsWith(route.path));
+    const matches = routes.filter(
+        (route) => path === route.path || path.startsWith(`${route.path}/`)
+    );
+    if (matches.length === 0) {
+        return undefined;
+    }
+    return matches.sort((a, b) => b.path.length - a.path.length)[0];
 };
 export const hasRequiredPermissions = (route: RouteConfig, userPermissions: string[]): boolean => {
     if (!route.permissions)

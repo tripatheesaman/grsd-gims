@@ -19,7 +19,6 @@ interface PrintReceivePreviewModalProps {
             equipmentNumber: string;
             imageUrl: string;
             location: string;
-            cardNumber: string;
             unit: string;
             remarks: string;
         }[];
@@ -69,7 +68,6 @@ export function PrintReceivePreviewModal({ receive, isOpen, onClose }: PrintRece
                     <th className="px-6 py-3 text-left text-xs font-semibold text-[#003594] uppercase tracking-wider">Equipment Number</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-[#003594] uppercase tracking-wider">Quantity</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-[#003594] uppercase tracking-wider">Location</th>
-                    <th className="px-6 py-3 text-left text-xs font-semibold text-[#003594] uppercase tracking-wider">Card Number</th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-[#003594] uppercase tracking-wider">Image</th>
                   </tr>
                 </thead>
@@ -80,7 +78,6 @@ export function PrintReceivePreviewModal({ receive, isOpen, onClose }: PrintRece
                       <td className="px-6 py-4 whitespace-nowrap">{item.equipmentNumber}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{item.receiveQuantity} {item.unit}</td>
                       <td className="px-6 py-4 whitespace-nowrap">{item.location}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">{item.cardNumber}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <Image src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10" onError={(e) => {
                 const target = e.target as HTMLImageElement;
