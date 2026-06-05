@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
+import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 import { formatDate } from '../utils/dateUtils';
 export interface RRPRecord {
     id: number;
@@ -79,10 +80,16 @@ export interface RRPFormData {
 export const getAllRRPRecords = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        const { universal, equipmentNumber, partNumber, status, createdBy, page = 1, pageSize = 20 } = req.query;
+        const { universal, equipmentNumber, partNumber, status, createdBy, page = 1, pageSize = 20, fiscalYear: fiscalYearQuery } = req.query;
         const offset = (Number(page) - 1) * Number(pageSize);
+        const currentFY = await resolveCurrentFiscalYear(connection);
+        const fyFilter = resolveFilterFiscalYear(fiscalYearQuery as string | undefined, currentFY);
         let whereConditions = [];
         let queryParams: any[] = [];
+        if (fyFilter) {
+            whereConditions.push('rd.current_fy = ?');
+            queryParams.push(fyFilter);
+        }
         if (universal) {
             whereConditions.push(`(rd.rrp_number LIKE ? OR red.item_name LIKE ? OR red.part_number LIKE ? OR rqd.request_number LIKE ?)`);
             const searchParam = `%${universal}%`;

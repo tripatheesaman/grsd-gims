@@ -15,6 +15,7 @@ export default function SettingsLayout({ children, }: {
         '/settings/receive': 'can_access_receive_settings',
         '/settings/issue': 'can_access_issue_settings',
         '/settings/rrp': 'can_access_rrp_settings',
+        '/settings/fuel': 'can_access_fuel_settings',
     };
     const requiredPermission = pathPermissionMap[pathname];
     if (requiredPermission && !permissions?.includes(requiredPermission)) {

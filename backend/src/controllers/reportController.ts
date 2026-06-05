@@ -367,7 +367,6 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
         s.part_numbers as part_number,
         COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
         s.location,
-        s.card_number,
         s.open_quantity,
         s.open_amount,
         s.created_at
@@ -375,7 +374,7 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
       LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
       WHERE s.nac_code LIKE ?
       ${dateClause}
-      GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.card_number, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
+      GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
     `, [searchPattern, ...dateParams]);
         return results;
     }
@@ -389,7 +388,6 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
       s.part_numbers as part_number,
       COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
       s.location,
-      s.card_number,
       s.open_quantity,
       s.open_amount,
       s.created_at
@@ -397,7 +395,7 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
     LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
     WHERE s.nac_code IN (${placeholders})
     ${dateClause}
-    GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.card_number, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
+    GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
   `, [...targetNaccodes, ...dateParams]);
     return results;
 };
@@ -737,7 +735,6 @@ export const previewStockCard = async (req: Request, res: Response): Promise<voi
                 part_number: stock.part_number,
                 equipment_number: stock.equipment_number,
                 location: stock.location,
-                card_number: stock.card_number,
                 open_quantity: stock.open_quantity,
                 open_amount: stock.open_amount,
                 openingBalanceDate: (stock as any).openingBalanceDate instanceof Date
@@ -1825,7 +1822,6 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
                 rd.is_received,
                 rd.receive_fk,
                 COALESCE(sd.location, '') as location,
-                COALESCE(sd.card_number, '') as card_number,
                 pm.weighted_average_days AS predicted_days,
                 pm.percentile_10_days AS predicted_range_lower,
                 pm.percentile_90_days AS predicted_range_upper,
@@ -2020,7 +2016,6 @@ export const generateRequestReceiveReport = async (req: Request, res: Response):
             latestReceiveId: row.latest_receive_id,
             receiveIdsCsv: row.receive_ids_csv,
             location: row.location,
-            cardNumber: row.card_number,
             receivedTotalPendingApproved: Number(row.total_pending_approved) || 0,
             receivedTotalApproved: Number(row.total_approved) || 0,
             remainingQuantity: Number(row.remaining_quantity) || 0,
@@ -2071,7 +2066,6 @@ export const generateTenderReceiveReport = async (req: Request, res: Response): 
                 rd.approval_status,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.tender_reference_number,
                 rd.created_at,
                 rd.updated_at,
@@ -2166,7 +2160,6 @@ export const generateTenderReceiveReport = async (req: Request, res: Response): 
             derivedReceiveStatus: item.derived_receive_status,
             imagePath: item.image_path,
             location: item.location,
-            cardNumber: item.card_number,
             tenderReferenceNumber: item.tender_reference_number,
             createdAt: item.created_at,
             updatedAt: item.updated_at
@@ -2212,7 +2205,6 @@ export const generateBorrowHistoryReport = async (req: Request, res: Response): 
                 rd.borrow_reference_number,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.created_at,
                 rd.updated_at,
                 bs.source_name,
@@ -2350,7 +2342,6 @@ export const generateBorrowHistoryReport = async (req: Request, res: Response): 
             borrowSourceCode: item.source_code,
             imagePath: item.image_path,
             location: item.location,
-            cardNumber: item.card_number,
             createdAt: item.created_at,
             updatedAt: item.updated_at
         }));
@@ -2754,7 +2745,21 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
         const processedRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status <> 'REJECTED'`);
         const voidRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status = 'REJECTED'`);
         const issueClauseWithAlias = applyAliasToIssueClause('i');
-        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, sparesTotalsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult] = await Promise.all([
+        let capitalRrpValueClause = `WHERE rd.rrp_category = 'capital' AND rd.approval_status = 'APPROVED' AND rd.asset_fk IS NOT NULL`;
+        const capitalRrpValueParams: string[] = [];
+        if (fromDate && toDate) {
+            capitalRrpValueClause += ' AND rd.date BETWEEN ? AND ?';
+            capitalRrpValueParams.push(fromDate, toDate);
+        }
+        else if (fromDate) {
+            capitalRrpValueClause += ' AND rd.date >= ?';
+            capitalRrpValueParams.push(fromDate);
+        }
+        else if (toDate) {
+            capitalRrpValueClause += ' AND rd.date <= ?';
+            capitalRrpValueParams.push(toDate);
+        }
+        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, sparesTotalsResult, assetsTotalsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult] = await Promise.all([
             pool.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT request_number) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM receive_details ${receiveWhereClause}`, receiveParams.length > 0 ? receiveParams : undefined),
@@ -2771,6 +2776,11 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
                     COALESCE(SUM(current_balance), 0) as totalQuantity,
                     COALESCE(SUM(open_amount), 0) as totalValue
                  FROM stock_details`),
+            pool.query<RowDataPacket[]>(
+                `SELECT COALESCE(SUM(a.current_value), 0) as totalValue
+                 FROM assets a
+                 WHERE a.current_value IS NOT NULL AND a.current_value > 0`
+            ),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(issue_quantity), 0) as totalQuantity FROM issue_details ${issueWhereClause}`, issueParams.length > 0 ? issueParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(i.issue_quantity), 0) as totalQuantity
                  FROM issue_details i
@@ -2799,6 +2809,10 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
             processedForeignRRPs: processedForeignRRPsResult[0][0]?.count || 0,
             totalSparesQuantity: Number(sparesTotalsResult[0][0]?.totalQuantity) || 0,
             totalSparesValue: Number(sparesTotalsResult[0][0]?.totalValue) || 0,
+            totalAssetsValue: Number(assetsTotalsResult[0][0]?.totalValue) || 0,
+            grandTotalValue:
+                (Number(sparesTotalsResult[0][0]?.totalValue) || 0) +
+                (Number(assetsTotalsResult[0][0]?.totalValue) || 0),
             totalItemsIssued: Number(totalItemsIssuedResult[0][0]?.totalQuantity) || 0,
             petrolIssuedQuantity: Number(petrolIssuedQuantityResult[0][0]?.totalQuantity) || 0,
             dieselIssuedQuantity: Number(dieselIssuedQuantityResult[0][0]?.totalQuantity) || 0,
@@ -2883,7 +2897,6 @@ export const getReceiveRRPReport = async (req: Request, res: Response): Promise<
                 rd.received_by,
                 rd.approval_status,
                 rd.location,
-                rd.card_number,
                 rd.request_fk,
                 rd.rrp_fk,
                 rq.request_number,
@@ -3009,7 +3022,6 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
                 rd.received_by,
                 rd.approval_status,
                 rd.location,
-                rd.card_number,
                 rq.request_number,
                 rq.request_date,
                 rq.requested_by,
@@ -3076,7 +3088,6 @@ export const exportReceiveRRPReport = async (req: Request, res: Response): Promi
             'Airway Bill Number': row.airway_bill_number || '-',
             'RRP Approval Status': row.rrp_approval_status || '-',
             'Location': row.location || '-',
-            'Card Number': row.card_number || '-',
             'Received By': row.received_by || '-'
         }));
         const workbook = new ExcelJS.Workbook();
@@ -3142,7 +3153,6 @@ interface StockReportItem {
     true_balance_quantity: number;
     true_balance_amount: number;
     location: string;
-    card_number: string;
 }
 export const getCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
@@ -3194,7 +3204,6 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 s.part_numbers,
                 s.applicable_equipments,
                 s.location,
-                s.card_number,
                 s.open_quantity,
                 s.open_amount,
                 -- Calculate opening balance (open + receives before fromDate - issues before fromDate)
@@ -3315,8 +3324,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 balance_quantity: balanceQty,
                 true_balance_quantity: trueBalanceQty,
                 true_balance_amount: trueBalanceAmt,
-                location: row.location || '',
-                card_number: row.card_number || ''
+                location: row.location || ''
             };
         });
         const totals = {
@@ -3403,7 +3411,6 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 s.part_numbers,
                 s.applicable_equipments,
                 s.location,
-                s.card_number,
                 s.open_quantity,
                 s.open_amount,
                 (
@@ -3511,8 +3518,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 balance_quantity: balanceQty,
                 true_balance_quantity: trueBalanceQty,
                 true_balance_amount: trueBalanceAmt,
-                location: row.location || '',
-                card_number: row.card_number || ''
+                location: row.location || ''
             };
         });
         worksheet.addRow([
@@ -3532,8 +3538,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             'Balance Quantity',
             'True Balance Quantity',
             'True Balance Amount',
-            'Location',
-            'Card Number'
+            'Location'
         ]);
         const headerRow = worksheet.getRow(1);
         headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -3561,8 +3566,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 item.balance_quantity || 0,
                 item.true_balance_quantity || 0,
                 item.true_balance_amount || 0,
-                item.location || '',
-                item.card_number || ''
+                item.location || ''
             ]);
         });
         worksheet.columns.forEach((column: any) => {
@@ -3746,7 +3750,7 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
         }
         const reportFromDate = String(fromDate);
         const reportToDate = String(toDate);
-        const [stockItem] = await connection.execute<RowDataPacket[]>(`SELECT nac_code, item_name, part_numbers, applicable_equipments, location, card_number 
+        const [stockItem] = await connection.execute<RowDataPacket[]>(`SELECT nac_code, item_name, part_numbers, applicable_equipments, location 
              FROM stock_details 
              WHERE nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci 
              LIMIT 1`, [nacCode]);
@@ -3843,7 +3847,6 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
             worksheet.addRow(['Part Numbers:', item.part_numbers || '']);
             worksheet.addRow(['Equipment Numbers:', item.applicable_equipments || '']);
             worksheet.addRow(['Location:', item.location || '']);
-            worksheet.addRow(['Card Number:', item.card_number || '']);
             worksheet.addRow(['']);
             worksheet.addRow(['Date Range:', `${reportFromDate} to ${reportToDate}`]);
             worksheet.addRow(['']);
@@ -4073,7 +4076,6 @@ interface ReceiveDetailItem {
     receive_source: string;
     tender_reference_number?: string;
     location: string;
-    card_number: string;
     unit: string;
     item_name: string;
 }
@@ -4338,7 +4340,6 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
                 rd.receive_source,
                 rd.tender_reference_number,
                 rd.location,
-                rd.card_number,
                 rd.unit,
                 rd.item_name
             FROM receive_details rd
@@ -4361,7 +4362,6 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
             receive_source: row.receive_source || '',
             tender_reference_number: row.tender_reference_number || '',
             location: row.location || '',
-            card_number: row.card_number || '',
             unit: row.unit || '',
             item_name: row.item_name || ''
         }));

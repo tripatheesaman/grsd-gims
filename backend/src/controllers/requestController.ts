@@ -696,16 +696,13 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
         const canCreateCustomRequestNumber = userPermissions.includes('can_create_new_request_number');
         if (!canCreateCustomRequestNumber) {
             
-            const [configRows] = await connection.query<RowDataPacket[]>(
-                'SELECT config_name, config_value FROM app_config WHERE config_name IN (?, ?)',
-                ['section_code', 'current_fy']
+            const { resolveCurrentFiscalYear } = await import('../services/fiscalYearService');
+            const currentFy = await resolveCurrentFiscalYear(connection);
+            const [sectionRows] = await connection.query<RowDataPacket[]>(
+                'SELECT config_value FROM app_config WHERE config_name = ?',
+                ['section_code']
             );
-            let sectionCode = '';
-            let currentFy = '';
-            for (const r of configRows as any[]) {
-                if (r.config_name === 'section_code') sectionCode = r.config_value;
-                if (r.config_name === 'current_fy') currentFy = r.config_value;
-            }
+            const sectionCode = sectionRows.length > 0 ? String(sectionRows[0].config_value) : '';
 
             
             const [lastRows] = await connection.query<RowDataPacket[]>(
@@ -1870,18 +1867,14 @@ export const getNextRequestNumber = async (req: Request, res: Response): Promise
     const connection = await pool.getConnection();
     try {
         
-        const [configRows] = await connection.query<RowDataPacket[]>(
-            'SELECT config_name, config_value FROM app_config WHERE config_name IN (?, ?)',
-            ['section_code', 'current_fy']
+        const { resolveCurrentFiscalYear } = await import('../services/fiscalYearService');
+        const currentFy = await resolveCurrentFiscalYear(connection);
+        const [sectionRows] = await connection.query<RowDataPacket[]>(
+            'SELECT config_value FROM app_config WHERE config_name = ?',
+            ['section_code']
         );
+        const sectionCode = sectionRows.length > 0 ? String(sectionRows[0].config_value) : '';
 
-        let sectionCode = '';
-        let currentFy = '';
-        for (const r of configRows as any[]) {
-            if (r.config_name === 'section_code') sectionCode = r.config_value;
-            if (r.config_name === 'current_fy') currentFy = r.config_value;
-        }
-        
         const [lastRows] = await connection.query<RowDataPacket[]>(
             `SELECT request_number FROM request_details GROUP BY request_number ORDER BY MAX(request_date) DESC, request_number DESC LIMIT 1`
         );

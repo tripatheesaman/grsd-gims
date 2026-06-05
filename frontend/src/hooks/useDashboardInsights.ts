@@ -1,7 +1,8 @@
 'use client';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
+import { API } from '@/lib/api';
 
 export interface SeriesPoint {
     date: string;
@@ -33,6 +34,8 @@ interface DashboardTotals {
     processedForeignRRPs: number;
     totalSparesQuantity: number;
     totalSparesValue: number;
+    totalAssetsValue: number;
+    grandTotalValue: number;
     totalItemsIssued: number;
     petrolIssuedQuantity: number;
     dieselIssuedQuantity: number;
@@ -42,12 +45,16 @@ interface DashboardTotals {
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const formatISODate = (value: Date) => value.toISOString().slice(0, 10);
 
+/** Fallback until Nepali FY bounds load from the API */
 export const getDefaultDashboardRange = (): DashboardRange => {
     const today = new Date();
-    const currentYear = today.getFullYear();
-    const fiscalStart = new Date(currentYear, 6, 17);
-    const from = fiscalStart > today ? new Date(currentYear - 1, 6, 17) : fiscalStart;
-    return { from: formatISODate(from), to: formatISODate(today) };
+    return { from: formatISODate(new Date(today.getFullYear(), today.getMonth(), 1)), to: formatISODate(today) };
+};
+
+export const getDashboardRangeFromFyBounds = (startAd: string, endAd: string): DashboardRange => {
+    const today = formatISODate(new Date());
+    const to = today < endAd ? today : endAd;
+    return { from: startAd, to };
 };
 
 const buildSeries = (rows: SummaryRow[], from: string, to: string): SeriesPoint[] => {
@@ -68,6 +75,18 @@ const buildSeries = (rows: SummaryRow[], from: string, to: string): SeriesPoint[
 
 export const useDashboardInsights = () => {
     const [range, setRange] = useState<DashboardRange>(() => getDefaultDashboardRange());
+    const [fiscalYearLabel, setFiscalYearLabel] = useState<string>('');
+
+    useEffect(() => {
+        API.get<{ startAd: string; endAd: string; fiscalYear: string }>('/api/settings/fiscal-year')
+            .then((res) => {
+                if (res.data?.startAd && res.data?.endAd) {
+                    setRange(getDashboardRangeFromFyBounds(res.data.startAd, res.data.endAd));
+                    setFiscalYearLabel(res.data.fiscalYear || '');
+                }
+            })
+            .catch(() => {});
+    }, []);
     
     const params = useMemo(() => ({ fromDate: range.from, toDate: range.to }), [range.from, range.to]);
     
@@ -186,6 +205,8 @@ export const useDashboardInsights = () => {
             processedForeignRRPs: Number(data?.processedForeignRRPs) || 0,
             totalSparesQuantity: Number(data?.totalSparesQuantity) || 0,
             totalSparesValue: Number(data?.totalSparesValue) || 0,
+            totalAssetsValue: Number(data?.totalAssetsValue) || 0,
+            grandTotalValue: Number(data?.grandTotalValue) || 0,
             totalItemsIssued: Number(data?.totalItemsIssued) || 0,
             petrolIssuedQuantity: Number(data?.petrolIssuedQuantity) || 0,
             dieselIssuedQuantity: Number(data?.dieselIssuedQuantity) || 0,
@@ -210,6 +231,7 @@ export const useDashboardInsights = () => {
     
     return {
         range,
+        fiscalYearLabel,
         setRange: handleRangeChange,
         loading: issuesLoading || reqLoading || recLoading || rrpLoading || totalsLoading,
         error: null,

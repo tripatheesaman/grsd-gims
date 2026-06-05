@@ -7,6 +7,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import { API } from '@/lib/api';
+import {
+    formatNprAmount,
+    getAssetBookValueNpr,
+    getAssetInsuranceBookValueNpr,
+    getAssetOriginalInsuranceAmountNpr,
+    getAssetOriginalPurchaseCostNpr,
+} from '@/utils/assetValue';
 interface AssetFormProps {
     assetTypes: AssetType[];
     initialData?: Asset;
@@ -20,7 +27,6 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
     const [location, setLocation] = useState<string>('');
     const [rrpStatus, setRrpStatus] = useState<string>('0');
     const [currentValue, setCurrentValue] = useState<string>('');
-    const [insuranceAmount, setInsuranceAmount] = useState<string>('');
     const [servicabilityStatus, setServicabilityStatus] = useState<string>('');
     const [purchaseCurrency, setPurchaseCurrency] = useState<string>('');
     const [purchaseFxRate, setPurchaseFxRate] = useState<string>('');
@@ -29,6 +35,14 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
     const [selectedAssetType, setSelectedAssetType] = useState<AssetTypeWithProperties | null>(null);
     const [isLoadingType, setIsLoadingType] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const derivedInsuranceNpr = (() => {
+        const base = Number(purchaseAmountBase);
+        const fx = Number(purchaseFxRate);
+        if (Number.isFinite(base) && Number.isFinite(fx) && base > 0 && fx > 0) {
+            return base * fx;
+        }
+        return null;
+    })();
     useEffect(() => {
         if (initialData) {
             setName(initialData.name);
@@ -50,7 +64,6 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
             setLocation(initialData.location ? String(initialData.location) : '');
             setRrpStatus(initialData.rrp_status != null && String(initialData.rrp_status) !== '' ? String(initialData.rrp_status) : '0');
             setCurrentValue(initialData.current_value !== null && initialData.current_value !== undefined ? String(initialData.current_value) : '');
-            setInsuranceAmount(initialData.insurance_amount !== null && initialData.insurance_amount !== undefined ? String(initialData.insurance_amount) : '');
             setServicabilityStatus(initialData.servicability_status ? String(initialData.servicability_status) : '');
             setPurchaseCurrency(initialData.purchase_currency ? String(initialData.purchase_currency) : '');
             setPurchaseFxRate(initialData.purchase_fx_rate !== null && initialData.purchase_fx_rate !== undefined ? String(initialData.purchase_fx_rate) : '');
@@ -121,11 +134,7 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
                 return;
             }
             if (!currentValue.trim() || !Number.isFinite(Number(currentValue)) || Number(currentValue) < 0) {
-                alert('Please enter a valid current value');
-                return;
-            }
-            if (!insuranceAmount.trim() || !Number.isFinite(Number(insuranceAmount)) || Number(insuranceAmount) < 0) {
-                alert('Please enter a valid insurance amount');
+                alert('Please enter a valid purchase cost');
                 return;
             }
             if (!servicabilityStatus.trim()) {
@@ -148,14 +157,6 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
             }
             if (!['0', '1'].includes(rrpStatus.trim())) {
                 alert('RRP status must be 0 or 1');
-                return;
-            }
-            if (!currentValue.trim() || !Number.isFinite(Number(currentValue)) || Number(currentValue) < 0) {
-                alert('Please enter a valid current value');
-                return;
-            }
-            if (!insuranceAmount.trim() || !Number.isFinite(Number(insuranceAmount)) || Number(insuranceAmount) < 0) {
-                alert('Please enter a valid insurance amount');
                 return;
             }
             if (!servicabilityStatus.trim()) {
@@ -182,8 +183,6 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
                     ? {
                         location: location.trim(),
                         rrp_status: rrpStatus.trim(),
-                        current_value: Number(currentValue),
-                        insurance_amount: Number(insuranceAmount),
                         servicability_status: servicabilityStatus.trim(),
                     }
                     : {
@@ -192,7 +191,6 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
                         location: location.trim(),
                         rrp_status: rrpStatus.trim(),
                         current_value: Number(currentValue),
-                        insurance_amount: Number(insuranceAmount),
                         servicability_status: servicabilityStatus.trim(),
                         purchase_currency: purchaseCurrency.trim(),
                         purchase_fx_rate: Number(purchaseFxRate),
@@ -260,14 +258,66 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="currentValue">Current Value *</Label>
-          <Input id="currentValue" type="number" step="0.01" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} placeholder="Enter current value" required className="border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20"/>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="insuranceAmount">Insurance Amount *</Label>
-          <Input id="insuranceAmount" type="number" step="0.01" value={insuranceAmount} onChange={(e) => setInsuranceAmount(e.target.value)} placeholder="Enter insurance amount" required className="border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20"/>
-        </div>
+        {initialData ? (
+          <>
+            <div className="space-y-2">
+              <Label>Purchase cost (NPR)</Label>
+              <p className="text-sm font-medium text-slate-800 tabular-nums">
+                {formatNprAmount(getAssetOriginalPurchaseCostNpr(initialData))}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Current value (NPR)</Label>
+              <p className="text-sm font-medium text-[#003594] tabular-nums">
+                {formatNprAmount(getAssetBookValueNpr(initialData))}
+              </p>
+              {initialData.purchase_fy ? (
+                <p className="text-xs text-slate-500">
+                  Depreciated from FY {initialData.purchase_fy}
+                  {initialData.elapsed_fiscal_years != null ? ` · ${initialData.elapsed_fiscal_years} FY × 20%` : ''}
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="currentValue">Purchase cost (NPR) *</Label>
+            <Input id="currentValue" type="number" step="0.01" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} placeholder="Enter purchase cost" required className="border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20"/>
+          </div>
+        )}
+        {initialData ? (
+          <>
+            <div className="space-y-2">
+              <Label>Insurance base (NPR)</Label>
+              <p className="text-sm font-medium text-slate-800 tabular-nums">
+                {formatNprAmount(getAssetOriginalInsuranceAmountNpr(initialData))}
+              </p>
+              <p className="text-xs text-slate-500">Foreign purchase amount × FX rate</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Insurance value (NPR)</Label>
+              <p className="text-sm font-medium text-[#003594] tabular-nums">
+                {formatNprAmount(getAssetInsuranceBookValueNpr(initialData))}
+              </p>
+              {initialData.purchase_fy ? (
+                <p className="text-xs text-slate-500">
+                  Depreciated from FY {initialData.purchase_fy}
+                  {initialData.elapsed_fiscal_years != null ? ` · ${initialData.elapsed_fiscal_years} FY × 10%` : ''}
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2">
+            <Label>Initial insurance (NPR)</Label>
+            <p className="text-sm font-medium text-slate-800 tabular-nums">
+              {formatNprAmount(derivedInsuranceNpr)}
+            </p>
+            <p className="text-xs text-slate-500">
+              Set automatically from purchase amount × FX rate; depreciates 10% per FY
+            </p>
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="servicabilityStatus">Servicability Status *</Label>
           <Input id="servicabilityStatus" value={servicabilityStatus} onChange={(e) => setServicabilityStatus(e.target.value)} placeholder="e.g., serviceable / unserviceable" required className="border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20"/>

@@ -36,6 +36,17 @@ export function adToBs(adStr: string): string {
     }
     return `${bsY}-${String(bsM).padStart(2, '0')}-${String(bsD).padStart(2, '0')}`;
 }
+export function getBsMonthDays(bsYear: number, bsMonth: number): number {
+    if (!BS_DATA[bsYear] || bsMonth < 1 || bsMonth > 12) {
+        throw new Error('Invalid BS year or month');
+    }
+    return BS_DATA[bsYear][bsMonth - 1];
+}
+
+export function formatBsDate(bsYear: number, bsMonth: number, bsDay: number): string {
+    return `${bsYear}-${String(bsMonth).padStart(2, '0')}-${String(bsDay).padStart(2, '0')}`;
+}
+
 export function bsToAd(bsStr: string): string {
     let [bsY, bsM, bsD] = bsStr.split('-').map(Number);
     if (!BS_DATA[bsY] || bsM < 1 || bsM > 12 || bsD < 1 || bsD > BS_DATA[bsY][bsM - 1]) {

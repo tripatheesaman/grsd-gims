@@ -166,10 +166,27 @@ const DashboardContent = () => {
             icon: ClipboardList,
         },
         {
-            label: 'Total spares value',
+            label: 'Spares purchase cost',
             value: `NPR ${totals.totalSparesValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
             accentClass: 'border-[#10b981]/30 bg-[#d1fae5]',
             icon: DollarSign,
+        },
+        {
+            label: 'Capital assets purchase cost',
+            value: `NPR ${totals.totalAssetsValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            accentClass: 'border-[#0d9488]/30 bg-[#ccfbf1]',
+            icon: DollarSign,
+            details: [{ label: 'RRCP lines', value: 'Approved · NPR' }],
+        },
+        {
+            label: 'Grand total purchase cost',
+            value: `NPR ${totals.grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            accentClass: 'border-[#0369a1]/30 bg-[#e0f2fe]',
+            icon: DollarSign,
+            details: [
+                { label: 'Spares', value: totals.totalSparesValue },
+                { label: 'Assets', value: totals.totalAssetsValue },
+            ],
         },
     ];
     const insightChips = [
@@ -184,8 +201,16 @@ const DashboardContent = () => {
         { label: 'Diesel issued', value: totals.dieselIssuedQuantity },
         { label: 'Items paid for', value: totals.totalItemsPaidFor },
         {
-            label: 'Total spares value',
+            label: 'Spares purchase cost',
             value: `NPR ${totals.totalSparesValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+        },
+        {
+            label: 'Capital assets purchase cost',
+            value: `NPR ${totals.totalAssetsValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+        },
+        {
+            label: 'Grand total purchase cost',
+            value: `NPR ${totals.grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
         },
     ];
     return (<div className="min-h-screen bg-[#f2f5ff]">

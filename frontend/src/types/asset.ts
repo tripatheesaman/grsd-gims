@@ -43,16 +43,28 @@ export interface Asset {
     location?: string | null;
     rrp_status?: string | null;
     current_value?: number | null;
+    original_purchase_cost_npr?: number | null;
+    purchase_fy?: string | null;
+    last_depreciation_fy?: string | null;
+    book_value_npr?: number | null;
+    elapsed_fiscal_years?: number | null;
+    annual_depreciation_npr?: number | null;
+    original_insurance_amount_npr?: number | null;
+    insurance_book_value_npr?: number | null;
+    annual_insurance_depreciation_npr?: number | null;
     insurance_amount?: number | null;
     servicability_status?: string | null;
     purchase_currency?: string | null;
     purchase_fx_rate?: number | null;
     purchase_amount_base?: number | null;
+    rrp_total_npr?: number | null;
+    image_path?: string | null;
     created_by?: number;
     created_at?: string;
     updated_at?: string;
     asset_type?: AssetTypeWithProperties;
     property_values?: AssetPropertyValue[];
+    capital_rrp_lines?: AssetCapitalRrpLine[];
 }
 export interface AssetPropertyValue {
     id: number;
@@ -62,6 +74,22 @@ export interface AssetPropertyValue {
     created_at?: string;
     updated_at?: string;
 }
+export interface AssetCapitalRrpLine {
+    id: number;
+    rrp_number: string;
+    rrp_date?: string | null;
+    supplier_name?: string | null;
+    currency?: string | null;
+    forex_rate?: number | null;
+    invoice_number?: string | null;
+    invoice_date?: string | null;
+    po_number?: string | null;
+    approval_status?: string | null;
+    item_price?: number | null;
+    total_amount?: number | null;
+    vat_percentage?: number | null;
+    created_at?: string | null;
+}
 export interface CreateAssetDTO {
     asset_type_id: number;
     name: string;
@@ -69,7 +97,7 @@ export interface CreateAssetDTO {
     location: string;
     rrp_status: string;
     current_value: number;
-    insurance_amount: number;
+    insurance_amount?: number | null;
     servicability_status: string;
     purchase_currency: string;
     purchase_fx_rate: number;
@@ -126,7 +154,7 @@ export const PROPERTY_DISPLAY_LABELS: Record<string, string> = {
     equipment_code: 'Equipment Code',
     location: 'Location',
     rrp_status: 'RRP Status',
-    current_value: 'Current Value',
+    current_value: 'Purchase cost',
     insurance_amount: 'Insurance Amount',
     servicability_status: 'Servicability Status',
     purchase_currency: 'Purchase Currency',
@@ -142,7 +170,7 @@ export const PROPERTY_DISPLAY_LABELS: Record<string, string> = {
     weight: 'Weight',
     size: 'Size',
     quantity: 'Quantity',
-    purchase_year: 'Purchase Year',
+    purchase_year: 'Purchase Year (AD)',
     purchase_amount: 'Purchase Amount'
 };
 export type PropertyName = typeof VALID_PROPERTY_NAMES[number];

@@ -4,6 +4,7 @@ import { useAuthContext } from '@/context/AuthContext';
 import { ApprovalCountsProvider, useApprovalCountsContext } from '@/context/ApprovalCountsContext';
 import { PendingRequestsCount } from '@/components/dashboard/PendingRequestsCount';
 import { PendingReceivesCount } from '@/components/dashboard/PendingReceivesCount';
+import { PendingAssetReceivesCount } from '@/components/dashboard/PendingAssetReceivesCount';
 import { PendingRRPCount } from '@/components/dashboard/PendingRRPCount';
 import { PendingIssuesCount } from '@/components/dashboard/PendingIssuesCount';
 import { PendingFuelIssues } from '@/components/dashboard/PendingFuelIssues';
@@ -40,9 +41,16 @@ function ApprovalsInner() {
             component: <PendingReceivesCount />
         },
         {
+            key: 'assets-receives',
+            title: 'Assets Receive',
+            description: 'Capital equipment receives pending approval before RRP.',
+            permission: 'can_approve_assets_receive',
+            component: <PendingAssetReceivesCount />
+        },
+        {
             key: 'rrps',
             title: 'RRPs',
-            description: 'Receive Register Papers requiring review.',
+            description: 'Spare and capital (RRCP) receive register papers awaiting approval.',
             permission: 'can_approve_rrp',
             component: <PendingRRPCount />
         },
@@ -102,6 +110,7 @@ function ApprovalsInner() {
         <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           <SummaryPill label="Requests" value={counts.requests} accent="bg-gradient-to-br from-[#2563eb]/70 to-[#003594]/90" loading={loading}/>
           <SummaryPill label="Receives" value={counts.receives} accent="bg-gradient-to-br from-[#10b981]/60 to-[#0f766e]/80" loading={loading}/>
+          <SummaryPill label="Assets Rcv" value={counts.assetReceives} accent="bg-gradient-to-br from-[#7c3aed]/60 to-[#4c1d95]/80" loading={loading}/>
           <SummaryPill label="RRPs" value={counts.rrps} accent="bg-gradient-to-br from-[#d946ef]/70 to-[#86198f]/80" loading={loading}/>
           <SummaryPill label="Issues" value={counts.issues} accent="bg-gradient-to-br from-[#f59e0b]/70 to-[#d97706]/80" loading={loading}/>
           <SummaryPill label="Fuel" value={counts.fuelIssues} accent="bg-gradient-to-br from-[#d2293b]/70 to-[#7f1d1d]/80" loading={loading}/>

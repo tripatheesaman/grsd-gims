@@ -4,6 +4,7 @@ import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 import { createIssue } from './issueController';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -33,16 +34,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     await connection.beginTransaction();
 
     
-    const [configRows] = await connection.query<RowDataPacket[]>(
-      'SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?',
-      ['rrp', 'current_fy']
-    );
-
-    if (configRows.length === 0) {
-      throw new Error('Current FY configuration not found');
-    }
-
-    const currentFY = configRows[0].config_value;
+    const currentFY = await resolveCurrentFiscalYear(connection);
 
     
     const [firstRecordResult] = await connection.query<RowDataPacket[]>(

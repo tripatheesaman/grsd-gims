@@ -16,7 +16,6 @@ export interface TenderReceiveRequest {
         imagePath: string;
         unit: string;
         location?: string;
-        cardNumber?: string;
         isNewItem?: boolean;
     }[];
 }
@@ -29,7 +28,6 @@ export interface TenderReceiveItem {
     imagePath: string;
     unit: string;
     location?: string;
-    cardNumber?: string;
 }
 export const createTenderReceive = async (req: Request, res: Response): Promise<void> => {
     const receiveData: TenderReceiveRequest = req.body;
@@ -92,10 +90,6 @@ export const createTenderReceive = async (req: Request, res: Response): Promise<
             if (item.location !== undefined && item.location !== null && item.location !== '') {
                 columns.push('location');
                 values.push(item.location);
-            }
-            if (item.cardNumber !== undefined && item.cardNumber !== null && item.cardNumber !== '') {
-                columns.push('card_number');
-                values.push(item.cardNumber);
             }
             const placeholders = columns.map(() => '?').join(', ');
             const [result] = await connection.execute(`INSERT INTO receive_details (${columns.join(', ')}) VALUES (${placeholders})`, values);
@@ -182,7 +176,6 @@ export const getTenderReceiveDetails = async (req: Request, res: Response): Prom
                 rd.received_by,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.receive_source,
                 rd.tender_reference_number,
                 rd.created_at,
@@ -210,7 +203,6 @@ export const getTenderReceiveDetails = async (req: Request, res: Response): Prom
             receivedBy: result.received_by,
             imagePath: result.image_path,
             location: result.location,
-            cardNumber: result.card_number,
             receiveSource: result.receive_source,
             tenderReferenceNumber: result.tender_reference_number,
             createdAt: result.created_at,

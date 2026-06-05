@@ -5,6 +5,7 @@ import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 interface IssueItem {
     nacCode: string;
     quantity: number;
@@ -36,16 +37,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
         await ensureAssetSpareSchema();
         const formattedIssueDate = formatDateForDB(issueDate);
         const issuedByName = issuedBy.name;
-        const [configRows] = await connection.query<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_type = ? AND config_name = ?', ['rrp', 'current_fy']);
-        if (configRows.length === 0) {
-            logEvents(`Failed to create issue - Current FY configuration not found`, "issueLog.log");
-            res.status(500).json({
-                error: 'Internal Server Error',
-                message: 'Current FY configuration not found'
-            });
-            return;
-        }
-        const currentFY = configRows[0].config_value;
+        const currentFY = await resolveCurrentFiscalYear(connection);
         const validationErrors: {
             nacCode: string;
             message: string;
@@ -94,21 +86,28 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
             );
             const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
 
+            // Load active sections (by code) so issuing to a section is allowed
+            const [sectionRows] = await connection.query<RowDataPacket[]>(
+                `SELECT code FROM issue_sections WHERE is_active = 1`
+            );
+            const sectionCodes = new Set<string>((sectionRows as any[]).map(r => String(r.code)));
+
             let isCompatible = true;
             for (const equipmentCode of equipmentTokens) {
-                if (compatSet.has(equipmentCode)) {
-                    continue;
-                }
-                if (!applicableTokens.includes(equipmentCode)) {
-                    isCompatible = false;
-                    break;
-                }
+                // Equipment matches spare_compatibility
+                if (compatSet.has(equipmentCode)) continue;
+                // Equipment is in applicable_equipments
+                if (applicableTokens.includes(equipmentCode)) continue;
+                // Equipment code matches a defined section code
+                if (sectionCodes.has(equipmentCode.toUpperCase())) continue;
+                isCompatible = false;
+                break;
             }
 
             if (!isCompatible) {
                 validationErrors.push({
                     nacCode: item.nacCode,
-                    message: `Selected equipment ${item.equipmentNumber} is not compatible with this spare`,
+                    message: `Selected equipment ${item.equipmentNumber} is not compatible with this spare and is not a defined section`,
                     originalIndex: i
                 });
                 continue;

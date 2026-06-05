@@ -6,7 +6,6 @@ export interface TenderReceiveCartItem {
     partNumber: string;
     equipmentNumber: string;
     location: string;
-    cardNumber: string;
     image: File | undefined;
     unit: string;
     isNewItem?: boolean;
@@ -24,7 +23,6 @@ export interface TenderReceiveData {
         imagePath: string;
         unit: string;
         location?: string;
-        cardNumber?: string;
         isNewItem?: boolean;
     }[];
 }

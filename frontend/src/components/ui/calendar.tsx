@@ -3,6 +3,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
+import { cn } from '@/utils/utils';
 const theme = createTheme({
     palette: {
         primary: {
@@ -33,8 +34,9 @@ const theme = createTheme({
         MuiPaper: {
             styleOverrides: {
                 root: {
+                    backgroundColor: '#ffffff',
                     borderRadius: '0.5rem',
-                    boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                    boxShadow: 'none',
                 },
             },
         },
@@ -50,17 +52,33 @@ interface CalendarProps {
 function Calendar({ value, onChange, className, minDate, maxDate }: CalendarProps) {
     return (<ThemeProvider theme={theme}>
       <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <DateCalendar value={value || null} onChange={onChange} minDate={minDate} maxDate={maxDate} sx={{
-            '& .MuiPickersDay-root.Mui-selected': {
+        <div className={cn('rounded-md bg-white', className)}>
+          <DateCalendar
+            value={value || null}
+            onChange={onChange}
+            minDate={minDate}
+            maxDate={maxDate}
+            sx={{
+              width: '100%',
+              backgroundColor: '#ffffff',
+              '& .MuiPickersCalendarHeader-root': {
+                backgroundColor: '#ffffff',
+              },
+              '& .MuiDayCalendar-root': {
+                backgroundColor: '#ffffff',
+              },
+              '& .MuiPickersDay-root.Mui-selected': {
                 backgroundColor: '#0f172a',
                 '&:hover': {
-                    backgroundColor: '#1e293b',
+                  backgroundColor: '#1e293b',
                 },
-            },
-            '& .MuiPickersDay-root:hover': {
+              },
+              '& .MuiPickersDay-root:hover': {
                 backgroundColor: '#f1f5f9',
-            },
-        }} className={className}/>
+              },
+            }}
+          />
+        </div>
       </LocalizationProvider>
     </ThemeProvider>);
 }

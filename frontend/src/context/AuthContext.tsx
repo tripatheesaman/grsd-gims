@@ -41,14 +41,56 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             return false;
         }
     };
+    const syncPermissionsFromApi = useCallback(async () => {
+        try {
+            const response = await API.get<string[]>("/api/auth/permissions");
+            if (Array.isArray(response.data) && response.data.length > 0) {
+                setPermissions(response.data);
+                return response.data;
+            }
+        }
+        catch {
+            // fall back to JWT permissions
+        }
+        return null;
+    }, []);
+
+    const applySession = useCallback(async (accessToken: string) => {
+        localStorage.setItem("token", accessToken);
+        setAuthHeader(accessToken);
+        const decoded = jwtDecode<User>(accessToken);
+        setUser(decoded);
+        const jwtPermissions = decoded.UserInfo?.permissions ?? [];
+        setPermissions(jwtPermissions);
+        await syncPermissionsFromApi();
+    }, [setAuthHeader, syncPermissionsFromApi]);
+    const refreshSession = useCallback(async (): Promise<boolean> => {
+        const token = localStorage.getItem("token");
+        if (!token || !validateToken(token)) {
+            return false;
+        }
+        try {
+            setAuthHeader(token);
+            const response = await API.post("/api/auth/refresh");
+            if (response.data?.accessToken) {
+                await applySession(response.data.accessToken);
+                return true;
+            }
+            return false;
+        }
+        catch {
+            return false;
+        }
+    }, [applySession, setAuthHeader]);
     const initializeAuth = useCallback(async () => {
         const token = localStorage.getItem("token");
         if (token && validateToken(token)) {
             try {
-                const decoded: User = jwtDecode<User>(token);
-                setUser(decoded);
-                setPermissions(decoded.UserInfo.permissions);
                 setAuthHeader(token);
+                const refreshed = await refreshSession();
+                if (!refreshed) {
+                    await applySession(token);
+                }
             }
             catch {
                 localStorage.removeItem("token");
@@ -62,7 +104,7 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             setShouldRedirect("/login");
         }
         setIsLoading(false);
-    }, [setAuthHeader]);
+    }, [applySession, refreshSession, setAuthHeader]);
     useEffect(() => {
         initializeAuth();
     }, [initializeAuth]);
@@ -75,12 +117,7 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
     const login = async (username: string, password: string) => {
         try {
             const data = await loginRequest(username, password);
-            const token = data.accessToken;
-            localStorage.setItem("token", token);
-            setAuthHeader(token);
-            const decoded: User = jwtDecode<User>(token);
-            setUser(decoded);
-            setPermissions(decoded.UserInfo.permissions);
+            await applySession(data.accessToken);
             router.push("/dashboard");
         }
         catch (error: unknown) {
@@ -100,7 +137,7 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
     if (isLoading) {
         return <FullPageSpinner />;
     }
-    return (<AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout }}>
+    return (<AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, refreshSession }}>
             {children}
         </AuthContext.Provider>);
 };

@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { cn } from '@/utils/utils';
+import { SpareApplicableEquipmentsCell } from '@/components/search/SpareApplicableEquipmentsCell';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 interface SearchResult {
     id: number;
@@ -8,6 +9,7 @@ interface SearchResult {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
+    equipmentDisplay?: string;
     currentBalance: string;
     unit: string;
     specifications: string;
@@ -48,7 +50,7 @@ export const SearchResultsTable = ({ results, onRowDoubleClick, className }: Sea
               <th scope="col" className="px-4 py-3 w-[120px]">NAC Code</th>
               <th scope="col" className="px-4 py-3 w-[250px]">Item Name</th>
               <th scope="col" className="px-4 py-3 w-[150px]">Part Number</th>
-              <th scope="col" className="px-4 py-3 w-[150px]">Equipment Number</th>
+              <th scope="col" className="px-4 py-3 min-w-[200px]">Applicable for</th>
               <th scope="col" className="px-4 py-3 w-[120px]">Unit</th>
               <th scope="col" className="px-4 py-3 w-[120px]">Requested Qty</th>
             </tr>
@@ -64,8 +66,12 @@ export const SearchResultsTable = ({ results, onRowDoubleClick, className }: Sea
                 <td className="px-4 py-3 max-w-[150px] truncate" title={item.partNumber}>
                   {item.partNumber}
                 </td>
-                <td className="px-4 py-3 max-w-[150px] truncate" title={item.equipmentNumber}>
-                  {item.equipmentNumber}
+                <td className="px-4 py-3 min-w-[200px]">
+                  <SpareApplicableEquipmentsCell
+                    equipmentNumber={item.equipmentNumber}
+                    equipmentDisplay={item.equipmentDisplay}
+                    showAll
+                  />
                 </td>
                 <td className="px-4 py-3">
                   {item.unit}

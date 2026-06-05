@@ -1,20 +1,15 @@
 'use client';
+
 import { useAuthContext } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { API } from '@/lib/api';
-interface StockRow {
-    id: number;
-    nacCode: string;
-    itemName: string;
-    partNumber: string;
-    equipmentNumber: string;
-    currentBalance: number;
-    openQuantity: number;
-    openAmount: number;
-    location: string;
-    cardNumber: string;
-}
+import { InventoryFilterPanel } from '@/components/inventory/InventoryFilterPanel';
+import { InventoryPageHeader } from '@/components/inventory/InventoryPageHeader';
+import { StockRecordsTable, type StockRecordRow } from '@/components/stock/StockRecordsTable';
+import { Button } from '@/components/ui/button';
+type StockRow = StockRecordRow;
 interface StockResponse {
     data: StockRow[];
     pagination: {
@@ -33,7 +28,6 @@ interface StockFormData {
     openQuantity: number;
     openAmount: number;
     location: string;
-    cardNumber: string;
 }
 export default function StockRecordsPage() {
     const { user, permissions } = useAuthContext();
@@ -75,8 +69,7 @@ export default function StockRecordsPage() {
         currentBalance: 0,
         openQuantity: 0,
         openAmount: 0,
-        location: '',
-        cardNumber: ''
+        location: ''
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
@@ -117,8 +110,7 @@ export default function StockRecordsPage() {
             currentBalance: 0,
             openQuantity: 0,
             openAmount: 0,
-            location: '',
-            cardNumber: ''
+            location: ''
         });
         setFormErrors({});
     };
@@ -147,9 +139,6 @@ export default function StockRecordsPage() {
         }
         if (!formData.location.trim()) {
             errors.location = 'Location is required';
-        }
-        if (!formData.cardNumber.trim()) {
-            errors.cardNumber = 'Card Number is required';
         }
         setFormErrors(errors);
         return Object.keys(errors).length === 0;
@@ -233,8 +222,7 @@ export default function StockRecordsPage() {
             currentBalance: Number(item.currentBalance) || 0,
             openQuantity: Number(item.openQuantity) || 0,
             openAmount: Number(item.openAmount) || 0,
-            location: item.location,
-            cardNumber: item.cardNumber
+            location: item.location
         });
         setShowEditModal(true);
         setError(null);
@@ -247,104 +235,76 @@ export default function StockRecordsPage() {
         resetForm();
         setShowCreateModal(true);
     };
-    if (!canAccess)
-        return null;
-    return (<div className="container mx-auto p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-            Stock Records
-          </h1>
-          {canAdd && (<button onClick={openCreateModal} className="bg-[#003594] text-white px-4 py-2 rounded-md hover:bg-[#002a6e] transition-colors flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/>
-              </svg>
-              Add New Item
-            </button>)}
-        </div>
 
-        
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-[#002a6e]/10">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input value={universal} onChange={(e) => { setPage(1); setUniversal(e.target.value); }} placeholder="Search by NAC/Name/Part/Equipment" className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none"/>
-            <input value={equipmentNumber} onChange={(e) => { setPage(1); setEquipmentNumber(e.target.value); }} placeholder="Equipment Number" className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none"/>
-            <input value={partNumber} onChange={(e) => { setPage(1); setPartNumber(e.target.value); }} placeholder="Part Number" className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none"/>
-          </div>
-        </div>
+    const hasActiveFilters = Boolean(universal.trim() || equipmentNumber.trim() || partNumber.trim());
 
-        
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-[#002a6e]/10 overflow-x-auto">
-          {loading ? (<div className="text-sm text-gray-600">Loading...</div>) : error ? (<div className="text-sm text-red-600">{error}</div>) : rows.length === 0 ? (<div className="text-sm text-gray-600">No records found.</div>) : (<table className="w-full text-sm">
-              <thead>
-                <tr className="bg-[#003594]/5">
-                  <th className="text-left p-3">NAC</th>
-                  <th className="text-left p-3">Item</th>
-                  <th className="text-left p-3">Part Numbers</th>
-                  <th className="text-left p-3">Equipments</th>
-                  <th className="text-left p-3">Balance</th>
-                  <th className="text-left p-3">Open Qty</th>
-                  <th className="text-left p-3">Open Amount</th>
-                  <th className="text-left p-3">Location</th>
-                  <th className="text-left p-3">Card</th>
-                  {(canEdit || canDelete) && (<th className="text-left p-3">Actions</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(r => (<tr key={r.id} className="border-t border-[#002a6e]/10 hover:bg-[#003594]/5">
-                    <td className="p-3">{r.nacCode}</td>
-                    <td className="p-3">{r.itemName}</td>
-                    <td className="p-3">{r.partNumber}</td>
-                    <td className="p-3">{r.equipmentNumber}</td>
-                    <td className="p-3">{r.currentBalance}</td>
-                    <td className="p-3">{r.openQuantity}</td>
-                    <td className="p-3">{r.openAmount}</td>
-                    <td className="p-3">{r.location}</td>
-                    <td className="p-3">{r.cardNumber}</td>
-                    {(canEdit || canDelete) && (<td className="p-3">
-                        <div className="flex gap-2">
-                          {canEdit && (<button onClick={() => openEditModal(r)} className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 border border-blue-300 rounded-md hover:bg-blue-200 hover:border-blue-400 transition-colors duration-200">
-                              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-                              </svg>
-                              Edit
-                            </button>)}
-                          {canDelete && (<button onClick={() => openDeleteModal(r)} className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 border border-red-300 rounded-md hover:bg-red-200 hover:border-red-400 transition-colors duration-200">
-                              <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                              </svg>
-                              Delete
-                            </button>)}
-                        </div>
-                      </td>)}
-                  </tr>))}
-              </tbody>
-            </table>)}
-        </div>
+    const handleFilterChange = (field: 'universal' | 'equipment' | 'part', value: string) => {
+        setPage(1);
+        if (field === 'universal') setUniversal(value);
+        else if (field === 'equipment') setEquipmentNumber(value);
+        else setPartNumber(value);
+    };
 
-        
-        <div className="flex items-center justify-between text-sm">
-          <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page === 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-            Previous
-          </button>
-          <div>
-            Page {page} of {totalPages} ({totalCount} total records)
-          </div>
-          <div className="flex items-center gap-2">
-            <select value={pageSize} onChange={(e) => {
-            setPage(1);
-            setPageSize(Number(e.target.value));
-        }} className="px-2 py-1 rounded border border-[#002a6e]/20 bg-white text-sm">
-              <option value={10}>10 / page</option>
-              <option value={20}>20 / page</option>
-              <option value={50}>50 / page</option>
-              <option value={100}>100 / page</option>
-            </select>
-          <button className="px-3 py-1 rounded border border-[#002a6e]/20 hover:bg-[#003594]/5" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-            Next
-          </button>
-          </div>
-        </div>
-      </div>
+    const clearFilters = () => {
+        setPage(1);
+        setUniversal('');
+        setEquipmentNumber('');
+        setPartNumber('');
+    };
+
+    if (!canAccess) return null;
+
+    return (
+        <div className="min-h-screen bg-[#f6f8fc]">
+            <div className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 sm:px-6 lg:py-8">
+                <InventoryPageHeader
+                    title="Stock records"
+                    description="Manage spare inventory: browse all items, filter by NAC, equipment, or part number, and add or edit records."
+                    badge="Administration"
+                    actions={
+                        canAdd ? (
+                            <Button
+                                type="button"
+                                onClick={openCreateModal}
+                                className="bg-white text-[#003594] hover:bg-white/90 shadow-md"
+                            >
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add item
+                            </Button>
+                        ) : undefined
+                    }
+                />
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                    <InventoryFilterPanel
+                        values={{ universal, equipment: equipmentNumber, part: partNumber }}
+                        onChange={handleFilterChange}
+                        onClear={clearFilters}
+                    />
+                </section>
+
+                <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <StockRecordsTable
+                        rows={rows}
+                        loading={loading}
+                        error={error}
+                        hasActiveFilters={hasActiveFilters}
+                        canEdit={canEdit}
+                        canDelete={canDelete}
+                        onEdit={openEditModal}
+                        onDelete={openDeleteModal}
+                        page={page}
+                        pageSize={pageSize}
+                        totalCount={totalCount}
+                        totalPages={totalPages}
+                        onPageChange={setPage}
+                        onPageSizeChange={(size) => {
+                            setPage(1);
+                            setPageSize(size);
+                        }}
+                    />
+                </section>
+            </div>
 
       
       {showCreateModal && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -399,11 +359,6 @@ export default function StockRecordsPage() {
                 {formErrors.location && (<p className="text-red-500 text-xs mt-1">{formErrors.location}</p>)}
               </div>
               
-              <div>
-                <label className="block text-sm font-medium mb-1">Card Number *</label>
-                <input type="text" value={formData.cardNumber} onChange={(e) => setFormData({ ...formData, cardNumber: e.target.value })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.cardNumber ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Card Number"/>
-                {formErrors.cardNumber && (<p className="text-red-500 text-xs mt-1">{formErrors.cardNumber}</p>)}
-              </div>
             </div>
             
             <div className="flex gap-3 mt-6">
@@ -473,11 +428,6 @@ export default function StockRecordsPage() {
                 {formErrors.location && (<p className="text-red-500 text-xs mt-1">{formErrors.location}</p>)}
               </div>
               
-              <div>
-                <label className="block text-sm font-medium mb-1">Card Number *</label>
-                <input type="text" value={formData.cardNumber} onChange={(e) => setFormData({ ...formData, cardNumber: e.target.value })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.cardNumber ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Card Number"/>
-                {formErrors.cardNumber && (<p className="text-red-500 text-xs mt-1">{formErrors.cardNumber}</p>)}
-              </div>
               </div>
             </div>
             
@@ -526,5 +476,6 @@ export default function StockRecordsPage() {
             </div>
           </div>
         </div>)}
-    </div>);
+        </div>
+    );
 }

@@ -77,12 +77,12 @@ const backfillCompatForNac = async (connection: any, nacCode: string, equipmentN
     }
 };
 export const createStockItem = async (req: Request, res: Response): Promise<void> => {
-    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, cardNumber } = req.body;
+    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location } = req.body;
     const connection = await pool.getConnection();
     let started = false;
     try {
         await ensureAssetSpareSchema();
-        if (!nacCode || !itemName || !partNumber || !equipmentNumber || currentBalance === undefined || !location || !cardNumber) {
+        if (!nacCode || !itemName || !partNumber || !equipmentNumber || currentBalance === undefined || !location) {
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'All fields are required'
@@ -106,9 +106,8 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         applicable_equipments, 
         current_balance, 
         location, 
-        card_number,
         open_amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, cardNumber]);
+      ) VALUES (?, ?, ?, ?, ?, ?, 0)`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();
         res.status(201).json({
@@ -133,12 +132,12 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
 };
 export const updateStockItem = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
-    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, cardNumber } = req.body;
+    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location } = req.body;
     const connection = await pool.getConnection();
     let started = false;
     try {
         await ensureAssetSpareSchema();
-        if (!nacCode || !itemName || !partNumber || !equipmentNumber || currentBalance === undefined || !location || !cardNumber) {
+        if (!nacCode || !itemName || !partNumber || !equipmentNumber || currentBalance === undefined || !location) {
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'All fields are required'
@@ -170,9 +169,8 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         part_numbers = ?, 
         applicable_equipments = ?, 
         current_balance = ?, 
-        location = ?, 
-        card_number = ?
-      WHERE id = ?`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, cardNumber, id]);
+        location = ?
+      WHERE id = ?`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, id]);
         await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [oldNacCode]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();

@@ -70,7 +70,6 @@ interface ReceiveDetails {
     receivedImage: string;
     nacCode: string;
     location?: string;
-    cardNumber?: string;
     receiveSource?: string;
     tenderReferenceNumber?: string;
     borrowReferenceNumber?: string;
@@ -127,7 +126,6 @@ export function PendingReceivesCount() {
                     receivedImage: response.data.receivedImage,
                     nacCode: response.data.nacCode || 'N/A',
                     location: response.data.location,
-                    cardNumber: response.data.cardNumber,
                     receiveSource: response.data.receiveSource,
                     tenderReferenceNumber: response.data.tenderReferenceNumber,
                     borrowReferenceNumber: response.data.borrowReferenceNumber,
@@ -662,10 +660,6 @@ export function PendingReceivesCount() {
                   {selectedReceive?.location && (<div className="space-y-1">
                       <p className="text-sm font-medium text-[#003594]">Location</p>
                       <p className="text-base text-gray-900">{selectedReceive.location}</p>
-                    </div>)}
-                  {selectedReceive?.cardNumber && (<div className="space-y-1">
-                      <p className="text-sm font-medium text-[#003594]">Card Number</p>
-                      <p className="text-base text-gray-900">{selectedReceive.cardNumber}</p>
                     </div>)}
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-[#003594]">Image</p>

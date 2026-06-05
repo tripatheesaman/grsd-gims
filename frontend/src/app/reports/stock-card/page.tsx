@@ -39,7 +39,6 @@ interface StockCardPreviewData {
     part_number: string;
     equipment_number: string;
     location: string;
-    card_number: string;
     open_quantity: number;
     open_amount: number;
     openingBalanceDate: string;
@@ -795,10 +794,6 @@ export default function StockCardPage() {
                     <div>
                       <p className="font-semibold text-gray-900">Type of Stock:</p>
                       <p>-</p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">Card No:</p>
-                      <p>{previewData.card_number || '-'}</p>
                     </div>
                     <div>
                       <p className="font-semibold text-gray-900">Nomenclature:</p>

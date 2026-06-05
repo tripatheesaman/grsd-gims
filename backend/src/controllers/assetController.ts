@@ -6,16 +6,56 @@ import { Asset, AssetPropertyValue, AssetTypeProperty, CreateAssetDTO, UpdateAss
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import ExcelJS from 'exceljs';
 import { backfillSpareCompatibilityFromStockDetails } from '../services/spareCompatibilityMigration';
+import {
+    applyDepreciationMetaToAsset,
+    computeAssetFinancials,
+    initializeAssetCostAndDepreciation,
+    refreshAssetDepreciation,
+    roundAssetCurrency,
+} from '../services/assetDepreciationService';
+import { getCurrentFiscalYearFromToday } from '../services/fiscalYearService';
+import {
+    detectAssetImportFormat,
+    runAssetExcelImport,
+} from '../services/assetHistoricalImportService';
+
+/** Approved capital RRCP line total(s) in NPR for each asset. */
+const ASSET_RRP_TOTAL_NPR_SQL = `(SELECT COALESCE(SUM(rd.total_amount), 0)
+    FROM rrp_details rd
+    WHERE rd.asset_fk = a.id
+      AND rd.rrp_category = 'capital'
+      AND rd.approval_status = 'APPROVED')`;
+
+/** Stored asset image, or latest linked receive image when asset row has none. */
+const ASSET_IMAGE_PATH_SQL = `COALESCE(
+    NULLIF(TRIM(a.image_path), ''),
+    (SELECT ar.image_path
+     FROM rrp_details rd
+     INNER JOIN asset_receive_details ar ON ar.id = rd.asset_receive_fk
+     WHERE rd.asset_fk = a.id
+       AND ar.image_path IS NOT NULL
+       AND TRIM(ar.image_path) != ''
+     ORDER BY rd.id DESC
+     LIMIT 1)
+)`;
+
 export const getAllAssets = async (req: Request, res: Response): Promise<void> => {
     try {
         await ensureAssetSpareSchema();
-        const { asset_type_id, search, page = '1', pageSize = '20', rrp_status, location, servicability_status, equipment_code } = req.query;
+        const {
+            asset_type_id, search, page = '1', pageSize = '20', rrp_status, location, servicability_status, equipment_code,
+            serial_number, model_name, engine_number, manufacturer, series, vin_number, transmission_model,
+        } = req.query;
         const pageNum = parseInt(page as string, 10) || 1;
         const pageSizeNum = Math.min(parseInt(pageSize as string, 10) || 20, 2000);
         const offset = (pageNum - 1) * pageSizeNum;
         let query = `
       SELECT a.id, a.asset_type_id, a.name,
-             a.equipment_code, a.location, a.rrp_status, a.current_value, a.insurance_amount, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+             a.equipment_code, a.location, a.rrp_status, a.current_value, a.original_purchase_cost_npr, a.purchase_fy, a.last_depreciation_fy,
+             a.insurance_amount, a.original_insurance_amount_npr, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+             ${ASSET_RRP_TOTAL_NPR_SQL} AS rrp_total_npr,
+             (SELECT apv.property_value FROM asset_property_values apv
+              WHERE apv.asset_id = a.id AND apv.property_name = 'purchase_year' LIMIT 1) AS purchase_year,
              a.created_by, a.created_at, a.updated_at,
              at.name as asset_type_name, at.description as asset_type_description
       FROM assets a
@@ -28,9 +68,33 @@ export const getAllAssets = async (req: Request, res: Response): Promise<void> =
             params.push(asset_type_id);
         }
         if (search) {
-            query += ' AND (a.name LIKE ? OR at.name LIKE ? OR a.equipment_code LIKE ?)';
+            query += ` AND (
+                a.name LIKE ? OR at.name LIKE ? OR a.equipment_code LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM asset_property_values apv
+                    WHERE apv.asset_id = a.id AND apv.property_value LIKE ?
+                )
+            )`;
             const searchTerm = `%${search}%`;
-            params.push(searchTerm, searchTerm, searchTerm);
+            params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+        }
+        const propertyFilters: Array<{ param: unknown; name: string }> = [
+            { param: serial_number, name: 'serial_number' },
+            { param: model_name, name: 'model_name' },
+            { param: engine_number, name: 'engine_number' },
+            { param: manufacturer, name: 'equipment_manufacturer_name' },
+            { param: series, name: 'series' },
+            { param: vin_number, name: 'vin_number' },
+            { param: transmission_model, name: 'transmission_model' },
+        ];
+        for (const filter of propertyFilters) {
+            if (filter.param && String(filter.param).trim()) {
+                query += ` AND EXISTS (
+                    SELECT 1 FROM asset_property_values apv
+                    WHERE apv.asset_id = a.id AND apv.property_name = ? AND apv.property_value LIKE ?
+                )`;
+                params.push(filter.name, `%${String(filter.param).trim()}%`);
+            }
         }
         if (rrp_status !== undefined && rrp_status !== null && String(rrp_status).trim() !== '' && String(rrp_status) !== 'all') {
             query += ' AND a.rrp_status = ?';
@@ -51,6 +115,10 @@ export const getAllAssets = async (req: Request, res: Response): Promise<void> =
         query += ' ORDER BY a.created_at DESC LIMIT ? OFFSET ?';
         params.push(pageSizeNum, offset);
         const [rows] = await pool.query<Asset[]>(query, params);
+        const currentFy = getCurrentFiscalYearFromToday();
+        const enrichedRows = rows.map((row) =>
+            applyDepreciationMetaToAsset(row as Record<string, unknown>, computeAssetFinancials(row as any, currentFy))
+        );
         let countQuery = `
       SELECT COUNT(*) as total
       FROM assets a
@@ -63,9 +131,24 @@ export const getAllAssets = async (req: Request, res: Response): Promise<void> =
             countParams.push(asset_type_id);
         }
         if (search) {
-            countQuery += ' AND (a.name LIKE ? OR at.name LIKE ? OR a.equipment_code LIKE ?)';
+            countQuery += ` AND (
+                a.name LIKE ? OR at.name LIKE ? OR a.equipment_code LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM asset_property_values apv
+                    WHERE apv.asset_id = a.id AND apv.property_value LIKE ?
+                )
+            )`;
             const searchTerm = `%${search}%`;
-            countParams.push(searchTerm, searchTerm, searchTerm);
+            countParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+        }
+        for (const filter of propertyFilters) {
+            if (filter.param && String(filter.param).trim()) {
+                countQuery += ` AND EXISTS (
+                    SELECT 1 FROM asset_property_values apv
+                    WHERE apv.asset_id = a.id AND apv.property_name = ? AND apv.property_value LIKE ?
+                )`;
+                countParams.push(filter.name, `%${String(filter.param).trim()}%`);
+            }
         }
         if (rrp_status !== undefined && rrp_status !== null && String(rrp_status).trim() !== '' && String(rrp_status) !== 'all') {
             countQuery += ' AND a.rrp_status = ?';
@@ -87,7 +170,7 @@ export const getAllAssets = async (req: Request, res: Response): Promise<void> =
         const total = (countResult[0] as any)?.total || 0;
         logEvents(`Successfully fetched ${rows.length} assets`, 'assetLog.log');
         res.status(200).json({
-            data: rows,
+            data: enrichedRows,
             pagination: {
                 page: pageNum,
                 pageSize: pageSizeNum,
@@ -110,7 +193,10 @@ export const getAssetById = async (req: Request, res: Response): Promise<void> =
         await ensureAssetSpareSchema();
         const { id } = req.params;
         const [assets] = await pool.query<Asset[]>(`SELECT a.id, a.asset_type_id, a.name,
-             a.equipment_code, a.location, a.rrp_status, a.current_value, a.insurance_amount, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+             a.equipment_code, a.location, a.rrp_status, a.current_value, a.original_purchase_cost_npr, a.purchase_fy, a.last_depreciation_fy,
+             a.insurance_amount, a.original_insurance_amount_npr, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+             ${ASSET_RRP_TOTAL_NPR_SQL} AS rrp_total_npr,
+             ${ASSET_IMAGE_PATH_SQL} AS image_path,
               a.created_by, a.created_at, a.updated_at,
               at.id as asset_type_id_full, at.name as asset_type_name, at.description as asset_type_description
        FROM assets a
@@ -130,16 +216,34 @@ export const getAssetById = async (req: Request, res: Response): Promise<void> =
        FROM asset_type_properties 
        WHERE asset_type_id = ? 
        ORDER BY display_order ASC, property_name ASC`, [assets[0].asset_type_id]);
-        const asset = {
-            ...assets[0],
-            asset_type: {
-                id: assets[0].asset_type_id,
-                name: (assets[0] as any).asset_type_name,
-                description: (assets[0] as any).asset_type_description,
-                properties: typeProperties
+        const [capitalRrpLines] = await pool.query<RowDataPacket[]>(
+            `SELECT id, rrp_number, date AS rrp_date, supplier_name, currency, forex_rate,
+                    invoice_number, invoice_date, po_number, approval_status,
+                    item_price, total_amount, vat_percentage, created_at
+             FROM rrp_details
+             WHERE asset_fk = ? AND rrp_category = 'capital'
+             ORDER BY date DESC, id DESC`,
+            [id]
+        );
+        const purchaseYear = propertyValues.find((p) => p.property_name === 'purchase_year')?.property_value ?? null;
+        const meta = computeAssetFinancials(
+            { ...(assets[0] as any), purchase_year: purchaseYear },
+            getCurrentFiscalYearFromToday()
+        );
+        const asset = applyDepreciationMetaToAsset(
+            {
+                ...assets[0],
+                asset_type: {
+                    id: assets[0].asset_type_id,
+                    name: (assets[0] as any).asset_type_name,
+                    description: (assets[0] as any).asset_type_description,
+                    properties: typeProperties,
+                },
+                property_values: propertyValues,
+                capital_rrp_lines: capitalRrpLines,
             },
-            property_values: propertyValues
-        };
+            meta
+        );
         logEvents(`Successfully fetched asset: ${id}`, 'assetLog.log');
         res.status(200).json(asset);
     }
@@ -193,7 +297,6 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
         const rrpStatusTrimmed = String(rrp_status || '').trim();
         const servicabilityStatusTrimmed = String(servicability_status || '').trim();
         const currentValueNum = Number(current_value);
-        const insuranceAmountNum = Number(insurance_amount);
         if (!locationTrimmed) {
             res.status(400).json({
                 error: 'Bad Request',
@@ -230,14 +333,6 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'current_value must be a non-negative number'
-            });
-            await connection.rollback();
-            return;
-        }
-        if (!Number.isFinite(insuranceAmountNum) || insuranceAmountNum < 0) {
-            res.status(400).json({
-                error: 'Bad Request',
-                message: 'insurance_amount must be a non-negative number'
             });
             await connection.rollback();
             return;
@@ -291,6 +386,7 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
                 return;
             }
         }
+        const initialInsuranceNpr = roundAssetCurrency(purchaseAmountBaseNum * purchaseFxRateNum);
         const [result] = await connection.query<any>(`INSERT INTO assets (asset_type_id, name, equipment_code, location, rrp_status, current_value, insurance_amount, servicability_status, purchase_currency, purchase_fx_rate, purchase_amount_base, created_by) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             asset_type_id,
@@ -299,7 +395,7 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
             locationTrimmed,
             rrpStatusTrimmed,
             currentValueNum,
-            insuranceAmountNum,
+            initialInsuranceNpr,
             servicabilityStatusTrimmed,
             purchaseCurrencyTrimmed,
             purchaseFxRateNum,
@@ -316,9 +412,17 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
             await connection.query(`INSERT INTO asset_property_values (asset_id, property_name, property_value) 
          VALUES ?`, [propertyValueRows]);
         }
+        const purchaseYear =
+            normalizedPropertyValues.find((pv) => pv.property_name === 'purchase_year')?.property_value ?? null;
+        const purchaseCostNpr =
+            Number.isFinite(currentValueNum) && currentValueNum > 0
+                ? currentValueNum
+                : purchaseAmountBaseNum * purchaseFxRateNum;
+        await initializeAssetCostAndDepreciation(connection, assetId, purchaseCostNpr, purchaseYear);
         await connection.commit();
         const [assets] = await connection.query<Asset[]>(`SELECT a.id, a.asset_type_id, a.name,
-              a.equipment_code, a.location, a.rrp_status, a.current_value, a.insurance_amount, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+              a.equipment_code, a.location, a.rrp_status, a.current_value, a.original_purchase_cost_npr, a.purchase_fy, a.last_depreciation_fy,
+              a.insurance_amount, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
               a.created_by, a.created_at, a.updated_at,
               at.name as asset_type_name, at.description as asset_type_description
        FROM assets a
@@ -331,16 +435,25 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
        FROM asset_type_properties 
        WHERE asset_type_id = ? 
        ORDER BY display_order ASC, property_name ASC`, [asset_type_id]);
-        const createdAsset = {
-            ...assets[0],
-            asset_type: {
-                id: asset_type_id,
-                name: (assets[0] as any).asset_type_name,
-                description: (assets[0] as any).asset_type_description,
-                properties: typeProperties
+        const purchaseYearForMeta =
+            propertyValues.find((p) => p.property_name === 'purchase_year')?.property_value ?? null;
+        const meta = computeAssetFinancials(
+            { ...(assets[0] as any), purchase_year: purchaseYearForMeta },
+            getCurrentFiscalYearFromToday()
+        );
+        const createdAsset = applyDepreciationMetaToAsset(
+            {
+                ...assets[0],
+                asset_type: {
+                    id: asset_type_id,
+                    name: (assets[0] as any).asset_type_name,
+                    description: (assets[0] as any).asset_type_description,
+                    properties: typeProperties,
+                },
+                property_values: propertyValues,
             },
-            property_values: propertyValues
-        };
+            meta
+        );
         logEvents(`Successfully created asset: ${name} (ID: ${assetId})`, 'assetLog.log');
         res.status(201).json(createdAsset);
     }
@@ -394,12 +507,26 @@ export const updateAsset = async (req: Request, res: Response): Promise<void> =>
             }
             await connection.query(`UPDATE assets SET name = ? WHERE id = ?`, [name.trim(), id]);
         }
-        if (location !== undefined || rrp_status !== undefined || current_value !== undefined || insurance_amount !== undefined || servicability_status !== undefined) {
+        if (current_value !== undefined) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'current_value is computed automatically from FY depreciation and cannot be edited directly',
+            });
+            await connection.rollback();
+            return;
+        }
+        if (insurance_amount !== undefined) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'insurance_amount is computed automatically from FY depreciation and cannot be edited directly',
+            });
+            await connection.rollback();
+            return;
+        }
+        if (location !== undefined || rrp_status !== undefined || servicability_status !== undefined) {
             const locationTrimmed = location !== undefined ? String(location || '').trim() : null;
             const rrpStatusTrimmed = rrp_status !== undefined ? String(rrp_status || '').trim() : null;
             const servicabilityStatusTrimmed = servicability_status !== undefined ? String(servicability_status || '').trim() : null;
-            const currentValueNum = current_value !== undefined ? Number(current_value) : null;
-            const insuranceAmountNum = insurance_amount !== undefined ? Number(insurance_amount) : null;
             if (location !== undefined && !locationTrimmed) {
                 res.status(400).json({
                     error: 'Bad Request',
@@ -432,35 +559,15 @@ export const updateAsset = async (req: Request, res: Response): Promise<void> =>
                 await connection.rollback();
                 return;
             }
-            if (current_value !== undefined && (!Number.isFinite(Number(currentValueNum)) || Number(currentValueNum) < 0)) {
-                res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'current_value must be a non-negative number'
-                });
-                await connection.rollback();
-                return;
-            }
-            if (insurance_amount !== undefined && (!Number.isFinite(Number(insuranceAmountNum)) || Number(insuranceAmountNum) < 0)) {
-                res.status(400).json({
-                    error: 'Bad Request',
-                    message: 'insurance_amount must be a non-negative number'
-                });
-                await connection.rollback();
-                return;
-            }
             await connection.query(
                 `UPDATE assets SET
                     location = COALESCE(?, location),
                     rrp_status = COALESCE(?, rrp_status),
-                    current_value = COALESCE(?, current_value),
-                    insurance_amount = COALESCE(?, insurance_amount),
                     servicability_status = COALESCE(?, servicability_status)
                  WHERE id = ?`,
                 [
                     location !== undefined ? locationTrimmed : null,
                     rrp_status !== undefined ? rrpStatusTrimmed : null,
-                    current_value !== undefined ? currentValueNum : null,
-                    insurance_amount !== undefined ? insuranceAmountNum : null,
                     servicability_status !== undefined ? servicabilityStatusTrimmed : null,
                     id
                 ]
@@ -519,9 +626,12 @@ export const updateAsset = async (req: Request, res: Response): Promise<void> =>
            VALUES ?`, [propertyValueRows]);
             }
         }
+        await refreshAssetDepreciation(connection, Number(id));
         await connection.commit();
         const [assets] = await connection.query<Asset[]>(`SELECT a.id, a.asset_type_id, a.name,
-              a.equipment_code, a.location, a.rrp_status, a.current_value, a.insurance_amount, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+              a.equipment_code, a.location, a.rrp_status, a.current_value, a.original_purchase_cost_npr, a.purchase_fy, a.last_depreciation_fy,
+              a.insurance_amount, a.original_insurance_amount_npr, a.servicability_status, a.purchase_currency, a.purchase_fx_rate, a.purchase_amount_base,
+              ${ASSET_RRP_TOTAL_NPR_SQL} AS rrp_total_npr,
               a.created_by, a.created_at, a.updated_at,
               at.name as asset_type_name, at.description as asset_type_description
        FROM assets a
@@ -534,16 +644,24 @@ export const updateAsset = async (req: Request, res: Response): Promise<void> =>
        FROM asset_type_properties 
        WHERE asset_type_id = ? 
        ORDER BY display_order ASC, property_name ASC`, [assetTypeId]);
-        const updatedAsset = {
-            ...assets[0],
-            asset_type: {
-                id: assetTypeId,
-                name: (assets[0] as any).asset_type_name,
-                description: (assets[0] as any).asset_type_description,
-                properties: typeProperties
+        const purchaseYear = propertyValues.find((p) => p.property_name === 'purchase_year')?.property_value ?? null;
+        const meta = computeAssetFinancials(
+            { ...(assets[0] as any), purchase_year: purchaseYear },
+            getCurrentFiscalYearFromToday()
+        );
+        const updatedAsset = applyDepreciationMetaToAsset(
+            {
+                ...assets[0],
+                asset_type: {
+                    id: assetTypeId,
+                    name: (assets[0] as any).asset_type_name,
+                    description: (assets[0] as any).asset_type_description,
+                    properties: typeProperties
+                },
+                property_values: propertyValues
             },
-            property_values: propertyValues
-        };
+            meta
+        );
         logEvents(`Successfully updated asset: ${id}`, 'assetLog.log');
         res.status(200).json(updatedAsset);
     }
@@ -787,6 +905,28 @@ export const importAssetsFromExcel = async (req: Request, res: Response): Promis
         for (let i = 1; i < headerValues.length; i++) {
             const raw = headerValues[i];
             headers.push(raw ? String(raw).trim() : '');
+        }
+
+        if (detectAssetImportFormat(headers) === 'historical') {
+            try {
+                const result = await runAssetExcelImport(connection, buffer, userId);
+                await connection.commit();
+                logEvents(
+                    `Historical asset import: inserted ${result.insertedCount}, failed ${result.failedCount}`,
+                    'assetLog.log'
+                );
+                res.status(200).json(result);
+                return;
+            }
+            catch (importError) {
+                await connection.rollback();
+                const message = importError instanceof Error ? importError.message : 'Historical import failed';
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message,
+                });
+                return;
+            }
         }
 
         const headerIndex = new Map<string, number>();
@@ -1055,6 +1195,15 @@ export const importAssetsFromExcel = async (req: Request, res: Response): Promis
                 `INSERT INTO asset_property_values (asset_id, property_name, property_value) VALUES ?`,
                 [propertyValueRows]
             );
+        }
+
+        for (const v of toInsert) {
+            const assetId = assetIdByEquipmentCode.get(v.equipmentCode);
+            if (!assetId) continue;
+            const purchaseYear = v.propertyValues.purchase_year ?? null;
+            const purchaseCostNpr =
+                v.currentValue > 0 ? v.currentValue : roundAssetCurrency(v.purchaseAmountBase * v.purchaseFxRate);
+            await initializeAssetCostAndDepreciation(connection, assetId, purchaseCostNpr, purchaseYear);
         }
 
         await connection.commit();

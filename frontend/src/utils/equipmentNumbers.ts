@@ -3,20 +3,55 @@ export function expandEquipmentNumbers(equipmentNumber: string): Set<string> {
     const parts = equipmentNumber.split(',');
     for (const part of parts) {
         const trimmedPart = part.trim();
-        if (/^[A-Za-z\s]+$/.test(trimmedPart)) {
-            numbers.add(trimmedPart);
+        if (!trimmedPart) {
+            continue;
         }
-        else if (/^\d+-\d+$/.test(trimmedPart)) {
-            const [start, end] = trimmedPart.split('-').map(Number);
-            for (let num = start; num <= end; num++) {
-                numbers.add(num.toString());
+
+        const rangeMatch = trimmedPart.match(/^(\d+)\s*-\s*(\d+)$/);
+        if (rangeMatch) {
+            const start = parseInt(rangeMatch[1], 10);
+            const end = parseInt(rangeMatch[2], 10);
+            const step = start <= end ? 1 : -1;
+            for (let num = start; step === 1 ? num <= end : num >= end; num += step) {
+                numbers.add(String(num));
             }
+            continue;
         }
-        else if (/^\d+$/.test(trimmedPart)) {
+
+        if (/^\d+$/.test(trimmedPart)) {
+            numbers.add(trimmedPart);
+            continue;
+        }
+
+        const spaceSeparated = trimmedPart.split(/\s+/).filter(Boolean);
+        if (spaceSeparated.length > 1 && spaceSeparated.every((token) => /^\d+$/.test(token))) {
+            for (const token of spaceSeparated) {
+                numbers.add(token);
+            }
+            continue;
+        }
+
+        if (/^[A-Za-z\s]+$/.test(trimmedPart)) {
             numbers.add(trimmedPart);
         }
     }
     return numbers;
+}
+
+/** Normalize equipment filter for API: expand numeric lists/ranges; keep asset names as typed. */
+export function normalizeEquipmentSearchQuery(raw: string): string | undefined {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+    if (/[A-Za-z]/.test(trimmed)) {
+        return trimmed;
+    }
+    const expanded = Array.from(expandEquipmentNumbers(trimmed));
+    if (expanded.length > 0) {
+        return expanded.join(',');
+    }
+    return trimmed;
 }
 export function normalizeEquipmentNumbers(equipmentNumbers: string): string {
     let normalized = String(equipmentNumbers);

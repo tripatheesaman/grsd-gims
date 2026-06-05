@@ -15,6 +15,10 @@ export const queryKeys = {
     lastInfo: () => ['request', 'last-info'] as const,
     print: (requestNumber: string) => ['request', 'print', requestNumber] as const,
   },
+  assetReceive: {
+    all: ['asset-receive'] as const,
+    pending: () => ['asset-receive', 'pending'] as const,
+  },
   receive: {
     all: ['receive'] as const,
     pending: () => ['receive', 'pending'] as const,

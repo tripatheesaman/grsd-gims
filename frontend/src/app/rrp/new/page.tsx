@@ -157,10 +157,10 @@ export default function NewRRPPage() {
             });
             return;
         }
-        if (!rrpNumber || !rrpNumber.match(/^[LF]\d{3}(T\d+)?$/)) {
+        if (!rrpNumber || !rrpNumber.match(/^[LF]\d{3}$/i)) {
             showErrorToast({
                 title: 'Error',
-                message: "Invalid RRP number format. Must be in format L001 or L001T1",
+                message: 'Invalid RRP number format. Must be L001 or F001 (resets each fiscal year)',
                 duration: 3000,
             });
             return;
@@ -368,7 +368,7 @@ export default function NewRRPPage() {
                   <Label>RRP Date *</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 hover:border-[#003594] hover:bg-[#003594]/5", !dates.rrpDate && "text-muted-foreground")}>
+                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 bg-white text-gray-900 hover:border-[#003594] hover:bg-[#003594]/5", !dates.rrpDate && "text-gray-500")}>
                         <CalendarIcon className="mr-2 h-4 w-4"/>
                         {dates.rrpDate ? format(dates.rrpDate, "PPP") : "Select date"}
                       </Button>
@@ -390,7 +390,7 @@ export default function NewRRPPage() {
                   <Label>Invoice Date *</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 hover:border-[#003594] hover:bg-[#003594]/5", !dates.invoiceDate && "text-muted-foreground")} disabled={!dates.rrpDate}>
+                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 bg-white text-gray-900 hover:border-[#003594] hover:bg-[#003594]/5", !dates.invoiceDate && "text-gray-500")} disabled={!dates.rrpDate}>
                         <CalendarIcon className="mr-2 h-4 w-4"/>
                         {dates.invoiceDate ? format(dates.invoiceDate, "PPP") : "Select date"}
                       </Button>
@@ -461,7 +461,7 @@ export default function NewRRPPage() {
                       <Label>Customs Date *</Label>
                       <Popover>
                         <PopoverTrigger asChild>
-                          <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 hover:border-[#003594] hover:bg-[#003594]/5", !dates.customsDate && "text-muted-foreground")} disabled={!dates.rrpDate}>
+                          <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 bg-white text-gray-900 hover:border-[#003594] hover:bg-[#003594]/5", !dates.customsDate && "text-gray-500")} disabled={!dates.rrpDate}>
                             <CalendarIcon className="mr-2 h-4 w-4"/>
                             {dates.customsDate ? format(dates.customsDate, "PPP") : "Select date"}
                           </Button>

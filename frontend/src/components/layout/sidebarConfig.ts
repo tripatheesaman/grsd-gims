@@ -30,6 +30,7 @@ export const sidebarLinks: SidebarLink[] = [
         permissionsAny: [
             'can_approve_request',
             'can_approve_receive',
+            'can_approve_assets_receive',
             'can_approve_rrp',
             'can_approve_issues'
         ],
@@ -51,7 +52,13 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Receive",
         href: "#",
         icon: 'log-in',
-        permission: 'can_receive_items',
+        permissionsAny: [
+            'can_receive_items',
+            'can_receive_items_from_purchase',
+            'can_receive_items_from_tender',
+            'can_borrow_stocks',
+            'can_receive_assets',
+        ],
         submenu: [
             {
                 label: "Purchase Receive",
@@ -70,6 +77,16 @@ export const sidebarLinks: SidebarLink[] = [
                 href: "/borrow-receive",
                 icon: 'receipt',
                 permission: 'can_borrow_stocks'
+            },
+            {
+                label: "Assets Receive",
+                href: "/asset-receive",
+                icon: 'briefcase',
+                permissionsAny: [
+                    'can_receive_assets',
+                    'can_receive_items',
+                    'can_access_asset_management_system',
+                ],
             }
         ]
     },
@@ -83,7 +100,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "RRP",
         href: "/rrp",
         icon: 'receipt',
-        permission: 'can_create_rrp'
+        permissionsAny: ['can_create_rrp', 'can_create_assets_rrp']
     },
     {
         label: "Balance Transfer",
@@ -350,7 +367,7 @@ export const sidebarLinks: SidebarLink[] = [
             {
                 label: "Fuel Settings",
                 href: "/settings/fuel",
-                permission: 'can_access_settings',
+                permission: 'can_access_fuel_settings',
                 icon: 'settings'
             }
         ]

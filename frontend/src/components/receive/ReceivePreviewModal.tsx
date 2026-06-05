@@ -34,7 +34,6 @@ export function ReceivePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, 
         itemName: item.itemName,
         equipmentNumber: item.equipmentNumber,
         location: item.location,
-        cardNumber: item.cardNumber,
         currentBalance: '0',
         unit: item.unit,
         specifications: '',
@@ -106,10 +105,6 @@ export function ReceivePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, 
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <MapPin className="h-4 w-4"/>
                           <span>Location: {item.location}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <Hash className="h-4 w-4"/>
-                          <span>Card: {item.cardNumber}</span>
                         </div>
                       </div>
                     </div>

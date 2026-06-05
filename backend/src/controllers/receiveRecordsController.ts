@@ -55,7 +55,6 @@ export interface ReceiveRecord {
     received_by: string;
     image_path: string;
     location?: string;
-    card_number?: string;
     rejection_reason?: string;
     rrp_fk?: number | null;
     created_at: string;
@@ -89,7 +88,6 @@ export interface ReceiveFormData {
     received_by: string;
     image_path: string;
     location: string;
-    card_number: string;
 }
 export const getAllReceiveRecords = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
@@ -141,7 +139,7 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
         rd.receive_source, rd.tender_reference_number,
         COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) AS nac_code, rd.part_number, rd.item_name,
         rd.received_quantity, req.requested_quantity, rd.unit, rd.approval_status, rd.received_by,
-        rd.image_path, rd.location, rd.card_number, rd.rejection_reason,
+        rd.image_path, rd.location, rd.rejection_reason,
         COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) AS equipment_number,
         rd.rrp_fk, rd.created_at, rd.updated_at,
         pm.weighted_average_days AS predicted_days,
@@ -205,7 +203,7 @@ export const getReceiveRecordById = async (req: Request, res: Response): Promise
         rd.receive_source, rd.tender_reference_number,
         COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) AS nac_code, rd.part_number, rd.item_name,
         rd.received_quantity, req.requested_quantity, rd.unit, rd.approval_status, rd.received_by,
-        rd.image_path, rd.location, rd.card_number, rd.rejection_reason,
+        rd.image_path, rd.location, rd.rejection_reason,
         COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) AS equipment_number,
         rd.rrp_fk, rd.created_at, rd.updated_at
       FROM receive_details rd
@@ -240,8 +238,8 @@ export const createReceiveRecord = async (req: Request, res: Response): Promise<
       INSERT INTO receive_details (
         receive_date, request_fk, nac_code, part_number, 
         item_name, received_quantity, remaining_quantity, unit, approval_status, received_by,
-        image_path, location, card_number
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        image_path, location
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
         const values = [
             formData.receive_date,
@@ -255,8 +253,7 @@ export const createReceiveRecord = async (req: Request, res: Response): Promise<
             formData.approval_status,
             formData.received_by,
             formData.image_path || '',
-            formData.location || '',
-            formData.card_number || ''
+            formData.location || ''
         ];
         const [result] = await connection.execute(query, values);
         const receiveId = (result as any).insertId;
@@ -316,8 +313,7 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
             approval_status: formData.approval_status ?? record.approval_status,
             received_by: formData.received_by ?? record.received_by,
             image_path: formData.image_path !== undefined ? formData.image_path : (record.image_path || ''),
-            location: formData.location !== undefined ? formData.location : (record.location || ''),
-            card_number: formData.card_number !== undefined ? formData.card_number : (record.card_number || '')
+            location: formData.location !== undefined ? formData.location : (record.location || '')
         };
         if (formData.image_path !== undefined && formData.image_path && record.image_path && formData.image_path !== record.image_path) {
             try {
@@ -370,7 +366,7 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
       UPDATE receive_details SET 
         receive_date = ?, request_fk = ?, nac_code = ?, part_number = ?,
         item_name = ?, received_quantity = ?, unit = ?, approval_status = ?,
-        received_by = ?, image_path = ?, location = ?, card_number = ?,
+        received_by = ?, image_path = ?, location = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
@@ -386,7 +382,6 @@ export const updateReceiveRecord = async (req: Request, res: Response): Promise<
             updatedData.received_by,
             updatedData.image_path || '',
             updatedData.location || '',
-            updatedData.card_number || '',
             id
         ];
         await connection.execute(query, values);

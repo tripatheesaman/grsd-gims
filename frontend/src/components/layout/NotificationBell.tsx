@@ -55,33 +55,83 @@ export function NotificationBell() {
                         duration: 3000,
                     });
                     break;
-                case 'rrp':
+                case 'rrp': {
                     const response = await API.get(`/api/rrp/items/${notification.referenceNumber}`);
-                    if (response.status === 200) {
-                        const rrpData = response.data.rrpDetails[0];
-                        const type = rrpData.rrp_number.startsWith('L') ? 'local' : 'foreign';
+                    const rrpDetails = response.data?.rrpDetails;
+                    const rrpData = Array.isArray(rrpDetails) ? rrpDetails[0] : undefined;
+                    if (response.status !== 200 || !rrpData?.rrp_number) {
+                        showErrorToast({
+                            title: 'Error',
+                            message: 'RRP details could not be loaded. The record may have been removed.',
+                            duration: 4000,
+                        });
+                        break;
+                    }
+                    const rrpNum = String(rrpData.rrp_number);
+                    const isCapital =
+                        response.data?.type === 'capital' ||
+                        response.data?.category === 'capital' ||
+                        /^C/i.test(rrpNum);
+                    const inspectionPayload = rrpData.inspection_details || {};
+                    const inspectionUser = String(
+                        inspectionPayload.inspection_user ||
+                            (typeof inspectionPayload === 'object' && 'inspection_user' in inspectionPayload
+                                ? inspectionPayload.inspection_user
+                                : '') ||
+                            ''
+                    );
+
+                    if (isCapital) {
+                        const queryParams = new URLSearchParams({
+                            rrpNumber: rrpNum,
+                            rrpDate: String(rrpData.date || ''),
+                            invoiceDate: String(rrpData.invoice_date || ''),
+                            supplier: String(rrpData.supplier_name || ''),
+                            inspectionUser,
+                            invoiceNumber: String(rrpData.invoice_number || ''),
+                            currency: String(rrpData.currency || 'NPR'),
+                            forexRate: String(rrpData.forex_rate ?? '1'),
+                            location: String(rrpData.location || ''),
+                            customsAmountNpr: String(rrpData.customs_charge ?? '0'),
+                            transportCharges: String(rrpData.transportation_other_charges ?? '0'),
+                            notificationId: String(notification.id),
+                        });
+                        if (rrpData.po_number) queryParams.set('poNumber', String(rrpData.po_number));
+                        if (rrpData.po_date) queryParams.set('poDate', String(rrpData.po_date));
+                        if (rrpData.contract_identification_number) {
+                            queryParams.set('contractId', String(rrpData.contract_identification_number));
+                        }
+                        if (rrpData.customs_number) queryParams.set('customsNumber', String(rrpData.customs_number));
+                        if (rrpData.customs_date) queryParams.set('customsDate', String(rrpData.customs_date));
+                        router.push(`/rrp/capital/new?${queryParams.toString()}`);
+                    }
+                    else {
+                        const type = rrpNum.startsWith('L') ? 'local' : 'foreign';
                         const queryParams = new URLSearchParams({
                             type: String(type),
-                            rrpNumber: String(rrpData.rrp_number),
-                            rrpDate: String(rrpData.date),
-                            invoiceDate: String(rrpData.invoice_date),
-                            supplier: String(rrpData.supplier_name),
-                            inspectionUser: String(rrpData.inspection_details.inspection_user),
-                            invoiceNumber: String(rrpData.invoice_number),
+                            rrpNumber: rrpNum,
+                            rrpDate: String(rrpData.date || ''),
+                            invoiceDate: String(rrpData.invoice_date || ''),
+                            supplier: String(rrpData.supplier_name || ''),
+                            inspectionUser,
+                            invoiceNumber: String(rrpData.invoice_number || ''),
                             freightCharge: rrpData.freight_charge?.toString() || '0',
                             notificationId: String(notification.id),
                             ...(type === 'foreign' && {
                                 customsDate: rrpData.customs_date ? String(rrpData.customs_date) : '',
                                 customsNumber: rrpData.customs_number ? String(rrpData.customs_number) : '',
                                 poNumber: rrpData.po_number ? String(rrpData.po_number) : '',
-                                airwayBillNumber: rrpData.airway_bill_number ? String(rrpData.airway_bill_number) : '',
+                                airwayBillNumber: rrpData.airway_bill_number
+                                    ? String(rrpData.airway_bill_number)
+                                    : '',
                                 currency: rrpData.currency ? String(rrpData.currency) : '',
-                                forexRate: rrpData.forex_rate?.toString() || '1'
-                            })
+                                forexRate: rrpData.forex_rate?.toString() || '1',
+                            }),
                         });
                         router.push(`/rrp/new?${queryParams.toString()}`);
                     }
                     break;
+                }
                 default:
                     break;
             }

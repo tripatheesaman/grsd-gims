@@ -2,8 +2,8 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Fragment, useMemo, useState } from "react";
-import { useAuthContext } from "@/context/AuthContext";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffectivePermissions } from "@/hooks/useEffectivePermissions";
 import { cn } from "@/utils/utils";
 import { ChevronDown } from "lucide-react";
 import { sidebarLinks } from "./sidebarConfig";
@@ -17,7 +17,7 @@ interface SidebarProps {
 }
 export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: SidebarProps) {
     const pathname = usePathname();
-    const { permissions } = useAuthContext();
+    const { permissions } = useEffectivePermissions();
     const { counts } = useApprovalCountsContext();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const isExpanded = useMemo(() => !collapsed || mobileOpen, [collapsed, mobileOpen]);
@@ -47,6 +47,44 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
             onCloseMobile();
         }
     };
+
+    const visibleSubmenuItems = (submenu?: typeof sidebarLinks[0]['submenu']) => {
+        if (!submenu) return [];
+        return submenu.filter((item) => hasPermission(item.permission, item.permissionsAny));
+    };
+
+    const isSubmenuOpen = (label: string, submenu?: typeof sidebarLinks[0]['submenu']) => {
+        if (!submenu?.length) return false;
+        if (activeMenu === label) return true;
+        return submenu.some(
+            (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+        );
+    };
+
+    useEffect(() => {
+        for (const link of sidebarLinks) {
+            if (!link.submenu) continue;
+            const matchesPath = link.submenu.some(
+                (item) => pathname === item.href || pathname.startsWith(`${item.href}/`)
+            );
+            if (matchesPath) {
+                setActiveMenu(link.label);
+                return;
+            }
+        }
+    }, [pathname]);
+
+    useEffect(() => {
+        if (!permissions?.length) return;
+        for (const link of sidebarLinks) {
+            if (!link.submenu) continue;
+            const visible = visibleSubmenuItems(link.submenu);
+            if (visible.length === 1) {
+                setActiveMenu(link.label);
+            }
+        }
+    }, [permissions]);
+
     return (<Fragment>
       {mobileOpen && (<div className="fixed inset-0 z-30 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={onCloseMobile}/>)}
       <aside className={cn("fixed inset-y-0 left-0 z-40 flex h-full flex-col border-r border-[#0b2a63]/40 bg-gradient-to-b from-[#003594] via-[#002f7a] to-[#001b47] transition-all duration-300 md:static md:translate-x-0", mobileOpen ? "translate-x-0" : "-translate-x-full", collapsed && !mobileOpen ? "md:w-16" : "md:w-64", "w-64 md:flex")}>
@@ -79,8 +117,8 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
                   </span>)}
                 {submenu && isExpanded && (<ChevronDown className={cn("ml-auto transition-transform text-gray-300 group-hover:text-white", activeMenu === label && "rotate-180")} size={16}/>)}
               </Link>
-              {submenu && activeMenu === label && isExpanded && (<div className="ml-4 mt-1 space-y-1">
-                  {submenu.map(({ label: subLabel, href: subHref, permission: subPermission, permissionsAny: subPermissionsAny, icon: subIcon }) => hasPermission(subPermission, subPermissionsAny) && (<Link key={subHref} href={subHref} className={cn("flex items-center px-4 py-2 text-gray-200 hover:bg-white/10 rounded-md transition-colors", "hover:text-white group", pathname === subHref && "bg-white/20 text-white font-medium")} onClick={handleSubmenuClick}>
+              {submenu && isSubmenuOpen(label, submenu) && isExpanded && (<div className="ml-4 mt-1 space-y-1">
+                  {visibleSubmenuItems(submenu).map(({ label: subLabel, href: subHref, icon: subIcon }) => (<Link key={subHref} href={subHref} className={cn("flex items-center px-4 py-2 text-gray-200 hover:bg-white/10 rounded-md transition-colors", "hover:text-white group", pathname === subHref && "bg-white/20 text-white font-medium")} onClick={handleSubmenuClick}>
                         {subIcon && (<SidebarIcon name={subIcon} className="text-gray-300 group-hover:text-white transition-colors"/>)}
                         <span className={cn("ml-3", !subIcon && "ml-8")}>{subLabel}</span>
                       </Link>))}

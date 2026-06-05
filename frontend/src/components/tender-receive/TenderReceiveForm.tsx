@@ -33,14 +33,12 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
         image: undefined,
         unit: '',
         location: '',
-        cardNumber: '',
         isNewItem: false,
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isCustomPartNumber, setIsCustomPartNumber] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [initialLocation, setInitialLocation] = useState('');
-    const [initialCardNumber, setInitialCardNumber] = useState('');
     const [equipmentNumber, setEquipmentNumber] = useState<string>('');
     useEffect(() => {
         if (item) {
@@ -54,12 +52,10 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
                 image: undefined,
                 unit: item.unit || '',
                 location: item.location || '',
-                cardNumber: item.cardNumber || '',
             });
             setEquipmentNumber(item.equipmentNumber || '');
             setIsCustomPartNumber(!item.partNumber);
             setInitialLocation(item.location);
-            setInitialCardNumber(item.cardNumber);
         }
         if (!item && isManualEntry) {
             setFormData(prev => ({
@@ -87,9 +83,6 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
         }
         if (!formData.location.trim()) {
             newErrors.location = 'Location is required';
-        }
-        if (!formData.cardNumber.trim()) {
-            newErrors.cardNumber = 'Card number is required';
         }
         if (!formData.image) {
             newErrors.image = 'Item image is required';
@@ -153,7 +146,6 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
                     itemName: processItemName(item.itemName) || formData.itemName,
                     unit: item.unit || formData.unit,
                     location: item.location || formData.location,
-                    cardNumber: item.cardNumber || formData.cardNumber,
                 } : {})
             };
             await onSubmit(submitData);
@@ -241,18 +233,6 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
                 }));
             }} className={`mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 ${errors.location ? 'border-red-500' : ''}`} placeholder="Enter location" required disabled={!(!initialLocation || initialLocation.trim() === '' || initialLocation === '0')}/>
                   {errors.location && (<p className="text-sm text-red-500 mt-1">{errors.location}</p>)}
-                </div>
-
-                <div>
-                  <Label htmlFor="cardNumber" className="text-sm font-medium text-[#003594]">Card Number *</Label>
-                  <Input id="cardNumber" value={formData.cardNumber} onChange={(e) => {
-                setFormData(prev => ({
-                    ...prev,
-                    cardNumber: e.target.value,
-                    isCardNumberChanged: true
-                }));
-            }} className={`mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 ${errors.cardNumber ? 'border-red-500' : ''}`} placeholder="Enter card number" required disabled={!(!initialCardNumber || initialCardNumber.trim() === '' || initialCardNumber === '0')}/>
-                  {errors.cardNumber && (<p className="text-sm text-red-500 mt-1">{errors.cardNumber}</p>)}
                 </div>
 
                 <div>

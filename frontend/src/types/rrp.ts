@@ -2,7 +2,8 @@ export interface RRPSearchResult {
     rrpNumber: string;
     rrpDate: string;
     supplierName: string;
-    type: 'local' | 'foreign';
+    type: 'local' | 'foreign' | 'capital';
+    category?: 'spare' | 'capital';
     currency: string;
     forexRate: string;
     invoiceNumber: string;

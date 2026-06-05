@@ -35,6 +35,9 @@ import borrowSourcesRoutes from './routes/borrowSourcesRoutes';
 import predictionRoutes from './routes/predictionRoutes';
 import assetTypeRoutes from './routes/assetTypeRoutes';
 import assetRoutes from './routes/assetRoutes';
+import assetReceiveRoutes from './routes/assetReceiveRoutes';
+import capitalRrpRoutes from './routes/capitalRrpRoutes';
+import assetSettingsRoutes from './routes/assetSettingsRoutes';
 import locationPhrasesRoutes from './routes/locationPhrasesRoutes';
 import { startRequestReminderWorker } from './services/requestReminderService';
 const app = express();
@@ -107,6 +110,9 @@ app.use('/api/location-phrases', verifyJWT, locationPhrasesRoutes);
 app.use('/api/predictions', predictionRoutes);
 app.use('/api/asset-types', verifyJWT, assetTypeRoutes);
 app.use('/api/assets', verifyJWT, assetRoutes);
+app.use('/api/asset-receive', verifyJWT, assetReceiveRoutes);
+app.use('/api/capital-rrp', verifyJWT, capitalRrpRoutes);
+app.use('/api/settings/assets', verifyJWT, assetSettingsRoutes);
 const healthHandler = async (req: Request, res: Response) => {
     try {
         await pool.query("SELECT 1");

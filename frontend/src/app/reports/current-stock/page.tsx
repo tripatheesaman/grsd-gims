@@ -36,7 +36,6 @@ interface StockReportItem {
     true_balance_quantity: number;
     true_balance_amount: number;
     location: string;
-    card_number: string;
 }
 interface StockHistoryItem {
     transaction_type: 'RECEIVE' | 'ISSUE';
@@ -84,7 +83,6 @@ interface RRPDetail {
     airway_bill_number?: string | null;
     entry_type?: string | null;
     location?: string | null;
-    card_number?: string | null;
     tender_reference_number?: string | null;
 }
 interface IssueDetail {
@@ -115,7 +113,6 @@ interface ReceiveDetail {
     received_quantity: number;
     unit?: string | null;
     location?: string | null;
-    card_number?: string | null;
     item_name?: string | null;
     part_number?: string | null;
     equipment_number?: string | null;
@@ -839,7 +836,6 @@ export default function CurrentStockReportPage() {
                         <TableHead className="w-[85px] px-2 text-right">True Bal Qty</TableHead>
                         <TableHead className="w-[90px] px-2 text-right">True Bal Amt</TableHead>
                         <TableHead className="w-[100px] px-2">Location</TableHead>
-                        <TableHead className="w-[90px] px-2">Card #</TableHead>
                         <TableHead className="w-[60px] px-2 text-center">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -860,7 +856,6 @@ export default function CurrentStockReportPage() {
                           <TableCell className="px-2 text-xs text-right">{item.true_balance_quantity?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell className="px-2 text-xs text-right">{item.true_balance_amount?.toFixed(2) || '0.00'}</TableCell>
                           <TableCell className="px-2 text-xs truncate max-w-[100px]" title={item.location || ''}>{item.location || ''}</TableCell>
-                          <TableCell className="px-2 text-xs">{item.card_number || ''}</TableCell>
                           <TableCell className="px-2 text-center">
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-[#003594]/10" onClick={() => {
                     setPreviewItem(item);
@@ -1017,10 +1012,6 @@ export default function CurrentStockReportPage() {
                   <Label className="text-sm font-medium text-[#003594]">Location</Label>
                   <p className="text-sm">{previewItem.location || '-'}</p>
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-sm font-medium text-[#003594]">Card Number</Label>
-                  <p className="text-sm">{previewItem.card_number || '-'}</p>
-                </div>
               </div>
 
               
@@ -1150,10 +1141,6 @@ export default function CurrentStockReportPage() {
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-[#003594] uppercase">Location</p>
                     <p className="text-base font-semibold text-gray-900">{previewItem?.location || '-'}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-[#003594] uppercase">Card Number</p>
-                    <p className="text-base font-semibold text-gray-900">{previewItem?.card_number || '-'}</p>
                   </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-blue-200">
@@ -2165,12 +2152,6 @@ export default function CurrentStockReportPage() {
                     <p className="text-xs font-medium text-blue-700 uppercase mb-1">Location</p>
                     <p className="text-sm font-semibold text-blue-900">
                       {selectedReceiveRecord.location || '-'}
-                    </p>
-                  </div>
-                  <div className="bg-white rounded-lg p-4 border border-blue-100">
-                    <p className="text-xs font-medium text-blue-700 uppercase mb-1">Card Number</p>
-                    <p className="text-sm font-semibold text-blue-900">
-                      {selectedReceiveRecord.card_number || '-'}
                     </p>
                   </div>
                   <div className="bg-white rounded-lg p-4 border border-blue-100">

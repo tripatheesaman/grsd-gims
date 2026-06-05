@@ -17,7 +17,6 @@ export interface BorrowReceiveRequest {
         imagePath: string;
         unit: string;
         location?: string;
-        cardNumber?: string;
         isNewItem?: boolean;
     }[];
 }
@@ -89,10 +88,6 @@ export const createBorrowReceive = async (req: Request, res: Response): Promise<
                 columns.push('location');
                 values.push(item.location);
             }
-            if (item.cardNumber !== undefined && item.cardNumber !== null && item.cardNumber !== '') {
-                columns.push('card_number');
-                values.push(item.cardNumber);
-            }
             const placeholders = values.map(() => '?').join(', ');
             const [result] = await connection.execute(`INSERT INTO receive_details (${columns.join(', ')}) VALUES (${placeholders})`, values);
             const receiveId = (result as any).insertId;
@@ -134,7 +129,6 @@ export const getBorrowReceiveDetails = async (req: Request, res: Response): Prom
                 rd.received_by,
                 rd.image_path,
                 rd.location,
-                rd.card_number,
                 rd.receive_source,
                 rd.borrow_source_id,
                 rd.borrow_status,
@@ -170,7 +164,6 @@ export const getBorrowReceiveDetails = async (req: Request, res: Response): Prom
             receivedBy: result.received_by,
             imagePath: result.image_path,
             location: result.location,
-            cardNumber: result.card_number,
             receiveSource: result.receive_source,
             borrowSourceId: result.borrow_source_id,
             borrowSourceName: result.source_name,
@@ -216,8 +209,8 @@ export const returnBorrowedItem = async (req: Request, res: Response): Promise<v
                 receive_date, request_fk, nac_code, part_number, item_name,
                 received_quantity, remaining_quantity, unit, approval_status, received_by, image_path,
                 receive_source, borrow_source_id, borrow_status, borrow_date, borrow_reference_number,
-                equipment_number, location, card_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                equipment_number, location
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             formattedReturnDate,
             0,
             borrowReceive.nac_code,
@@ -235,8 +228,7 @@ export const returnBorrowedItem = async (req: Request, res: Response): Promise<v
             borrowReceive.borrow_date,
             borrowReceive.borrow_reference_number,
             borrowReceive.equipment_number,
-            borrowReceive.location,
-            borrowReceive.card_number
+            borrowReceive.location
         ]);
         const returnReceiveId = (returnResult as any).insertId;
         await connection.execute(`UPDATE receive_details 

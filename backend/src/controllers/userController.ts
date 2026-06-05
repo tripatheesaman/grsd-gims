@@ -332,10 +332,11 @@ export const updateUserPermissions = async (req: Request, res: Response): Promis
             const { permission_id, hasAccess } = permission;
             if (hasAccess === 1) {
                 await connection.query(`UPDATE user_permissions 
-                     SET allowed_user_ids = CONCAT(
-                         IF(allowed_user_ids IS NULL OR allowed_user_ids = '', ?, CONCAT(allowed_user_ids, ',', ?))
-                     )
-                     WHERE id = ? AND (allowed_user_ids IS NULL OR FIND_IN_SET(?, allowed_user_ids) = 0)`, [userId, userId, permission_id, userId]);
+                     SET allowed_user_ids = CASE
+                         WHEN allowed_user_ids IS NULL OR allowed_user_ids = '' OR allowed_user_ids = '[]' THEN ?
+                         ELSE CONCAT(allowed_user_ids, ',', ?)
+                     END
+                     WHERE id = ? AND (allowed_user_ids IS NULL OR allowed_user_ids = '' OR allowed_user_ids = '[]' OR FIND_IN_SET(?, allowed_user_ids) = 0)`, [userId, userId, permission_id, userId]);
             }
             else {
                 await connection.query(`UPDATE user_permissions 

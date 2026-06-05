@@ -39,7 +39,6 @@ interface BorrowHistoryData {
     borrowSourceCode: string | null;
     imagePath: string | null;
     location: string | null;
-    cardNumber: string | null;
     createdAt: string;
     updatedAt: string;
 }

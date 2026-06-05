@@ -43,11 +43,23 @@ export interface Asset extends RowDataPacket {
     location?: string | null;
     rrp_status?: string | null;
     current_value?: number | null;
+    original_purchase_cost_npr?: number | null;
+    purchase_fy?: string | null;
+    last_depreciation_fy?: string | null;
+    book_value_npr?: number | null;
+    elapsed_fiscal_years?: number | null;
+    annual_depreciation_npr?: number | null;
+    original_insurance_amount_npr?: number | null;
+    insurance_book_value_npr?: number | null;
+    annual_insurance_depreciation_npr?: number | null;
     insurance_amount?: number | null;
     servicability_status?: string | null;
     purchase_currency?: string | null;
     purchase_fx_rate?: number | null;
     purchase_amount_base?: number | null;
+    /** Sum of approved capital RRCP line totals (NPR) linked to this asset */
+    rrp_total_npr?: number | null;
+    image_path?: string | null;
     created_by?: number;
     created_at?: string;
     updated_at?: string;

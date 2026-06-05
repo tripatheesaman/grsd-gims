@@ -11,8 +11,8 @@ interface PrintRRPSearchControlsProps {
 export const PrintRRPSearchControls = ({ onUniversalSearch, onEquipmentSearch, onPartSearch, referenceStatus, onReferenceStatusChange, }: PrintRRPSearchControlsProps) => {
     return (<div className="grid grid-cols-1 md:grid-cols-4 gap-4">
       <SearchBar placeholder="Universal Search..." onSearch={onUniversalSearch}/>
-      <SearchBar placeholder="Search by Equipment Number..." onSearch={onEquipmentSearch}/>
-      <SearchBar placeholder="Search by Part Number..." onSearch={onPartSearch}/>
+      <SearchBar placeholder="Equipment / GE Number..." onSearch={onEquipmentSearch}/>
+      <SearchBar placeholder="Part / Model Number..." onSearch={onPartSearch}/>
       <div className="flex flex-col space-y-1">
         <span className="text-xs font-medium text-gray-600">Reference Document</span>
         <Select value={referenceStatus || 'all'} onValueChange={(value) => onReferenceStatusChange && onReferenceStatusChange(value)}>

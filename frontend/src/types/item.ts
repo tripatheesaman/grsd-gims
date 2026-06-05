@@ -4,9 +4,9 @@ export interface ItemDetails {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
+    equipmentDisplay?: string | null;
     currentBalance: number;
     location: string;
-    cardNumber: number;
     unit: string;
     openQuantity: string;
     openAmount: number;

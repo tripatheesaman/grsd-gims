@@ -3,19 +3,20 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
 import { testSMTPConnection } from '../services/mailer';
+import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { getFiscalYearInfo } from '../services/fiscalYearService';
 export const getFiscalYear = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        const [rows] = await connection.execute<RowDataPacket[]>('SELECT config_value FROM app_config WHERE config_name = ?', ['current_fy']);
-        if (rows.length === 0) {
-            res.status(404).json({
-                error: 'Not Found',
-                message: 'Fiscal year configuration not found'
-            });
-            return;
-        }
+        const info = await getFiscalYearInfo(connection);
         res.status(200).json({
-            fiscalYear: rows[0].config_value
+            fiscalYear: info.fiscalYear,
+            autoManaged: info.autoManaged,
+            startBs: info.bounds.startBs,
+            endBs: info.bounds.endBs,
+            startAd: info.bounds.startAd,
+            endAd: info.bounds.endAd,
+            availableFiscalYears: info.availableFiscalYears,
         });
     }
     catch (error) {
@@ -30,45 +31,12 @@ export const getFiscalYear = async (req: Request, res: Response): Promise<void> 
         connection.release();
     }
 };
-export const updateFiscalYear = async (req: Request, res: Response): Promise<void> => {
-    const { fiscalYear } = req.body;
-    const connection = await pool.getConnection();
-    try {
-        if (!fiscalYear) {
-            res.status(400).json({
-                error: 'Bad Request',
-                message: 'Fiscal year is required'
-            });
-            return;
-        }
-        const fiscalYearRegex = /^\d{4}\/\d{2}$/;
-        if (!fiscalYearRegex.test(fiscalYear)) {
-            res.status(400).json({
-                error: 'Bad Request',
-                message: 'Invalid fiscal year format. Must be in format YYYY/YY (e.g., 2081/82)'
-            });
-            return;
-        }
-        const [result] = await connection.execute('UPDATE app_config SET config_value = ? WHERE config_name = ?', [fiscalYear, 'current_fy']);
-        if ((result as any).affectedRows === 0) {
-            await connection.execute('INSERT INTO app_config (config_name, config_value) VALUES (?, ?)', ['current_fy', fiscalYear]);
-        }
-        res.status(200).json({
-            message: 'Fiscal year updated successfully',
-            fiscalYear
-        });
-    }
-    catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error in updateFiscalYear: ${errorMessage}`, "settingsLog.log");
-        res.status(500).json({
-            error: 'Internal Server Error',
-            message: errorMessage
-        });
-    }
-    finally {
-        connection.release();
-    }
+export const updateFiscalYear = async (_req: Request, res: Response): Promise<void> => {
+    res.status(400).json({
+        error: 'Bad Request',
+        message:
+            'Fiscal year is managed automatically from the Nepali calendar (Shrawan 1 through end of Ashadh). It updates when the FY period changes.',
+    });
 };
 export const getRequestAuthorityDetails = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
@@ -213,6 +181,7 @@ export const updateRRPAuthorityDetails = async (req: Request, res: Response): Pr
     }
 };
 export const getRRPSuppliers = async (req: Request, res: Response): Promise<void> => {
+    await ensureAssetSpareSchema();
     const connection = await pool.getConnection();
     try {
         const page = Math.max(parseInt(String(req.query.page || '1'), 10), 1);
@@ -250,7 +219,9 @@ export const getRRPSuppliers = async (req: Request, res: Response): Promise<void
         connection.release();
     }
 };
+const RRP_SUPPLIER_TYPES = ['local', 'foreign', 'capital'] as const;
 export const addRRPSupplier = async (req: Request, res: Response): Promise<void> => {
+    await ensureAssetSpareSchema();
     const { name, type } = req.body;
     const connection = await pool.getConnection();
     try {
@@ -258,6 +229,13 @@ export const addRRPSupplier = async (req: Request, res: Response): Promise<void>
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'Name and type are required'
+            });
+            return;
+        }
+        if (!RRP_SUPPLIER_TYPES.includes(type)) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Type must be local, foreign, or capital'
             });
             return;
         }
@@ -282,6 +260,7 @@ export const addRRPSupplier = async (req: Request, res: Response): Promise<void>
     }
 };
 export const updateRRPSupplier = async (req: Request, res: Response): Promise<void> => {
+    await ensureAssetSpareSchema();
     const { id } = req.params;
     const { name, type, is_active } = req.body;
     const connection = await pool.getConnection();
@@ -290,6 +269,13 @@ export const updateRRPSupplier = async (req: Request, res: Response): Promise<vo
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'Name and type are required'
+            });
+            return;
+        }
+        if (!RRP_SUPPLIER_TYPES.includes(type)) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Type must be local, foreign, or capital'
             });
             return;
         }
@@ -879,5 +865,124 @@ export const verifySMTP = async (_req: Request, res: Response): Promise<void> =>
     }
     else {
         res.status(500).json({ error: 'SMTP verification failed', details: result.error });
+    }
+};
+
+// ─── Issue Sections CRUD ────────────────────────────────────────────────────
+
+export const getIssueSections = async (_req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const [rows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, name, code, description, is_active FROM issue_sections ORDER BY name`
+        );
+        res.status(200).json(rows);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in getIssueSections: ${errorMessage}`, 'settingsLog.log');
+        res.status(500).json({ error: 'Internal Server Error', message: errorMessage });
+    } finally {
+        connection.release();
+    }
+};
+
+export const addIssueSection = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const { name, code, description } = req.body;
+        if (!name || !code) {
+            res.status(400).json({ error: 'Bad Request', message: 'Name and code are required' });
+            return;
+        }
+        await connection.execute(
+            `INSERT INTO issue_sections (name, code, description, is_active) VALUES (?, ?, ?, 1)`,
+            [name.trim(), code.trim().toUpperCase(), description?.trim() || null]
+        );
+        const [rows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, name, code, description, is_active FROM issue_sections WHERE code = ? ORDER BY id DESC LIMIT 1`,
+            [code.trim().toUpperCase()]
+        );
+        res.status(201).json(rows[0]);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in addIssueSection: ${errorMessage}`, 'settingsLog.log');
+        if ((error as any)?.code === 'ER_DUP_ENTRY') {
+            res.status(409).json({ error: 'Conflict', message: 'A section with this code already exists' });
+        } else {
+            res.status(500).json({ error: 'Internal Server Error', message: errorMessage });
+        }
+    } finally {
+        connection.release();
+    }
+};
+
+export const updateIssueSection = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const { id } = req.params;
+        const { name, code, description, is_active } = req.body;
+        if (!name || !code) {
+            res.status(400).json({ error: 'Bad Request', message: 'Name and code are required' });
+            return;
+        }
+        const [result] = await connection.execute(
+            `UPDATE issue_sections SET name = ?, code = ?, description = ?, is_active = COALESCE(?, is_active) WHERE id = ?`,
+            [name.trim(), code.trim().toUpperCase(), description?.trim() || null, is_active !== undefined ? is_active : null, id]
+        );
+        if ((result as any).affectedRows === 0) {
+            res.status(404).json({ error: 'Not Found', message: 'Section not found' });
+            return;
+        }
+        const [rows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, name, code, description, is_active FROM issue_sections WHERE id = ?`, [id]
+        );
+        res.status(200).json(rows[0]);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in updateIssueSection: ${errorMessage}`, 'settingsLog.log');
+        if ((error as any)?.code === 'ER_DUP_ENTRY') {
+            res.status(409).json({ error: 'Conflict', message: 'A section with this code already exists' });
+        } else {
+            res.status(500).json({ error: 'Internal Server Error', message: errorMessage });
+        }
+    } finally {
+        connection.release();
+    }
+};
+
+export const deleteIssueSection = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const { id } = req.params;
+        const [result] = await connection.execute(
+            `UPDATE issue_sections SET is_active = 0 WHERE id = ?`, [id]
+        );
+        if ((result as any).affectedRows === 0) {
+            res.status(404).json({ error: 'Not Found', message: 'Section not found' });
+            return;
+        }
+        res.status(200).json({ message: 'Section deactivated successfully' });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in deleteIssueSection: ${errorMessage}`, 'settingsLog.log');
+        res.status(500).json({ error: 'Internal Server Error', message: errorMessage });
+    } finally {
+        connection.release();
+    }
+};
+
+export const getActiveIssueSections = async (_req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const [rows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, name, code, description FROM issue_sections WHERE is_active = 1 ORDER BY name`
+        );
+        res.status(200).json(rows);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in getActiveIssueSections: ${errorMessage}`, 'settingsLog.log');
+        res.status(500).json({ error: 'Internal Server Error', message: errorMessage });
+    } finally {
+        connection.release();
     }
 };

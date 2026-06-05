@@ -45,7 +45,7 @@ export default function DashboardLayoutContent({ children }: DashboardLayoutCont
           </Suspense>
           <div className="flex-1 flex flex-col">
             <TopBar onToggleSidebar={handleToggleSidebar}/>
-            <main className="p-6 overflow-y-auto">
+            <main className="flex-1 p-6 overflow-y-auto">
               {isLoading ? <ContentSpinner /> : children}
             </main>
           </div>

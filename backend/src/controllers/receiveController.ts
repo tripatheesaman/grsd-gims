@@ -34,7 +34,6 @@ export interface ReceiveItem {
     unit: string;
     requestId: number;
     location?: string;
-    cardNumber?: string;
 }
 export interface ReceiveRequest {
     receiveDate: string;
@@ -67,7 +66,6 @@ interface ReceiveDetailResult extends RowDataPacket {
     requested_image: string;
     received_image: string;
     location?: string;
-    card_number?: string;
 }
 interface StockDetailResult extends RowDataPacket {
     id: number;
@@ -77,7 +75,6 @@ interface StockDetailResult extends RowDataPacket {
     applicable_equipments: string;
     current_balance: number;
     location: string;
-    card_number: string;
     image_url: string;
     unit: string;
 }
@@ -114,7 +111,7 @@ export const getPendingReceives = async (req: Request, res: Response): Promise<v
             receivedQuantity: item.received_quantity,
             receiveDate: formatDate(item.receive_date),
             equipmentNumber: item.equipment_number,
-            receiveSource: item.receive_source,
+            receiveSource: item.receive_source || 'purchase',
             tenderReferenceNumber: item.tender_reference_number,
             requestFk: item.request_fk
         }));
@@ -151,8 +148,7 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
                 rd.image_path,
                 rd.specifications,
                 rd.remarks,
-                COALESCE(sd.location, '') as location,
-                COALESCE(sd.card_number, '') as card_number
+                COALESCE(sd.location, '') as location
             FROM request_details rd
             LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
             WHERE rd.approval_status = 'APPROVED'
@@ -239,8 +235,7 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
                 imageUrl: result.image_path,
                 specifications: result.specifications,
                 remarks: result.remarks,
-                location: result.location,
-                cardNumber: result.card_number
+                location: result.location
             });
             return acc;
         }, {} as Record<string, any>);
@@ -398,10 +393,6 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
                 columns.push('location');
                 values.push(item.location);
             }
-            if (item.cardNumber !== undefined && item.cardNumber !== null && item.cardNumber !== '') {
-                columns.push('card_number');
-                values.push(item.cardNumber);
-            }
             const placeholders = columns.map(() => '?').join(', ');
             const [result] = await connection.execute(`INSERT INTO receive_details (${columns.join(', ')}) VALUES (${placeholders})`, values);
             const receiveId = (result as any).insertId;
@@ -463,7 +454,6 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
                 COALESCE(req.image_path, '') as requested_image,
                 rd.image_path as received_image,
                 rd.location,
-                rd.card_number,
                 rd.receive_source,
                 rd.tender_reference_number,
                 rd.borrow_reference_number,
@@ -522,9 +512,6 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
         };
         if (result.location !== undefined && result.location !== null && result.location !== '') {
             formattedResponse.location = result.location;
-        }
-        if (result.card_number !== undefined && result.card_number !== null && result.card_number !== '') {
-            formattedResponse.cardNumber = result.card_number;
         }
         logEvents(`Successfully fetched receive details for ID: ${receiveId}`, "receiveLog.log");
         res.status(200).json(formattedResponse);
@@ -844,7 +831,6 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
                 rd.received_quantity,
                 COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) as equipment_number,
                 rd.location,
-                rd.card_number,
                 rd.image_path,
                 rd.unit,
                 COALESCE(req.unit, '') as requested_unit,
@@ -919,10 +905,6 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
                 updateFields.push('location = ?');
                 updateValues.push(receive.location);
             }
-            if (receive.card_number && receive.card_number.trim() !== '') {
-                updateFields.push('card_number = ?');
-                updateValues.push(receive.card_number);
-            }
             if (receive.image_path && receive.image_path.trim() !== '') {
                 updateFields.push('image_url = ?');
                 updateValues.push(receive.image_path);
@@ -967,10 +949,6 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
             if (receive.location && receive.location.trim() !== '') {
                 insertFields.push('location');
                 insertValues.push(receive.location);
-            }
-            if (receive.card_number && receive.card_number.trim() !== '') {
-                insertFields.push('card_number');
-                insertValues.push(receive.card_number);
             }
             if (receive.image_path && receive.image_path.trim() !== '') {
                 insertFields.push('image_url');
@@ -1047,7 +1025,6 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
                 rd.received_quantity,
                 COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) as equipment_number,
                 rd.location,
-                rd.card_number,
                 rd.image_path,
                 rd.unit,
                 COALESCE(req.unit, '') as requested_unit,
@@ -1122,10 +1099,6 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
                 updateFields.push('location = ?');
                 updateValues.push(receive.location);
             }
-            if (receive.card_number && receive.card_number.trim() !== '') {
-                updateFields.push('card_number = ?');
-                updateValues.push(receive.card_number);
-            }
             if (receive.image_path && receive.image_path.trim() !== '') {
                 updateFields.push('image_url = ?');
                 updateValues.push(receive.image_path);
@@ -1168,10 +1141,6 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
             if (receive.location && receive.location.trim() !== '') {
                 insertFields.push('location');
                 insertValues.push(receive.location);
-            }
-            if (receive.card_number && receive.card_number.trim() !== '') {
-                insertFields.push('card_number');
-                insertValues.push(receive.card_number);
             }
             if (receive.image_path && receive.image_path.trim() !== '') {
                 insertFields.push('image_url');

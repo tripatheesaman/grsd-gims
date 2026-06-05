@@ -212,7 +212,6 @@ export default function BorrowReceivePage() {
                     imagePath: imagePaths[index],
                     unit: item.unit || '',
                     location: item.location,
-                    cardNumber: item.cardNumber,
                     isNewItem: item.isNewItem === true
                 }))
             };

@@ -53,6 +53,17 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
     const [returnDate, setReturnDate] = useState<Date | undefined>(undefined);
     const [isReturning, setIsReturning] = useState(false);
     const [isReturnDateOpen, setIsReturnDateOpen] = useState(false);
+    const [sections, setSections] = useState<{ id: number; name: string; code: string }[]>([]);
+    const fetchActiveSections = useCallback(async () => {
+        try {
+            const res = await API.get('/api/settings/issue/sections/active');
+            setSections(res.data || []);
+        } catch {
+            setSections([]);
+        }
+    }, []);
+    useEffect(() => { fetchActiveSections(); }, [fetchActiveSections]);
+
     const fetchActiveBorrows = useCallback(async () => {
         if (!item?.nacCode)
             return;
@@ -278,11 +289,26 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
               <Label htmlFor="equipment" className="text-sm font-medium text-[#003594]">
                 <div className="flex items-center gap-2">
                   <Hash className="h-4 w-4"/>
-                  Equipment Number
+                  Equipment / Section
                 </div>
               </Label>
               <div className="relative">
-                <EquipmentRangeSelect equipmentList={item.equipmentNumber} value={selectedEquipment} onChange={setSelectedEquipment} error={errors.equipment}/>
+                {(() => {
+                  const sectionPart = sections.length > 0
+                    ? sections.map(s => s.code).join(',')
+                    : '';
+                  const combined = [item.equipmentNumber, sectionPart].filter(Boolean).join(',');
+                  return (
+                    <EquipmentRangeSelect
+                      equipmentList={combined}
+                      value={selectedEquipment}
+                      onChange={setSelectedEquipment}
+                      error={errors.equipment}
+                      sectionCodes={sections.map(s => s.code)}
+                      sectionLabels={Object.fromEntries(sections.map(s => [s.code, s.name]))}
+                    />
+                  );
+                })()}
               </div>
               {errors.equipment && (<p className="text-sm text-red-500 mt-1 flex items-center gap-1">
                   <AlertCircle className="h-3 w-3"/>

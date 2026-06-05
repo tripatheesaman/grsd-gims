@@ -74,6 +74,26 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         });
     }
 };
+export const getMyPermissions = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const userId = (req as Request & { userId?: number }).userId;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+            return;
+        }
+        const permissions = await getPermissionsByUserId(userId);
+        res.status(200).json(permissions);
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error fetching session permissions: ${errorMessage}`, "authLog.log");
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: 'Failed to fetch permissions',
+        });
+    }
+};
+
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
     try {
         const authHeader = req.headers.authorization || req.headers.Authorization;

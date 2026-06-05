@@ -27,7 +27,7 @@ interface AuthorityDetails {
 interface Supplier {
     id: number;
     name: string;
-    type: 'foreign' | 'local';
+    type: 'foreign' | 'local' | 'capital';
 }
 interface InspectionUser {
     id: number;
@@ -49,7 +49,7 @@ export default function RRPSettingsPage() {
     const supplierPageSize = 20;
     const [inspectionUsers, setInspectionUsers] = useState<InspectionUser[]>([]);
     const [newSupplierName, setNewSupplierName] = useState('');
-    const [newSupplierType, setNewSupplierType] = useState<'foreign' | 'local'>('foreign');
+    const [newSupplierType, setNewSupplierType] = useState<'foreign' | 'local' | 'capital'>('foreign');
     const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
     const [newInspectionUserName, setNewInspectionUserName] = useState('');
     const [newInspectionUserDesignation, setNewInspectionUserDesignation] = useState('');
@@ -610,9 +610,10 @@ export default function RRPSettingsPage() {
               </div>
               <div className="w-40">
                 <Label>Type</Label>
-                <select className="w-full p-2 border rounded-md" value={newSupplierType} onChange={(e) => setNewSupplierType(e.target.value as 'foreign' | 'local')}>
-                  <option value="foreign">Foreign</option>
-                  <option value="local">Local</option>
+                <select className="w-full p-2 border rounded-md bg-white" value={newSupplierType} onChange={(e) => setNewSupplierType(e.target.value as 'foreign' | 'local' | 'capital')}>
+                  <option value="foreign">Foreign (RRP)</option>
+                  <option value="local">Local (RRP)</option>
+                  <option value="capital">Capital (RRCP)</option>
                 </select>
               </div>
               <Button onClick={handleAddSupplier} disabled={isSaving || !permissions?.includes('can_edit_rrp_authority_details')} className="bg-[#003594] text-white hover:bg-[#002a6e]">
@@ -672,6 +673,34 @@ export default function RRPSettingsPage() {
               <h3 className="text-lg font-semibold">Local Suppliers</h3>
               <div className="space-y-2">
                 {filteredSuppliers.filter(s => s.type === 'local').map((supplier, index) => (<div key={`local-${supplier.id}-${index}`} className="flex items-center gap-4 p-2 border rounded-md">
+                    {editingSupplier?.id === supplier.id ? (<>
+                        <Input value={editingSupplier.name} onChange={(e) => setEditingSupplier({ ...editingSupplier, name: e.target.value })} className="flex-1"/>
+                        <Button onClick={() => handleUpdateSupplier(editingSupplier)} disabled={isSaving} className="bg-green-600 hover:bg-green-700 text-white">
+                          <Save className="h-4 w-4 mr-2"/>
+                          Save
+                        </Button>
+                        <Button variant="outline" onClick={() => setEditingSupplier(null)} disabled={isSaving}>
+                          <X className="h-4 w-4 mr-2"/>
+                          Cancel
+                        </Button>
+                      </>) : (<>
+                        <span className="flex-1">{supplier.name}</span>
+                        <Button variant="outline" onClick={() => setEditingSupplier(supplier)} disabled={isSaving || !permissions?.includes('can_edit_rrp_authority_details')} className="text-blue-600 hover:text-blue-700">
+                          <Edit className="h-4 w-4 mr-2"/>
+                          Edit
+                        </Button>
+                        <Button variant="destructive" onClick={() => handleDeleteSupplier(supplier.id)} disabled={isSaving || !permissions?.includes('can_edit_rrp_authority_details')} className="text-red-600 hover:text-red-700">
+                          <Trash2 className="h-4 w-4 mr-2"/>
+                          Delete
+                        </Button>
+                      </>)}
+                  </div>))}
+              </div>
+
+              <h3 className="text-lg font-semibold">Capital (RRCP) Suppliers</h3>
+              <p className="text-sm text-gray-600">Used on Capital RRP (RRCP) forms — separate from spare Local/Foreign RRP suppliers.</p>
+              <div className="space-y-2">
+                {filteredSuppliers.filter(s => s.type === 'capital').map((supplier, index) => (<div key={`capital-${supplier.id}-${index}`} className="flex items-center gap-4 p-2 border rounded-md">
                     {editingSupplier?.id === supplier.id ? (<>
                         <Input value={editingSupplier.name} onChange={(e) => setEditingSupplier({ ...editingSupplier, name: e.target.value })} className="flex-1"/>
                         <Button onClick={() => handleUpdateSupplier(editingSupplier)} disabled={isSaving} className="bg-green-600 hover:bg-green-700 text-white">

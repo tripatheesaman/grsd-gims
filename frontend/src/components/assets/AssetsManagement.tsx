@@ -4,7 +4,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { useAuthContext } from '@/context/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { API } from '@/lib/api';
-import { Asset, AssetType, CreateAssetDTO, UpdateAssetDTO, VALID_PROPERTY_NAMES, PROPERTY_DISPLAY_LABELS } from '@/types/asset';
+import { Asset, AssetType, CreateAssetDTO, UpdateAssetDTO, VALID_PROPERTY_NAMES } from '@/types/asset';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,12 +37,21 @@ import {
     Package,
 } from 'lucide-react';
 import { AssetForm } from './AssetForm';
+import { AssetDetailModal } from './AssetDetailModal';
+import {
+    getAssetOriginalPurchaseCostNpr,
+    getAssetBookValueNpr,
+    formatNprAmount,
+} from '@/utils/assetValue';
 
 type TextFilterInput = {
     search: string;
     location: string;
     equipmentCode: string;
     servicability: string;
+    serialNumber: string;
+    modelName: string;
+    manufacturer: string;
 };
 
 type SelectFilters = {
@@ -55,6 +64,9 @@ const defaultTextFilters: TextFilterInput = {
     location: '',
     equipmentCode: '',
     servicability: '',
+    serialNumber: '',
+    modelName: '',
+    manufacturer: '',
 };
 
 const defaultSelectFilters: SelectFilters = {
@@ -99,6 +111,9 @@ export function AssetsManagement() {
             location: debouncedTextFilters.location.trim(),
             equipmentCode: debouncedTextFilters.equipmentCode.trim(),
             servicability: debouncedTextFilters.servicability.trim(),
+            serialNumber: debouncedTextFilters.serialNumber.trim(),
+            modelName: debouncedTextFilters.modelName.trim(),
+            manufacturer: debouncedTextFilters.manufacturer.trim(),
             assetTypeId: selectFilters.assetTypeId,
             rrpStatus: selectFilters.rrpStatus,
         }),
@@ -121,7 +136,7 @@ export function AssetsManagement() {
 
     useEffect(() => {
         setPage(1);
-    }, [filterKey.search, filterKey.location, filterKey.equipmentCode, filterKey.servicability, filterKey.assetTypeId, filterKey.rrpStatus]);
+    }, [filterKey.search, filterKey.location, filterKey.equipmentCode, filterKey.servicability, filterKey.serialNumber, filterKey.modelName, filterKey.manufacturer, filterKey.assetTypeId, filterKey.rrpStatus]);
 
     const assetTypesQuery = useQuery({
         queryKey: ['asset-types'],
@@ -142,6 +157,9 @@ export function AssetsManagement() {
             if (filterKey.location) params.location = filterKey.location;
             if (filterKey.equipmentCode) params.equipment_code = filterKey.equipmentCode;
             if (filterKey.servicability) params.servicability_status = filterKey.servicability;
+            if (filterKey.serialNumber) params.serial_number = filterKey.serialNumber;
+            if (filterKey.modelName) params.model_name = filterKey.modelName;
+            if (filterKey.manufacturer) params.manufacturer = filterKey.manufacturer;
             const res = await API.get<{
                 data: AssetExportRow[];
                 pagination: { page: number; pageSize: number; total: number; totalPages: number };
@@ -214,16 +232,31 @@ export function AssetsManagement() {
         },
         onSuccess: (res) => {
             invalidateAssets();
-            const body = res.data as { insertedCount?: number; failedCount?: number };
+            const body = res.data as {
+                insertedCount?: number;
+                failedCount?: number;
+                format?: string;
+                failures?: Array<{ rowNumber: number; equipmentCode?: string; errors: string[] }>;
+            };
             const insertedCount = body.insertedCount ?? 0;
             const failedCount = body.failedCount ?? 0;
+            const formatLabel = body.format === 'historical' ? ' (historical format)' : '';
             showSuccessToast({
                 title: 'Import finished',
-                message: `Inserted: ${insertedCount}, Failed: ${failedCount}`,
-                duration: 5000,
+                message: `Inserted: ${insertedCount}, Failed: ${failedCount}${formatLabel}`,
+                duration: failedCount > 0 ? 8000 : 5000,
             });
+            if (failedCount > 0 && body.failures?.length) {
+                console.warn('Asset import failures', body.failures);
+            }
             setIsImportOpen(false);
             setSelectedImportFile(null);
+        },
+        onError: (error: unknown) => {
+            const message =
+                (error as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+                'Import failed';
+            showErrorToast({ title: 'Import failed', message, duration: 8000 });
         },
     });
 
@@ -526,6 +559,24 @@ export function AssetsManagement() {
                                 onChange={(e) => setTextFilterInput((f) => ({ ...f, servicability: e.target.value }))}
                                 className="h-10 border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 shadow-sm focus-visible:ring-[#003594]/30"
                             />
+                            <Input
+                                placeholder="Serial number…"
+                                value={textFilterInput.serialNumber}
+                                onChange={(e) => setTextFilterInput((f) => ({ ...f, serialNumber: e.target.value }))}
+                                className="h-10 border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 shadow-sm focus-visible:ring-[#003594]/30"
+                            />
+                            <Input
+                                placeholder="Model name…"
+                                value={textFilterInput.modelName}
+                                onChange={(e) => setTextFilterInput((f) => ({ ...f, modelName: e.target.value }))}
+                                className="h-10 border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 shadow-sm focus-visible:ring-[#003594]/30"
+                            />
+                            <Input
+                                placeholder="Manufacturer…"
+                                value={textFilterInput.manufacturer}
+                                onChange={(e) => setTextFilterInput((f) => ({ ...f, manufacturer: e.target.value }))}
+                                className="h-10 border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 shadow-sm focus-visible:ring-[#003594]/30"
+                            />
                         </div>
                     </div>
 
@@ -590,7 +641,12 @@ export function AssetsManagement() {
                                         <TableHead className="min-w-[120px] font-semibold text-slate-900">Type</TableHead>
                                         <TableHead className="min-w-[100px] font-semibold text-slate-900">Location</TableHead>
                                         <TableHead className="min-w-[140px] font-semibold text-slate-900">RRP</TableHead>
-                                        <TableHead className="min-w-[90px] text-right font-semibold text-slate-900">Value</TableHead>
+                                        <TableHead className="min-w-[110px] text-right font-semibold text-slate-900">
+                                            Purchase cost
+                                        </TableHead>
+                                        <TableHead className="min-w-[110px] text-right font-semibold text-slate-900">
+                                            Current value
+                                        </TableHead>
                                         <TableHead className="w-[200px] text-right font-semibold text-slate-900">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -615,8 +671,11 @@ export function AssetsManagement() {
                                                 <TableCell>
                                                     <RrpBadge value={asset.rrp_status} />
                                                 </TableCell>
-                                                <TableCell className="text-right tabular-nums text-slate-800">
-                                                    {asset.current_value != null ? Number(asset.current_value).toLocaleString() : '—'}
+                                                <TableCell className="text-right tabular-nums text-slate-600">
+                                                    {formatNprAmount(getAssetOriginalPurchaseCostNpr(asset))}
+                                                </TableCell>
+                                                <TableCell className="text-right tabular-nums font-medium text-[#003594]">
+                                                    {formatNprAmount(getAssetBookValueNpr(asset))}
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-1.5">
@@ -696,78 +755,15 @@ export function AssetsManagement() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog
+            <AssetDetailModal
                 open={detailId !== null}
                 onOpenChange={(open) => {
                     if (!open) setDetailId(null);
                 }}
-            >
-                <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto border border-slate-200 bg-white text-slate-900 shadow-xl">
-                    <DialogHeader>
-                        <DialogTitle className="text-slate-900">Asset details</DialogTitle>
-                    </DialogHeader>
-                    {detailQuery.isPending && (
-                        <div className="flex justify-center py-12">
-                            <Loader2 className="h-8 w-8 animate-spin text-[#003594]" />
-                        </div>
-                    )}
-                    {detailQuery.data && !detailQuery.isPending && (
-                        <div className="space-y-4 text-sm">
-                            <div className={cn('rounded-lg border border-slate-200 p-3', rrpRowTone(detailQuery.data.rrp_status))}>
-                                <div className="flex items-center justify-between gap-2">
-                                    <span className="font-semibold text-slate-900">{detailQuery.data.name}</span>
-                                    <RrpBadge value={detailQuery.data.rrp_status} />
-                                </div>
-                                <p className="mt-1 text-xs text-slate-600">
-                                    {detailQuery.data.asset_type?.name ?? (detailQuery.data as AssetExportRow).asset_type_name ?? '—'}
-                                </p>
-                            </div>
-                            <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Equipment code</dt>
-                                    <dd className="font-mono text-slate-900">{detailQuery.data.equipment_code ?? '—'}</dd>
-                                </div>
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Location</dt>
-                                    <dd className="text-slate-900">{detailQuery.data.location ?? '—'}</dd>
-                                </div>
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Servicability</dt>
-                                    <dd className="text-slate-900">{detailQuery.data.servicability_status ?? '—'}</dd>
-                                </div>
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Current value</dt>
-                                    <dd className="tabular-nums text-slate-900">{detailQuery.data.current_value ?? '—'}</dd>
-                                </div>
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Insurance</dt>
-                                    <dd className="tabular-nums text-slate-900">{detailQuery.data.insurance_amount ?? '—'}</dd>
-                                </div>
-                                <div>
-                                    <dt className="text-xs font-medium text-slate-500">Currency / FX / Purchase</dt>
-                                    <dd className="text-slate-900">
-                                        {detailQuery.data.purchase_currency ?? '—'} · {detailQuery.data.purchase_fx_rate ?? '—'} ·{' '}
-                                        {detailQuery.data.purchase_amount_base ?? '—'}
-                                    </dd>
-                                </div>
-                            </dl>
-                            {detailQuery.data.property_values && detailQuery.data.property_values.length > 0 && (
-                                <div>
-                                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Properties</p>
-                                    <div className="max-h-48 space-y-2 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
-                                        {detailQuery.data.property_values.map((pv) => (
-                                            <div key={pv.id} className="flex justify-between gap-2 text-xs">
-                                                <span className="text-slate-600">{PROPERTY_DISPLAY_LABELS[pv.property_name] || pv.property_name}</span>
-                                                <span className="text-right font-medium text-slate-900">{pv.property_value ?? '—'}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+                asset={detailQuery.data}
+                isLoading={detailId !== null && detailQuery.isPending}
+                onEdit={(id) => void handleEditClick(id)}
+            />
 
             <Dialog
                 open={isImportOpen}
@@ -783,7 +779,11 @@ export function AssetsManagement() {
                         <DialogTitle className="text-slate-900">Import assets</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4 text-sm text-slate-600">
-                        <p>Use the template, fill rows, then upload the .xlsx file.</p>
+                        <p>
+                            Upload the standard template or your historical equipment spreadsheet (.xlsx).
+                            Historical files are detected automatically (e.g. columns like purchase_year, chassis_number).
+                            Empty fields are stored as N/A; RRP status defaults to 1 (already made).
+                        </p>
                         <Input
                             type="file"
                             accept=".xlsx"

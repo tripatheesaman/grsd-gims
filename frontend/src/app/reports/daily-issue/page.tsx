@@ -91,8 +91,8 @@ export default function DailyIssueReportPage() {
                     {fromDate ? format(fromDate, "PPP") : "Select date"}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar value={fromDate} onChange={(date) => date && setFromDate(startOfDay(date))} className="rounded-md border"/>
+                <PopoverContent className="w-auto overflow-hidden border border-slate-200 bg-white p-0 shadow-md">
+                  <Calendar value={fromDate} onChange={(date) => date && setFromDate(startOfDay(date))} className="border-0"/>
                 </PopoverContent>
               </Popover>
             </div>
@@ -106,8 +106,8 @@ export default function DailyIssueReportPage() {
                     {toDate ? format(toDate, "PPP") : "Select date"}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar value={toDate} onChange={(date) => date && setToDate(startOfDay(date))} className="rounded-md border"/>
+                <PopoverContent className="w-auto overflow-hidden border border-slate-200 bg-white p-0 shadow-md">
+                  <Calendar value={toDate} onChange={(date) => date && setToDate(startOfDay(date))} className="border-0"/>
                 </PopoverContent>
               </Popover>
             </div>

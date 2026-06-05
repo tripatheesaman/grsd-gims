@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import { generateRequestExcel, generateRRPExcel } from '../services/excelService';
+import { generateCapitalRRPExcel } from '../services/capitalRrpExcelService';
+import pool from '../config/db';
+import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 export const printRequest = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -38,9 +41,18 @@ export const printRRP = async (req: Request, res: Response): Promise<void> => {
             });
             return;
         }
-        const excelBuffer = await generateRRPExcel(rrpNumber);
+        const [metaRows] = await pool.query<RowDataPacket[]>(
+            'SELECT rrp_category FROM rrp_details WHERE rrp_number = ? LIMIT 1',
+            [rrpNumber]
+        );
+        const isCapital =
+            metaRows[0]?.rrp_category === 'capital' || /^C/i.test(rrpNumber);
+        const excelBuffer = isCapital
+            ? await generateCapitalRRPExcel(rrpNumber)
+            : await generateRRPExcel(rrpNumber);
+        const filename = isCapital ? `RRCP_${rrpNumber}.xlsx` : `rrp_${rrpNumber}.xlsx`;
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        res.setHeader('Content-Disposition', `attachment; filename=rrp_${rrpNumber}.xlsx`);
+        res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
         logEvents(`Successfully generated Excel for RRP: ${rrpNumber}`, "printLog.log");
         res.send(excelBuffer);
     }

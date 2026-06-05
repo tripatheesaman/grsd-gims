@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { API } from '@/lib/api';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { Plus, Edit, Trash2 } from 'lucide-react';
+import { FiscalYearFilterSelect } from '@/components/fiscal-year/FiscalYearFilterSelect';
+import { useFiscalYear } from '@/hooks/useFiscalYear';
 interface RRPRecord {
     id: number;
     rrp_number: string;
@@ -90,6 +92,11 @@ export default function RRPRecordsPage() {
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
     const latestRequestRef = useRef<number>(0);
     useEffect(() => {
+        if (currentFiscalYear && !fiscalYearFilter) {
+            setFiscalYearFilter(currentFiscalYear);
+        }
+    }, [currentFiscalYear, fiscalYearFilter]);
+    useEffect(() => {
         if (!user) {
             router.push('/login');
             return;
@@ -108,6 +115,8 @@ export default function RRPRecordsPage() {
     const [partNumber, setPartNumber] = useState<string>('');
     const [status, setStatus] = useState<string>('all');
     const [createdBy, setCreatedBy] = useState<string>('all');
+    const { fiscalYear: currentFiscalYear } = useFiscalYear();
+    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     const [page, setPage] = useState<number>(1);
     const [pageSize, setPageSize] = useState<number>(20);
     const [records, setRecords] = useState<RRPRecord[]>([]);
@@ -168,7 +177,8 @@ export default function RRPRecordsPage() {
                 ...(equipmentNumber && { equipmentNumber }),
                 ...(partNumber && { partNumber }),
                 ...(status && status !== 'all' && { status }),
-                ...(createdBy && createdBy !== 'all' && { createdBy })
+                ...(createdBy && createdBy !== 'all' && { createdBy }),
+                ...(fiscalYearFilter && { fiscalYear: fiscalYearFilter }),
             });
             const response = await API.get(`/api/rrp-records?${params}`);
             if (requestId !== latestRequestRef.current) {
@@ -197,7 +207,7 @@ export default function RRPRecordsPage() {
                 setLoading(false);
             }
         }
-    }, [page, pageSize, universal, equipmentNumber, partNumber, status, createdBy]);
+    }, [page, pageSize, universal, equipmentNumber, partNumber, status, createdBy, fiscalYearFilter]);
     const fetchFilterOptions = useCallback(async () => {
         try {
             const response = await API.get('/api/rrp-records/filters/options');
@@ -228,7 +238,7 @@ export default function RRPRecordsPage() {
         if (canAccess) {
             fetchData();
         }
-    }, [canAccess, page, universal, equipmentNumber, partNumber, status, createdBy, fetchData]);
+    }, [canAccess, page, universal, equipmentNumber, partNumber, status, createdBy, fiscalYearFilter, fetchData]);
     const resetForm = () => {
         setFormData({
             rrp_number: '',
@@ -522,7 +532,11 @@ export default function RRPRecordsPage() {
             <input value={equipmentNumber} onChange={(e) => { setPage(1); setEquipmentNumber(e.target.value); }} placeholder="Equipment Number" className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none"/>
             <input value={partNumber} onChange={(e) => { setPage(1); setPartNumber(e.target.value); }} placeholder="Part Number" className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none"/>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+            <FiscalYearFilterSelect
+              value={fiscalYearFilter}
+              onChange={(v) => { setPage(1); setFiscalYearFilter(v); }}
+            />
             <select value={status} onChange={(e) => { setPage(1); setStatus(e.target.value); }} className="border rounded-md px-3 py-2 text-sm border-[#002a6e]/20 focus:border-[#003594] focus:outline-none">
               <option value="all">All statuses</option>
               {filterOptions.statuses.map((statusOption) => (<option key={statusOption} value={statusOption}>

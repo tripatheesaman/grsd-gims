@@ -223,12 +223,12 @@ export default function RRPPreview({ cart, rrpDate, supplier, inspectionUser, in
                 <Label className="text-sm font-medium text-[#003594]">Invoice Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 focus:ring-[#003594]", !invoiceDate && "text-muted-foreground")}>
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 bg-white text-gray-900 focus:ring-[#003594]", !invoiceDate && "text-gray-500")}>
                       <CalendarIcon className="mr-2 h-4 w-4"/>
                       {invoiceDate ? format(new Date(invoiceDate), "PPP") : "Select date"}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
+                  <PopoverContent className="w-auto overflow-hidden bg-white p-2">
                     <Calendar value={invoiceDate ? new Date(invoiceDate) : undefined} onChange={onInvoiceDateChange} className="rounded-md border border-[#002a6e]/10"/>
                   </PopoverContent>
                 </Popover>
@@ -256,12 +256,12 @@ export default function RRPPreview({ cart, rrpDate, supplier, inspectionUser, in
                     <Label className="text-sm font-medium text-[#003594]">Customs Date</Label>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 focus:ring-[#003594]", !customsDate && "text-muted-foreground")}>
+                        <Button variant="outline" className={cn("w-full justify-start text-left font-normal border-[#002a6e]/10 bg-white text-gray-900 focus:ring-[#003594]", !customsDate && "text-gray-500")}>
                           <CalendarIcon className="mr-2 h-4 w-4"/>
                           {customsDate ? format(new Date(customsDate), "PPP") : "Select date"}
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
+                      <PopoverContent className="w-auto overflow-hidden bg-white p-2">
                         <Calendar value={customsDate ? new Date(customsDate) : undefined} onChange={onCustomsDateChange} className="rounded-md border border-[#002a6e]/10"/>
                       </PopoverContent>
                     </Popover>
