@@ -14,7 +14,7 @@ interface EquipmentRangeSelectProps {
     sectionLabels?: Record<string, string>;
 }
 export function EquipmentRangeSelect({ equipmentList, value, onChange, error, sectionCodes = [], sectionLabels = {} }: EquipmentRangeSelectProps) {
-    const sectionSet = new Set(sectionCodes.map(c => c.toUpperCase()));
+    const sectionSet = useMemo(() => new Set(sectionCodes.map(c => c.toUpperCase())), [sectionCodes]);
     const [open, setOpen] = useState(false);
     const [inputValue, setInputValue] = useState("");
     const parseInput = (input: string): {

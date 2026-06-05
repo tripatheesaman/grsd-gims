@@ -75,7 +75,7 @@ export function EquipmentAssetAutocomplete({
                 });
                 if (cancelled) return;
                 const rows = Array.isArray(response.data?.data) ? response.data.data : [];
-                setSuggestions(rows.map((r: any) => ({
+                setSuggestions(rows.map((r: { equipment_code?: string | null; name?: string | null }) => ({
                     equipment_code: r.equipment_code ?? null,
                     name: r.name ?? null,
                 })).filter((r: AssetSuggestion) => !!r.equipment_code));

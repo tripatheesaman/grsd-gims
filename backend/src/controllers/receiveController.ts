@@ -80,9 +80,6 @@ interface StockDetailResult extends RowDataPacket {
 }
 export const getPendingReceives = async (req: Request, res: Response): Promise<void> => {
     try {
-        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-        res.set('Pragma', 'no-cache');
-        res.set('Expires', '0');
         const [results] = await pool.execute<PendingReceiveItem[]>(`SELECT 
                 rd.id,
                 COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) as nac_code,
@@ -97,11 +94,6 @@ export const getPendingReceives = async (req: Request, res: Response): Promise<v
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
             WHERE rd.approval_status = 'PENDING'
-              AND (
-                rd.request_fk IS NULL
-                OR req.id IS NULL
-                OR req.is_received = 0
-              )
             ORDER BY rd.created_at DESC`);
         const pendingReceives = results.map(item => ({
             id: item.id,

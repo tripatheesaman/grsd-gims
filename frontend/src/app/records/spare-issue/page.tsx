@@ -67,6 +67,8 @@ export default function SpareIssueRecordsPage() {
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
     const latestRequestRef = useRef<number>(0);
+    const { fiscalYear: currentFiscalYear } = useFiscalYear();
+    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     useEffect(() => {
         if (currentFiscalYear && !fiscalYearFilter) {
             setFiscalYearFilter(currentFiscalYear);
@@ -98,8 +100,6 @@ export default function SpareIssueRecordsPage() {
     const [issuedBy, setIssuedBy] = useState('all');
     const [sortBy, setSortBy] = useState('issue_date');
     const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
-    const { fiscalYear: currentFiscalYear } = useFiscalYear();
-    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         issueSlipNumbers: [],
         nacCodes: [],

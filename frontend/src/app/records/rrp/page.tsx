@@ -91,6 +91,8 @@ export default function RRPRecordsPage() {
     const showErrorToastRef = useRef(showErrorToast);
     useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
     const latestRequestRef = useRef<number>(0);
+    const { fiscalYear: currentFiscalYear } = useFiscalYear();
+    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     useEffect(() => {
         if (currentFiscalYear && !fiscalYearFilter) {
             setFiscalYearFilter(currentFiscalYear);
@@ -115,8 +117,6 @@ export default function RRPRecordsPage() {
     const [partNumber, setPartNumber] = useState<string>('');
     const [status, setStatus] = useState<string>('all');
     const [createdBy, setCreatedBy] = useState<string>('all');
-    const { fiscalYear: currentFiscalYear } = useFiscalYear();
-    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
     const [page, setPage] = useState<number>(1);
     const [pageSize, setPageSize] = useState<number>(20);
     const [records, setRecords] = useState<RRPRecord[]>([]);

@@ -96,7 +96,8 @@ export default function NewCapitalRRPPage() {
     const notificationId = searchParams.get('notificationId');
     const isFromNotification = !!(rrpNumberFromParams && notificationId);
     const [isLoading, setIsLoading] = useState(true);
-    const [config, setConfig] = useState<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [config, setConfig] = useState<Record<string, any> | null>(null);
     const [previousRRPDate, setPreviousRRPDate] = useState<Date | null>(null);
     const [latestRRPInfo, setLatestRRPInfo] = useState<LatestRRPInfo | null>(null);
     const [rrpNumber, setRrpNumber] = useState(isFromNotification ? (rrpNumberFromParams || '') : '');

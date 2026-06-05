@@ -56,7 +56,8 @@ export default function CapitalRRPItemsPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [receiveLines, setReceiveLines] = useState<ReceiveLine[]>([]);
     const [assetTypes, setAssetTypes] = useState<{ id: number; name: string }[]>([]);
-    const [settings, setSettings] = useState<any>({});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [settings, setSettings] = useState<Record<string, any>>({});
     const [vatRate, setVatRate] = useState(0);
     const [cart, setCart] = useState<CartItem[]>([]);
     const [selectedLine, setSelectedLine] = useState<ReceiveLine | null>(null);

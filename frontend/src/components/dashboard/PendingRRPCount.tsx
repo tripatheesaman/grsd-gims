@@ -108,6 +108,9 @@ interface PendingCapitalRRP {
     equipment_code?: string;
     equipment_name?: string;
     location?: string;
+    vat_percentage?: string;
+    vat_amount?: string;
+    customs_date?: string | null;
 }
 type PendingRRPListEntry = {
     rrp_number: string;
@@ -279,7 +282,7 @@ export function PendingRRPCount() {
             quantity: Number(c.quantity) || 1,
             purchase_amount: Number(c.purchase_amount) || parseFloat(item.item_price) || 0,
             unit: String(c.unit || 'EA'),
-            vat_status: Boolean(c.vat_status ?? (parseFloat(item.vat_percentage) > 0)),
+            vat_status: Boolean(c.vat_status ?? (parseFloat(item.vat_percentage || '0') > 0)),
             item_price: parseFloat(item.item_price) || 0,
             total_amount: parseFloat(item.total_amount) || 0,
             vat_amount_purchase_currency: parseFloat(String(c.vat_amount_purchase_currency ?? item.vat_amount ?? 0)) || undefined,

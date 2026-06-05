@@ -794,7 +794,7 @@ export const getWeeklyDieselSummary = async (req: Request, res: Response): Promi
         MAX(f.week_number) as week_number,
         MAX(f.number_of_flights) as number_of_flights,
         SUM(i.issue_quantity) as total_quantity,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+        SUM(i.issue_quantity * f.fuel_price) as total_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel'
@@ -806,7 +806,7 @@ export const getWeeklyDieselSummary = async (req: Request, res: Response): Promi
         MAX(f.week_number) as week_number,
         MAX(f.number_of_flights) as number_of_flights,
         SUM(i.issue_quantity) as total_quantity,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+        SUM(i.issue_quantity * f.fuel_price) as total_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel'
@@ -897,17 +897,17 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
         DATE(i.issue_date) as date,
         DAYNAME(i.issue_date) as day_name,
         i.issued_for,
-        COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0) as fuel_price,
+        f.fuel_price,
         MAX(f.week_number) as week_number,
         SUM(i.issue_quantity) as issue_quantity,
         MAX(f.kilometers) as kilometers,
-        SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as daily_cost
+        SUM(i.issue_quantity * f.fuel_price) as daily_cost
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
        WHERE f.fuel_type = 'diesel' 
       AND i.issue_date BETWEEN ? AND ?
       AND i.approval_status = 'APPROVED'
-      GROUP BY DATE(i.issue_date), DAYNAME(i.issue_date), i.issued_for, COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
+      GROUP BY DATE(i.issue_date), DAYNAME(i.issue_date), i.issued_for, f.fuel_price
       ORDER BY date, i.issued_for`, [start_date, end_date]);
         interface EquipmentData {
             quantity: number;
@@ -917,7 +917,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
         interface DailyData {
             date: string;
             day_name: string;
-            fuel_price: number | null;
+            fuel_price: number;
             equipmentData: Map<string, EquipmentData>;
         }
         interface EquipmentTotal {
@@ -1005,7 +1005,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
           MAX(f.week_number) as week_number,
           MAX(f.number_of_flights) as number_of_flights,
           SUM(i.issue_quantity) as total_quantity,
-          SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+          SUM(i.issue_quantity * f.fuel_price) as total_cost
          FROM fuel_records f
          JOIN issue_details i ON f.issue_fk = i.id
          WHERE f.fuel_type = 'diesel'
@@ -1017,7 +1017,7 @@ export const generateWeeklyDieselReport = async (req: Request, res: Response): P
           MAX(f.week_number) as week_number,
           MAX(f.number_of_flights) as number_of_flights,
           SUM(i.issue_quantity) as total_quantity,
-          SUM(i.issue_quantity * COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)) as total_cost
+          SUM(i.issue_quantity * f.fuel_price) as total_cost
          FROM fuel_records f
          JOIN issue_details i ON f.issue_fk = i.id
          WHERE f.fuel_type = 'diesel'

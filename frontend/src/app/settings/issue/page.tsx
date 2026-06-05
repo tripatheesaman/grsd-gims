@@ -90,8 +90,9 @@ export default function IssueSettingsPage() {
             }
             fetchSections();
             closeDialog();
-        } catch (err: any) {
-            const msg = err?.response?.data?.message || 'Failed to save section';
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { message?: string } } };
+            const msg = axiosErr?.response?.data?.message || 'Failed to save section';
             showErrorToast({ title: 'Error', message: msg, duration: 3000 });
         } finally {
             setIsSaving(false);

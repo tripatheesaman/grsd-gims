@@ -380,10 +380,7 @@ export const getPendingFuelIssues = async (req: Request, res: Response): Promise
         i.issued_by,
         i.issued_for,
         f.fuel_type,
-        CASE 
-          WHEN TRIM(i.nac_code) = 'GT 07986' THEN COALESCE(i.issue_cost / NULLIF(i.issue_quantity, 0), 0)
-          ELSE f.fuel_price
-        END as fuel_rate,
+        f.fuel_price as fuel_rate,
         f.kilometers,
         (
           SELECT f2.kilometers

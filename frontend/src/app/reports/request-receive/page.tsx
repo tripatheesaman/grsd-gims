@@ -664,7 +664,6 @@ export default function RequestReceiveReportPage() {
                                 <p className="text-sm font-medium text-[#003594]">Location</p>
                                 <p className="text-sm text-gray-900">{rd.location || 'N/A'}</p>
                               </div>
-                              <div>
                             </div>
 
                             <div className="mt-4 pt-4 border-t border-[#002a6e]/10">
