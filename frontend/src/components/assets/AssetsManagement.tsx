@@ -227,8 +227,7 @@ export function AssetsManagement() {
                 reader.readAsDataURL(file);
             });
             const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-            const apiBase = String(API.defaults.baseURL || '').replace(/\/+$/, '');
-            return API.post(`${apiBase}/api/assets/import`, { fileBase64: base64 });
+            return API.post('/api/assets/import', { fileBase64: base64 });
         },
         onSuccess: (res) => {
             invalidateAssets();
