@@ -4,6 +4,7 @@ import { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
+import { validateIssuedFor } from '../services/issueValidationService';
 const getExistingDateForSlipNumber = async (connection: PoolConnection, issueSlipNumber: string): Promise<string | null> => {
     const [results] = await connection.execute<RowDataPacket[]>('SELECT issue_date FROM issue_details WHERE issue_slip_number = ? LIMIT 1', [issueSlipNumber]);
     return results.length > 0 ? results[0].issue_date : null;
@@ -242,6 +243,15 @@ export const createSpareIssueRecord = async (req: Request, res: Response): Promi
             });
             return;
         }
+        const issuedForCheck = await validateIssuedFor(connection, formData.nac_code, formData.issued_for);
+        if (!issuedForCheck.valid) {
+            res.status(400).json({
+                error: 'Validation Failed',
+                message: issuedForCheck.message || 'Invalid issued-for equipment or section'
+            });
+            return;
+        }
+
         const [stockCheck] = await connection.execute<RowDataPacket[]>('SELECT current_balance FROM stock_details WHERE nac_code = ?', [formData.nac_code]);
         if (stockCheck.length === 0) {
             res.status(400).json({
@@ -321,6 +331,17 @@ export const updateSpareIssueRecord = async (req: Request, res: Response): Promi
             return;
         }
         const record = currentRecord[0];
+        if (formData.issued_for !== undefined) {
+            const nacCode = formData.nac_code || record.nac_code;
+            const issuedForCheck = await validateIssuedFor(connection, nacCode, formData.issued_for);
+            if (!issuedForCheck.valid) {
+                res.status(400).json({
+                    error: 'Validation Failed',
+                    message: issuedForCheck.message || 'Invalid issued-for equipment or section'
+                });
+                return;
+            }
+        }
         const oldQuantity = record.issue_quantity;
         const newQuantity = formData.issue_quantity || oldQuantity;
         let finalIssueDate = formData.issue_date ? formatDateForDB(formData.issue_date) : record.issue_date;

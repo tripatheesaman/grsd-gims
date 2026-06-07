@@ -185,20 +185,24 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     } as Request;
 
     let issueIds: number[] = [];
+    let issueErrorMessage: string | null = null;
 
     const issueRes = {
       status: (code: number) => ({
-        json: (data: any) => {
+        json: (data: { issueIds?: number[]; message?: string; error?: string; validationErrors?: Array<{ message?: string }> }) => {
           logEvents(`CreateIssue response data: ${JSON.stringify(data)}`, "fuelLog.log");
-          
+
           if (code === 201) {
             if (data.issueIds && Array.isArray(data.issueIds)) {
               issueIds = data.issueIds;
               logEvents(`Issue records created successfully with IDs: ${issueIds.join(', ')}`, "fuelLog.log");
             } else {
+              issueErrorMessage = 'Failed to create issue record - No issue IDs returned';
               logEvents(`Failed to find issue IDs in response: ${JSON.stringify(data)}`, "fuelLog.log");
             }
           } else {
+            const validationMessage = data.validationErrors?.[0]?.message;
+            issueErrorMessage = validationMessage || data.message || data.error || 'Failed to create issue record';
             logEvents(`Failed to create issue record. Status: ${code}, Response: ${JSON.stringify(data)}`, "fuelLog.log");
           }
         }
@@ -208,13 +212,14 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     try {
       logEvents(`Sending createIssue request: ${JSON.stringify(issueReq.body)}`, "fuelLog.log");
       await createIssue(issueReq, issueRes);
-      
+
       if (issueIds.length === 0) {
-        throw new Error('Failed to create issue record - No issue IDs returned');
+        throw new Error(issueErrorMessage || 'Failed to create issue record - No issue IDs returned');
       }
     } catch (error) {
-      logEvents(`Error in createIssue: ${error instanceof Error ? error.message : 'Unknown error'}`, "fuelLog.log");
-      throw new Error('Failed to create issue record');
+      const message = error instanceof Error ? error.message : 'Failed to create issue record';
+      logEvents(`Error in createIssue: ${message}`, "fuelLog.log");
+      throw new Error(message);
     }
 
     for (let i = 0; i < payload.records.length; i++) {

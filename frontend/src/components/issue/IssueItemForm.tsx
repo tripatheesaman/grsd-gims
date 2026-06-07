@@ -8,6 +8,8 @@ import { IssueCartItem } from '@/types/issue';
 import { Package, Hash, Scale, AlertCircle, RotateCcw, Info } from 'lucide-react';
 import { PartNumberSelect } from '@/components/request/PartNumberSelect';
 import { EquipmentRangeSelect } from '@/components/request/EquipmentRangeSelect';
+import { ConsumableIssueEquipmentSelect } from '@/components/issue/ConsumableIssueEquipmentSelect';
+import { isConsumableStock } from '@/utils/stockItem';
 import { API } from '@/lib/api';
 import { useAuthContext } from '@/context/AuthContext';
 import { useCustomToast } from '@/components/ui/custom-toast';
@@ -189,6 +191,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
         setErrors({});
     };
     const hasPartNumber = item.partNumber && item.partNumber.trim() !== '';
+    const isConsumable = isConsumableStock(item.equipmentNumber);
     return (<Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[500px] bg-white">
         <DialogHeader>
@@ -293,22 +296,31 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
                 </div>
               </Label>
               <div className="relative">
-                {(() => {
-                  const sectionPart = sections.length > 0
-                    ? sections.map(s => s.code).join(',')
-                    : '';
-                  const combined = [item.equipmentNumber, sectionPart].filter(Boolean).join(',');
-                  return (
-                    <EquipmentRangeSelect
-                      equipmentList={combined}
-                      value={selectedEquipment}
-                      onChange={setSelectedEquipment}
-                      error={errors.equipment}
-                      sectionCodes={sections.map(s => s.code)}
-                      sectionLabels={Object.fromEntries(sections.map(s => [s.code, s.name]))}
-                    />
-                  );
-                })()}
+                {isConsumable ? (
+                  <ConsumableIssueEquipmentSelect
+                    value={selectedEquipment}
+                    onChange={setSelectedEquipment}
+                    sections={sections}
+                    error={errors.equipment}
+                  />
+                ) : (
+                  (() => {
+                    const sectionPart = sections.length > 0
+                      ? sections.map(s => s.code).join(',')
+                      : '';
+                    const combined = [item.equipmentNumber, sectionPart].filter(Boolean).join(',');
+                    return (
+                      <EquipmentRangeSelect
+                        equipmentList={combined}
+                        value={selectedEquipment}
+                        onChange={setSelectedEquipment}
+                        error={errors.equipment}
+                        sectionCodes={sections.map(s => s.code)}
+                        sectionLabels={Object.fromEntries(sections.map(s => [s.code, s.name]))}
+                      />
+                    );
+                  })()
+                )}
               </div>
               {errors.equipment && (<p className="text-sm text-red-500 mt-1 flex items-center gap-1">
                   <AlertCircle className="h-3 w-3"/>
