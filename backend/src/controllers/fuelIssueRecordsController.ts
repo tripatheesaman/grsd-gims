@@ -3,6 +3,7 @@ import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
+import { validateIssuedFor } from '../services/issueValidationService';
 interface FuelIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -247,6 +248,16 @@ export const createFuelIssueRecord = async (req: Request, res: Response): Promis
       WHERE current_fy = ?`, [formData.issue_date, currentFY]);
         const dayNumber = dayNumberResult[0].day_number;
         const issueSlipNumber = `${dayNumber}Y${currentFY}`;
+
+        const issuedForCheck = await validateIssuedFor(connection, formData.nac_code, formData.issued_for);
+        if (!issuedForCheck.valid) {
+            res.status(400).json({
+                error: 'Validation Failed',
+                message: issuedForCheck.message || 'Invalid issued-for equipment or section'
+            });
+            return;
+        }
+
         const [stockResults] = await connection.query<RowDataPacket[]>('SELECT current_balance FROM stock_details WHERE nac_code = ?', [formData.nac_code]);
         if (stockResults.length === 0) {
             throw new Error(`Stock not found for NAC code: ${formData.nac_code}`);
@@ -353,6 +364,17 @@ export const updateFuelIssueRecord = async (req: Request, res: Response): Promis
         const fuel = fuelDetails[0];
         const oldQuantity = fuel.issue_quantity;
         const oldNacCode = fuel.nac_code;
+        if (formData.issued_for !== undefined) {
+            const nacCode = formData.nac_code || fuel.nac_code;
+            const issuedForCheck = await validateIssuedFor(connection, nacCode, formData.issued_for);
+            if (!issuedForCheck.valid) {
+                res.status(400).json({
+                    error: 'Validation Failed',
+                    message: issuedForCheck.message || 'Invalid issued-for equipment or section'
+                });
+                return;
+            }
+        }
         if (formData.issue_quantity !== undefined || formData.nac_code !== undefined ||
             formData.part_number !== undefined || formData.issued_for !== undefined || formData.issue_date !== undefined) {
             const updateFields = [];

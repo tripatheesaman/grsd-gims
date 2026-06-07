@@ -1,11 +1,14 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { IssueCartItem } from '@/types/issue';
 import { format } from 'date-fns';
 import { EquipmentSelect } from './EquipmentSelect';
+import { ConsumableIssueEquipmentSelect } from '@/components/issue/ConsumableIssueEquipmentSelect';
+import { isConsumableStock } from '@/utils/stockItem';
+import { API } from '@/lib/api';
 import { Pencil, Check, X, Trash2, Loader2, Package, Calendar, Hash, Scale } from 'lucide-react';
 interface IssuePreviewModalProps {
     isOpen: boolean;
@@ -25,7 +28,21 @@ interface EditableRowProps {
 function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editedItem, setEditedItem] = useState(item);
-    const isConsumable = item.equipmentNumber.toLowerCase().includes('consumable');
+    const [sections, setSections] = useState<{ id: number; name: string; code: string }[]>([]);
+    const isConsumable = isConsumableStock(item.equipmentNumber);
+    const fetchSections = useCallback(async () => {
+        try {
+            const res = await API.get('/api/settings/issue/sections/active');
+            setSections(res.data || []);
+        } catch {
+            setSections([]);
+        }
+    }, []);
+    useEffect(() => {
+        if (isConsumable) {
+            fetchSections();
+        }
+    }, [isConsumable, fetchSections]);
     const handleSave = () => {
         onUpdate(editedItem);
         setIsEditing(false);
@@ -46,7 +63,15 @@ function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
           <span className="text-gray-900">{item.itemName}</span>
         </td>
         <td className="px-6 py-4">
-          {isConsumable ? (<Input value={editedItem.selectedEquipment} onChange={(e) => setEditedItem({ ...editedItem, selectedEquipment: e.target.value })} className="w-32 border-[#002a6e]/10 focus-visible:ring-[#003594]"/>) : (<EquipmentSelect equipmentList={item.equipmentNumber} value={editedItem.selectedEquipment} onChange={(value) => setEditedItem({ ...editedItem, selectedEquipment: value })}/>)}
+          {isConsumable ? (
+            <ConsumableIssueEquipmentSelect
+              value={editedItem.selectedEquipment}
+              onChange={(value) => setEditedItem({ ...editedItem, selectedEquipment: value })}
+              sections={sections}
+            />
+          ) : (
+            <EquipmentSelect equipmentList={item.equipmentNumber} value={editedItem.selectedEquipment} onChange={(value) => setEditedItem({ ...editedItem, selectedEquipment: value })}/>
+          )}
         </td>
         <td className="px-6 py-4">
           <div className="flex items-center gap-2">

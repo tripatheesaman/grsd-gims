@@ -204,8 +204,12 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (nac_code, equipment_code),
             KEY idx_spare_compatibility_equipment (equipment_code)
-        ) ENGINE=InnoDB`
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     );
+    // Fix collation if table was created with the wrong one
+    await pool.query(
+        `ALTER TABLE spare_compatibility CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+    ).catch(() => undefined);
 
     const spareCompatibilityReverseIndex = await hasIndex('spare_compatibility', 'idx_spare_compatibility_equipment_nac');
     if (!spareCompatibilityReverseIndex) {
