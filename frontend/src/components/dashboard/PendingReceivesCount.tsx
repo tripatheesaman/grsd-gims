@@ -1,7 +1,11 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
+import { usePendingReceivesQuery } from '@/hooks/api/usePendingApprovals';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
+import { isAxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Eye, X, Pencil, Check, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -63,10 +67,9 @@ interface EditData {
 }
 const FALLBACK_IMAGE = '/images/nepal_airlines_logo.jpeg';
 export function PendingReceivesCount() {
+    const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
-    const [pendingCount, setPendingCount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isImagePreviewOpen, setIsImagePreviewOpen] = useState(false);
@@ -75,36 +78,15 @@ export function PendingReceivesCount() {
     const [isSaving, setIsSaving] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [selectedImage, setSelectedImage] = useState<string>('');
-    const [pendingReceives, setPendingReceives] = useState<PendingReceive[]>([]);
     const [selectedReceive, setSelectedReceive] = useState<ReceiveDetails | null>(null);
     const [editData, setEditData] = useState<EditData | null>(null);
-    const fetchPendingCount = useCallback(async () => {
-        if (!permissions?.includes('can_approve_receive')) {
-            setIsLoading(false);
-            return;
-        }
-        try {
-            const response = await API.get('/api/receive/pending');
-            setPendingReceives(response.data);
-            setPendingCount(response.data.length);
-        }
-        catch {
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [permissions]);
-    useEffect(() => {
-        fetchPendingCount();
-    }, [fetchPendingCount]);
-    useEffect(() => {
-        if (isDetailsOpen || isEditOpen || isRejectOpen || isImagePreviewOpen)
-            return;
-        const interval = setInterval(() => {
-            fetchPendingCount();
-        }, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPendingCount, isDetailsOpen, isEditOpen, isRejectOpen, isImagePreviewOpen]);
+    const [isApproving, setIsApproving] = useState(false);
+    const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen && !isImagePreviewOpen;
+    const { data: pendingRes, isLoading } = usePendingReceivesQuery(
+        Boolean(permissions?.includes('can_approve_receive') && shouldPoll)
+    );
+    const pendingReceives = (pendingRes?.data as PendingReceive[] | undefined) ?? [];
+    const pendingCount = pendingReceives.length;
     const handleViewDetails = async (receiveId: number) => {
         try {
             const response = await API.get(`/api/receive/${receiveId}/details`);
@@ -290,9 +272,7 @@ export function PendingReceivesCount() {
                     message: "Receive rejected successfully",
                     duration: 3000,
                 });
-                const pendingResponse = await API.get('/api/receive/pending');
-                setPendingReceives(pendingResponse.data);
-                setPendingCount(pendingResponse.data.length);
+                await invalidatePendingApprovals(queryClient);
                 setIsDetailsOpen(false);
                 setIsRejectOpen(false);
                 setRejectionReason('');
@@ -310,8 +290,9 @@ export function PendingReceivesCount() {
         }
     };
     const handleApproveReceive = async () => {
-        if (!selectedReceive)
+        if (!selectedReceive || isApproving)
             return;
+        setIsApproving(true);
         try {
             const response = await API.put(`/api/receive/${selectedReceive.id}/approve`);
             if (response.status === 200) {
@@ -320,9 +301,7 @@ export function PendingReceivesCount() {
                     message: "Receive approved successfully",
                     duration: 3000,
                 });
-                const pendingResponse = await API.get('/api/receive/pending');
-                setPendingReceives(pendingResponse.data);
-                setPendingCount(pendingResponse.data.length);
+                await invalidatePendingApprovals(queryClient);
                 setIsDetailsOpen(false);
             }
             else {
@@ -330,11 +309,24 @@ export function PendingReceivesCount() {
             }
         }
         catch (error) {
+            if (isAxiosError(error) && error.response?.status === 409) {
+                await invalidatePendingApprovals(queryClient);
+                setIsDetailsOpen(false);
+                showSuccessToast({
+                    title: 'Already processed',
+                    message: 'This receive was already approved.',
+                    duration: 3000,
+                });
+                return;
+            }
             showErrorToast({
                 title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve receive",
                 duration: 5000,
             });
+        }
+        finally {
+            setIsApproving(false);
         }
     };
     const handleCloseEditModal = () => {
@@ -445,11 +437,14 @@ export function PendingReceivesCount() {
                   <Pencil className="h-4 w-4"/>
                   Edit Details
                 </Button>
-                <Button variant="default" size="sm" className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white" onClick={handleApproveReceive}>
+                <Button variant="default" size="sm" disabled={isApproving} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white" onClick={handleApproveReceive}>
                   <Check className="h-4 w-4"/>
                   Approve
                 </Button>
-                {selectedReceive?.requestFk && selectedReceive.requestFk > 0 && selectedReceive.receiveSource !== 'tender' && (<Button variant="default" size="sm" className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={async () => {
+                {selectedReceive?.requestFk && selectedReceive.requestFk > 0 && selectedReceive.receiveSource !== 'tender' && (<Button variant="default" size="sm" disabled={isApproving} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={async () => {
+                if (isApproving)
+                    return;
+                setIsApproving(true);
                 try {
                     const response = await API.put(`/api/receive/${selectedReceive.id}/approve-and-close`);
                     if (response.status === 200) {
@@ -458,9 +453,7 @@ export function PendingReceivesCount() {
                             message: 'Receive approved and request force-closed',
                             duration: 3000,
                         });
-                        const pendingResponse = await API.get('/api/receive/pending');
-                        setPendingReceives(pendingResponse.data);
-                        setPendingCount(pendingResponse.data.length);
+                        await invalidatePendingApprovals(queryClient);
                         setIsDetailsOpen(false);
                     }
                     else {
@@ -468,11 +461,24 @@ export function PendingReceivesCount() {
                     }
                 }
                 catch (error) {
+                    if (isAxiosError(error) && error.response?.status === 409) {
+                        await invalidatePendingApprovals(queryClient);
+                        setIsDetailsOpen(false);
+                        showSuccessToast({
+                            title: 'Already processed',
+                            message: 'This receive was already approved.',
+                            duration: 3000,
+                        });
+                        return;
+                    }
                     showErrorToast({
                         title: 'Error',
                         message: error instanceof Error ? error.message : 'Failed to approve and close',
                         duration: 5000,
                     });
+                }
+                finally {
+                    setIsApproving(false);
                 }
             }}>
                     <Check className="h-4 w-4"/>

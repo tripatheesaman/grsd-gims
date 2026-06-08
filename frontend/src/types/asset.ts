@@ -49,9 +49,10 @@ export interface Asset {
     book_value_npr?: number | null;
     elapsed_fiscal_years?: number | null;
     annual_depreciation_npr?: number | null;
-    original_insurance_amount_npr?: number | null;
-    insurance_book_value_npr?: number | null;
-    annual_insurance_depreciation_npr?: number | null;
+    original_insurance_amount_usd?: number | null;
+    insurance_baseline_fy?: string | null;
+    insurance_book_value_usd?: number | null;
+    annual_insurance_depreciation_usd?: number | null;
     insurance_amount?: number | null;
     servicability_status?: string | null;
     purchase_currency?: string | null;
@@ -155,7 +156,7 @@ export const PROPERTY_DISPLAY_LABELS: Record<string, string> = {
     location: 'Location',
     rrp_status: 'RRP Status',
     current_value: 'Purchase cost',
-    insurance_amount: 'Insurance Amount',
+    insurance_amount: 'Insurance Amount (USD)',
     servicability_status: 'Servicability Status',
     purchase_currency: 'Purchase Currency',
     purchase_fx_rate: 'Purchase FX Rate',

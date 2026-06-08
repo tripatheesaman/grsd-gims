@@ -6,6 +6,7 @@ import { logEvents } from '../middlewares/logger';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { fetchRRPConfigMasters } from './rrpController';
 import { generateCapitalRRPExcel } from '../services/capitalRrpExcelService';
+import { setNoCacheHeaders } from '../utils/approvalResponse';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 import { initializeAssetCostAndDepreciation } from '../services/assetDepreciationService';
 import {
@@ -932,6 +933,7 @@ interface CapitalRRPUpdatePayload {
 
 export const getPendingCapitalRRPs = async (_req: Request, res: Response): Promise<void> => {
     try {
+        setNoCacheHeaders(res);
         await ensureAssetSpareSchema();
         const [configRows] = await pool.query<RowDataPacket[]>('SELECT config_name, config_value FROM app_config WHERE config_type = ?', ['rrp']);
         const rrpConfig: Record<string, unknown> = {};

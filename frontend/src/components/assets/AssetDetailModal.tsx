@@ -27,10 +27,11 @@ import { cn } from '@/utils/utils';
 import { resolveImageUrl } from '@/lib/urls';
 import {
     formatNprAmount,
+    formatUsdAmount,
     getAssetOriginalPurchaseCostNpr,
     getAssetBookValueNpr,
-    getAssetOriginalInsuranceAmountNpr,
-    getAssetInsuranceBookValueNpr,
+    getAssetOriginalInsuranceAmountUsd,
+    getAssetInsuranceBookValueUsd,
 } from '@/utils/assetValue';
 import {
     Banknote,
@@ -235,8 +236,8 @@ export function AssetDetailModal({
     const propertyMap = asset ? buildPropertyMap(asset) : new Map<string, string>();
     const purchaseCostNpr = asset ? getAssetOriginalPurchaseCostNpr(asset) : null;
     const bookValueNpr = asset ? getAssetBookValueNpr(asset) : null;
-    const originalInsuranceNpr = asset ? getAssetOriginalInsuranceAmountNpr(asset) : null;
-    const insuranceBookValueNpr = asset ? getAssetInsuranceBookValueNpr(asset) : null;
+    const originalInsuranceUsd = asset ? getAssetOriginalInsuranceAmountUsd(asset) : null;
+    const insuranceBookValueUsd = asset ? getAssetInsuranceBookValueUsd(asset) : null;
     const hasApprovedRrp = Number(asset?.rrp_total_npr) > 0;
     const estimatedNprFromBase =
         asset?.purchase_amount_base != null &&
@@ -373,34 +374,34 @@ export function AssetDetailModal({
                                         </p>
                                         <p className="mt-2 text-xs text-slate-600">
                                             {asset.elapsed_fiscal_years != null && asset.purchase_fy
-                                                ? `FY ${asset.purchase_fy} → now · ${asset.elapsed_fiscal_years} FY × 20%`
-                                                : '20% straight-line depreciation per FY (min NPR 0.10)'}
+                                                ? `FY ${asset.purchase_fy} → now · ${asset.elapsed_fiscal_years} FY @ 20% reducing balance`
+                                                : '20% reducing balance per FY (min NPR 0.10)'}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:col-span-2">
                                     <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4 shadow-sm">
                                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                                            Insurance base (NPR)
+                                            Insurance base (USD)
                                         </p>
                                         <p className="mt-1 text-2xl font-bold tabular-nums text-violet-900">
-                                            {formatNprAmount(originalInsuranceNpr)}
+                                            {formatUsdAmount(originalInsuranceUsd)}
                                         </p>
                                         <p className="mt-2 text-xs text-slate-600">
-                                            Foreign purchase amount × FX rate
+                                            Purchase amount in foreign currency (USD)
                                         </p>
                                     </div>
                                     <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-4 shadow-sm">
                                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-                                            Insurance value (NPR)
+                                            Insurance value (USD)
                                         </p>
                                         <p className="mt-1 text-2xl font-bold tabular-nums text-violet-900">
-                                            {formatNprAmount(insuranceBookValueNpr)}
+                                            {formatUsdAmount(insuranceBookValueUsd)}
                                         </p>
                                         <p className="mt-2 text-xs text-slate-600">
-                                            {asset.elapsed_fiscal_years != null && asset.purchase_fy
-                                                ? `FY ${asset.purchase_fy} → now · ${asset.elapsed_fiscal_years} FY × 10%`
-                                                : '10% straight-line depreciation per FY (min NPR 0.10)'}
+                                            {asset.insurance_baseline_fy
+                                                ? `Baseline FY ${asset.insurance_baseline_fy} · 10% reducing balance (min USD 0.10)`
+                                                : 'Baseline FY 2081/82 · 10% reducing balance (min USD 0.10)'}
                                         </p>
                                     </div>
                                 </div>

@@ -46,24 +46,26 @@ export const getAssetOriginalPurchaseCostNpr = (asset: {
 
 
 
-/** Original insurance NPR base (foreign purchase amount × FX rate). */
+/** Original insurance USD: imported FY 2081/82 baseline, or purchase_amount_base for new assets. */
 
-export const getAssetOriginalInsuranceAmountNpr = (asset: {
+export const getAssetOriginalInsuranceAmountUsd = (asset: {
+    original_insurance_amount_usd?: number | null;
     original_insurance_amount_npr?: number | null;
     purchase_amount_base?: number | null;
-    purchase_fx_rate?: number | null;
 }): number | null => {
-    const original = Number(asset.original_insurance_amount_npr);
+    const original = Number(asset.original_insurance_amount_usd ?? asset.original_insurance_amount_npr);
     if (Number.isFinite(original) && original > 0) {
         return original;
     }
     const base = Number(asset.purchase_amount_base);
-    const fx = Number(asset.purchase_fx_rate);
-    if (Number.isFinite(base) && Number.isFinite(fx) && base > 0 && fx > 0) {
-        return base * fx;
+    if (Number.isFinite(base) && base > 0) {
+        return base;
     }
     return null;
 };
+
+/** @deprecated Use getAssetOriginalInsuranceAmountUsd */
+export const getAssetOriginalInsuranceAmountNpr = getAssetOriginalInsuranceAmountUsd;
 
 /** Depreciated book value (current value after FY depreciation). Minimum NPR 0.1. */
 
@@ -95,18 +97,22 @@ export const getAssetPurchaseCostNpr = getAssetOriginalPurchaseCostNpr;
 
 
 
-/** Depreciated insurance value after FY depreciation (10% per FY). Minimum NPR 0.1. */
+/** Depreciated insurance value after FY depreciation (10% per FY). Minimum USD 0.10. */
 
-export const getAssetInsuranceBookValueNpr = (asset: {
+export const getAssetInsuranceBookValueUsd = (asset: {
+    insurance_book_value_usd?: number | null;
     insurance_book_value_npr?: number | null;
     insurance_amount?: number | null;
 }): number | null => {
-    const book = Number(asset.insurance_book_value_npr ?? asset.insurance_amount);
+    const book = Number(asset.insurance_book_value_usd ?? asset.insurance_book_value_npr ?? asset.insurance_amount);
     if (Number.isFinite(book) && book >= 0) {
         return book;
     }
     return null;
 };
+
+/** @deprecated Use getAssetInsuranceBookValueUsd */
+export const getAssetInsuranceBookValueNpr = getAssetInsuranceBookValueUsd;
 
 /** @deprecated Use getAssetBookValueNpr */
 
@@ -130,6 +136,16 @@ export const formatNprAmount = (value: number | null | undefined): string => {
 
     })}`;
 
+};
+
+export const formatUsdAmount = (value: number | null | undefined): string => {
+    if (value == null || !Number.isFinite(Number(value))) {
+        return '—';
+    }
+    return `USD ${Number(value).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`;
 };
 
 

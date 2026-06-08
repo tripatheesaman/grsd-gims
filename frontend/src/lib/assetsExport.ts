@@ -1,7 +1,7 @@
 import type { Asset } from '@/types/asset';
 import {
-    getAssetInsuranceBookValueNpr,
-    getAssetOriginalInsuranceAmountNpr,
+    getAssetInsuranceBookValueUsd,
+    getAssetOriginalInsuranceAmountUsd,
     getAssetPurchaseCostNpr,
 } from '@/utils/assetValue';
 
@@ -19,8 +19,8 @@ export async function downloadAssetsExcel(rows: AssetExportRow[], filename: stri
         'RRP Status',
         'Purchase Cost (NPR)',
         'Current Value (NPR)',
-        'Insurance Base (NPR)',
-        'Insurance Value (NPR)',
+        'Insurance Base (USD)',
+        'Insurance Value (USD)',
         'Servicability',
         'Currency',
         'FX Rate',
@@ -38,8 +38,8 @@ export async function downloadAssetsExcel(rows: AssetExportRow[], filename: stri
             r.rrp_status ?? '',
             getAssetPurchaseCostNpr(r) ?? '',
             r.book_value_npr ?? r.current_value ?? '',
-            getAssetOriginalInsuranceAmountNpr(r) ?? '',
-            getAssetInsuranceBookValueNpr(r) ?? '',
+            getAssetOriginalInsuranceAmountUsd(r) ?? '',
+            getAssetInsuranceBookValueUsd(r) ?? '',
             r.servicability_status ?? '',
             r.purchase_currency ?? '',
             r.purchase_fx_rate ?? '',

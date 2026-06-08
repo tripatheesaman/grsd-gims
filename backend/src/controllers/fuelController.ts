@@ -5,6 +5,8 @@ import { logEvents } from '../middlewares/logger';
 import { createIssue } from './issueController';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
+import { sendAlreadyProcessed } from '../utils/approvalResponse';
+import { ResultSetHeader } from 'mysql2';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -392,10 +394,11 @@ export const approveFuelRecord = async (req: Request, res: Response): Promise<vo
     await connection.beginTransaction();
 
     const [fuelDetails] = await connection.query<RowDataPacket[]>(
-      `SELECT f.*, i.issue_quantity, i.nac_code 
+      `SELECT f.*, i.issue_quantity, i.nac_code, i.approval_status AS issue_approval_status
        FROM fuel_records f
        JOIN issue_details i ON f.issue_fk = i.id
-       WHERE f.id = ?`,
+       WHERE f.id = ?
+       FOR UPDATE`,
       [id]
     );
 
@@ -405,23 +408,42 @@ export const approveFuelRecord = async (req: Request, res: Response): Promise<vo
 
     const fuel = fuelDetails[0];
 
-    await connection.execute(
+    if (fuel.approval_status !== 'PENDING' || fuel.issue_approval_status !== 'PENDING') {
+      await connection.rollback();
+      logEvents(`Failed to approve fuel record - Already processed: ${id}`, "fuelLog.log");
+      sendAlreadyProcessed(res, 'This fuel issue');
+      return;
+    }
+
+    const [fuelUpdateResult] = await connection.execute<ResultSetHeader>(
       `UPDATE fuel_records 
        SET approval_status = 'APPROVED',
            approved_by = ?,
            updated_datetime = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? AND approval_status = 'PENDING'`,
       [JSON.stringify(approvedBy), id]
     );
 
-    await connection.execute(
+    if (fuelUpdateResult.affectedRows === 0) {
+      await connection.rollback();
+      sendAlreadyProcessed(res, 'This fuel issue');
+      return;
+    }
+
+    const [issueUpdateResult] = await connection.execute<ResultSetHeader>(
       `UPDATE issue_details 
        SET approval_status = 'APPROVED',
            approved_by = ?,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? AND approval_status = 'PENDING'`,
       [JSON.stringify(approvedBy), fuel.issue_fk]
     );
+
+    if (issueUpdateResult.affectedRows === 0) {
+      await connection.rollback();
+      sendAlreadyProcessed(res, 'This fuel issue');
+      return;
+    }
 
     await rebuildNacInventoryState(connection, fuel.nac_code);
     logEvents(`Recalculated remaining balances for NAC code: ${fuel.nac_code} after approving fuel record`, "fuelLog.log");

@@ -219,6 +219,18 @@ export const sidebarLinks: SidebarLink[] = [
                 icon: 'file-text'
             },
             {
+                label: "Assets Report",
+                href: "/reports/assets",
+                permission: 'can_access_report',
+                icon: 'briefcase'
+            },
+            {
+                label: "Insurance Report",
+                href: "/reports/insurance",
+                permission: 'can_access_report',
+                icon: 'briefcase'
+            },
+            {
                 label: "Predictive Analytics",
                 href: "/analytics/predictive",
                 permission: 'can_access_predictive_analysis',

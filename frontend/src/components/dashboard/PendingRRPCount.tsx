@@ -16,6 +16,8 @@ import {
     type CapitalEditItem,
 } from '@/components/rrp/CapitalRRPDetailsModal';
 import { useNotification } from '@/context/NotificationContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 interface PendingRRP {
     id: number;
     rrp_number: string;
@@ -119,6 +121,7 @@ type PendingRRPListEntry = {
     category: 'spare' | 'capital';
 };
 export function PendingRRPCount() {
+    const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const { markAsRead } = useNotification();
@@ -404,6 +407,7 @@ export function PendingRRPCount() {
                 duration: 3000,
             });
             setIsDetailsOpen(false);
+            await invalidatePendingApprovals(queryClient);
             fetchPendingCount();
         }
         catch (error: unknown) {
@@ -422,7 +426,7 @@ export function PendingRRPCount() {
                 duration: 3000,
             });
         }
-    }, [selectedRRP, user?.UserInfo?.username, markAsRead, showSuccessToast, showErrorToast, fetchPendingCount]);
+    }, [selectedRRP, user?.UserInfo?.username, markAsRead, showSuccessToast, showErrorToast, fetchPendingCount, queryClient]);
     const handleApproveCapitalRRP = useCallback(async () => {
         if (!selectedCapitalRRP || !user?.UserInfo?.username) return;
         try {
@@ -436,6 +440,7 @@ export function PendingRRPCount() {
             });
             setIsCapitalDetailsOpen(false);
             setSelectedCapitalRRP(null);
+            await invalidatePendingApprovals(queryClient);
             fetchPendingCount();
         }
         catch (error: unknown) {
@@ -455,7 +460,7 @@ export function PendingRRPCount() {
             }
             showErrorToast({ title: 'Error', message, duration: 3000 });
         }
-    }, [selectedCapitalRRP, user?.UserInfo?.username, showSuccessToast, showErrorToast, fetchPendingCount]);
+    }, [selectedCapitalRRP, user?.UserInfo?.username, showSuccessToast, showErrorToast, fetchPendingCount, queryClient]);
     const handleEditCapitalRRP = useCallback(
         async (data: CapitalRRPApprovalData) => {
             try {

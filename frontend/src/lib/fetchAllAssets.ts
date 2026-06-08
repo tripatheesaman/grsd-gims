@@ -8,6 +8,11 @@ export type AssetListQuery = {
     location?: string;
     equipment_code?: string;
     servicability_status?: string;
+    serial_number?: string;
+    model_name?: string;
+    manufacturer?: string;
+    sortBy?: string;
+    sortOrder?: string;
 };
 
 export async function fetchAllAssetsMatchingFilters(filters: AssetListQuery): Promise<Asset[]> {
@@ -21,6 +26,11 @@ export async function fetchAllAssetsMatchingFilters(filters: AssetListQuery): Pr
     if (filters.location?.trim()) params.location = filters.location.trim();
     if (filters.equipment_code?.trim()) params.equipment_code = filters.equipment_code.trim();
     if (filters.servicability_status?.trim()) params.servicability_status = filters.servicability_status.trim();
+    if (filters.serial_number?.trim()) params.serial_number = filters.serial_number.trim();
+    if (filters.model_name?.trim()) params.model_name = filters.model_name.trim();
+    if (filters.manufacturer?.trim()) params.manufacturer = filters.manufacturer.trim();
+    if (filters.sortBy) params.sortBy = filters.sortBy;
+    if (filters.sortOrder) params.sortOrder = filters.sortOrder;
     const all: Asset[] = [];
     let page = 1;
     let totalPages = 1;

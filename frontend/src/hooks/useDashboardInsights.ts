@@ -19,7 +19,14 @@ interface SummaryRow {
     count: number;
 }
 
-interface DashboardTotals {
+export interface AssetTypeValuation {
+    typeName: string;
+    purchaseCost: number;
+    currentValue: number;
+    assetCount: number;
+}
+
+export interface DashboardTotals {
     uniqueRequests: number;
     totalItemsRequested: number;
     totalItemsReceived: number;
@@ -34,8 +41,14 @@ interface DashboardTotals {
     processedForeignRRPs: number;
     totalSparesQuantity: number;
     totalSparesValue: number;
+    totalSparesPurchaseCost: number;
     totalAssetsValue: number;
+    totalAssetsPurchaseCost: number;
+    totalAssetsCurrentValue: number;
+    assetTypeValues: AssetTypeValuation[];
     grandTotalValue: number;
+    grandTotalPurchaseCost: number;
+    grandTotalCurrentValue: number;
     totalItemsIssued: number;
     petrolIssuedQuantity: number;
     dieselIssuedQuantity: number;
@@ -205,8 +218,14 @@ export const useDashboardInsights = () => {
             processedForeignRRPs: Number(data?.processedForeignRRPs) || 0,
             totalSparesQuantity: Number(data?.totalSparesQuantity) || 0,
             totalSparesValue: Number(data?.totalSparesValue) || 0,
+            totalSparesPurchaseCost: Number(data?.totalSparesPurchaseCost) || 0,
             totalAssetsValue: Number(data?.totalAssetsValue) || 0,
-            grandTotalValue: Number(data?.grandTotalValue) || 0,
+            totalAssetsPurchaseCost: Number(data?.totalAssetsPurchaseCost ?? data?.totalAssetsValue) || 0,
+            totalAssetsCurrentValue: Number(data?.totalAssetsCurrentValue) || 0,
+            assetTypeValues: Array.isArray(data?.assetTypeValues) ? data.assetTypeValues : [],
+            grandTotalValue: Number(data?.grandTotalValue ?? data?.grandTotalCurrentValue) || 0,
+            grandTotalPurchaseCost: Number(data?.grandTotalPurchaseCost) || 0,
+            grandTotalCurrentValue: Number(data?.grandTotalCurrentValue ?? data?.grandTotalValue) || 0,
             totalItemsIssued: Number(data?.totalItemsIssued) || 0,
             petrolIssuedQuantity: Number(data?.petrolIssuedQuantity) || 0,
             dieselIssuedQuantity: Number(data?.dieselIssuedQuantity) || 0,

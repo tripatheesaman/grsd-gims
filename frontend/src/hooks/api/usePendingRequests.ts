@@ -1,5 +1,6 @@
 import { useApiQuery } from './useApiQuery';
 import { queryKeys } from '@/lib/queryKeys';
+import { PENDING_APPROVAL_QUERY_OPTIONS } from './usePendingApprovals';
 
 export function usePendingRequestsQuery(enabled = true) {
   return useApiQuery(
@@ -8,8 +9,7 @@ export function usePendingRequestsQuery(enabled = true) {
     undefined,
     {
       enabled,
-      refetchInterval: 30000,
-      staleTime: 1000 * 15,
+      ...PENDING_APPROVAL_QUERY_OPTIONS,
     }
   );
 }

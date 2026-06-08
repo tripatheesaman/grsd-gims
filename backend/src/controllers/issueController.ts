@@ -7,6 +7,8 @@ import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 import { validateIssuedFor, type IssueValidationCaches } from '../services/issueValidationService';
+import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
+import { ResultSetHeader } from 'mysql2';
 interface IssueItem {
     nacCode: string;
     quantity: number;
@@ -178,15 +180,18 @@ export const approveIssue = async (req: Request, res: Response): Promise<void> =
         }
         const [issueCheck] = await connection.execute<RowDataPacket[]>(`SELECT id, approval_status 
        FROM issue_details 
-       WHERE id IN (${issueIds.map(() => '?').join(',')})`, issueIds);
+       WHERE id IN (${issueIds.map(() => '?').join(',')})
+       FOR UPDATE`, issueIds);
         if (issueCheck.length === 0) {
             logEvents(`Failed to approve issues - No issues found with IDs: ${issueIds.join(', ')}`, "issueLog.log");
             throw new Error('Issue records not found');
         }
-        const alreadyApproved = issueCheck.filter(issue => issue.approval_status === 'APPROVED');
-        if (alreadyApproved.length > 0) {
-            logEvents(`Failed to approve issues - Some issues are already approved: ${alreadyApproved.map(i => i.id).join(', ')}`, "issueLog.log");
-            throw new Error(`Issues ${alreadyApproved.map(i => i.id).join(', ')} are already approved`);
+        const alreadyProcessed = issueCheck.filter(issue => issue.approval_status !== 'PENDING');
+        if (alreadyProcessed.length > 0) {
+            await connection.rollback();
+            logEvents(`Failed to approve issues - Already processed: ${alreadyProcessed.map(i => i.id).join(', ')}`, "issueLog.log");
+            sendAlreadyProcessed(res, 'One or more issues');
+            return;
         }
         const [issueDetails] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.id,
@@ -195,12 +200,22 @@ export const approveIssue = async (req: Request, res: Response): Promise<void> =
         i.issue_date,
         i.issue_slip_number
       FROM issue_details i
-      WHERE i.id IN (${issueIds.map(() => '?').join(',')})`, issueIds);
-        await connection.execute(`UPDATE issue_details 
+      WHERE id IN (${issueIds.map(() => '?').join(',')}) AND approval_status = 'PENDING'`, issueIds);
+        if (issueDetails.length !== issueIds.length) {
+            await connection.rollback();
+            sendAlreadyProcessed(res, 'One or more issues');
+            return;
+        }
+        const [updateResult] = await connection.execute<ResultSetHeader>(`UPDATE issue_details 
       SET approval_status = 'APPROVED',
           approved_by = ?,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id IN (${issueIds.map(() => '?').join(',')})`, [approvedBy, ...issueIds]);
+      WHERE id IN (${issueIds.map(() => '?').join(',')}) AND approval_status = 'PENDING'`, [approvedBy, ...issueIds]);
+        if (updateResult.affectedRows === 0) {
+            await connection.rollback();
+            sendAlreadyProcessed(res, 'One or more issues');
+            return;
+        }
         const uniqueNacCodes = [...new Set(issueDetails.map(issue => issue.nac_code))];
         for (const nacCode of uniqueNacCodes) {
             await rebuildNacInventoryState(connection, nacCode);
@@ -290,6 +305,7 @@ export const rejectIssue = async (req: Request, res: Response): Promise<void> =>
 export const getPendingIssues = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
+        setNoCacheHeaders(res);
         const [issues] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.id,
         i.nac_code,
@@ -331,6 +347,7 @@ export const getPendingIssues = async (req: Request, res: Response): Promise<voi
 export const getPendingFuelIssues = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
+        setNoCacheHeaders(res);
         const [issues] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.id,
         i.nac_code,

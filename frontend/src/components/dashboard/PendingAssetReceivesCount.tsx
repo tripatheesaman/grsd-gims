@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
+import { usePendingAssetReceivesQuery } from '@/hooks/api/usePendingApprovals';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
+import { isAxiosError } from 'axios';
 import { resolveImageUrl } from '@/lib/urls';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Eye, Check, X, Package } from 'lucide-react';
@@ -37,44 +41,21 @@ const modalPanelClass =
     'bg-white rounded-lg shadow-xl border border-[#002a6e]/10 text-gray-900';
 
 export function PendingAssetReceivesCount() {
+    const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
-    const [pendingCount, setPendingCount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isRejectOpen, setIsRejectOpen] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
-    const [pendingReceives, setPendingReceives] = useState<PendingAssetReceive[]>([]);
     const [selectedReceive, setSelectedReceive] = useState<AssetReceiveDetails | null>(null);
-
-    const fetchPending = useCallback(async () => {
-        if (!permissions?.includes('can_approve_assets_receive')) {
-            setIsLoading(false);
-            return;
-        }
-        try {
-            const response = await API.get('/api/asset-receive/pending');
-            setPendingReceives(response.data || []);
-            setPendingCount((response.data || []).length);
-        }
-        catch {
-            setPendingCount(0);
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [permissions]);
-
-    useEffect(() => {
-        fetchPending();
-    }, [fetchPending]);
-
-    useEffect(() => {
-        if (isDetailsOpen || isRejectOpen) return;
-        const interval = setInterval(fetchPending, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPending, isDetailsOpen, isRejectOpen]);
+    const [isApproving, setIsApproving] = useState(false);
+    const shouldPoll = !isDetailsOpen && !isRejectOpen;
+    const { data: pendingRes, isLoading } = usePendingAssetReceivesQuery(
+        Boolean(permissions?.includes('can_approve_assets_receive') && shouldPoll)
+    );
+    const pendingReceives = (pendingRes?.data as PendingAssetReceive[] | undefined) ?? [];
+    const pendingCount = pendingReceives.length;
 
     const handleViewDetails = async (receiveId: number) => {
         try {
@@ -90,20 +71,30 @@ export function PendingAssetReceivesCount() {
     };
 
     const handleApprove = async () => {
-        if (!selectedReceive) return;
+        if (!selectedReceive || isApproving) return;
+        setIsApproving(true);
         try {
             await API.put(`/api/asset-receive/${selectedReceive.receiveId}/approve`, {
                 approvedBy: user?.UserInfo?.username,
             });
             showSuccessToast({ title: 'Success', message: 'Assets receive approved', duration: 3000 });
-            await fetchPending();
+            await invalidatePendingApprovals(queryClient);
             setIsDetailsOpen(false);
         }
         catch (error: unknown) {
+            if (isAxiosError(error) && error.response?.status === 409) {
+                await invalidatePendingApprovals(queryClient);
+                setIsDetailsOpen(false);
+                showSuccessToast({ title: 'Already processed', message: 'This asset receive was already approved.', duration: 3000 });
+                return;
+            }
             const message = error && typeof error === 'object' && 'response' in error
                 ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
                 : 'Failed to approve';
             showErrorToast({ title: 'Error', message: message || 'Failed to approve', duration: 5000 });
+        }
+        finally {
+            setIsApproving(false);
         }
     };
 
@@ -118,7 +109,7 @@ export function PendingAssetReceivesCount() {
                 rejectionReason: rejectionReason.trim(),
             });
             showSuccessToast({ title: 'Success', message: 'Assets receive rejected', duration: 3000 });
-            await fetchPending();
+            await invalidatePendingApprovals(queryClient);
             setIsDetailsOpen(false);
             setIsRejectOpen(false);
             setRejectionReason('');
@@ -225,6 +216,7 @@ export function PendingAssetReceivesCount() {
                                 <Button
                                     size="sm"
                                     className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white"
+                                    disabled={isApproving}
                                     onClick={handleApprove}
                                 >
                                     <Check className="h-4 w-4" />
