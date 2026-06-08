@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
@@ -7,6 +7,7 @@ import { refreshPredictionMetrics } from '../services/predictionService';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
+import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
     request_number: string;
@@ -52,6 +53,11 @@ interface PendingReceiveItem extends RowDataPacket {
     receive_date: Date;
 }
 interface ReceiveDetailResult extends RowDataPacket {
+    approval_status?: string;
+    image_path?: string;
+    receive_source?: string;
+    tender_reference_number?: string;
+    request_fk?: number;
     request_number: string;
     request_date: Date;
     receive_date: Date;
@@ -81,6 +87,7 @@ interface StockDetailResult extends RowDataPacket {
 }
 export const getPendingReceives = async (req: Request, res: Response): Promise<void> => {
     try {
+        setNoCacheHeaders(res);
         const [results] = await pool.execute<PendingReceiveItem[]>(`SELECT 
                 rd.id,
                 COALESCE(NULLIF(rd.nac_code, ''), COALESCE(req.nac_code, '')) as nac_code,
@@ -788,6 +795,7 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
     try {
         await connection.beginTransaction();
         const [receiveDetails] = await connection.execute<ReceiveDetailResult[]>(`SELECT 
+                rd.approval_status,
                 rd.nac_code,
                 rd.item_name,
                 rd.part_number,
@@ -802,16 +810,28 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
                 rd.request_fk
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
-            WHERE rd.id = ?`, [receiveId]);
+            WHERE rd.id = ?
+            FOR UPDATE`, [receiveId]);
         if (!receiveDetails.length) {
             logEvents(`Failed to approve receive - Receive not found: ${receiveId}`, "receiveLog.log");
             throw new Error('Receive record not found');
         }
+        if (receiveDetails[0].approval_status !== 'PENDING') {
+            await connection.rollback();
+            logEvents(`Failed to approve receive - Already processed: ${receiveId}`, "receiveLog.log");
+            sendAlreadyProcessed(res, 'This receive');
+            return;
+        }
         const receive = receiveDetails[0];
-        await connection.execute(`UPDATE receive_details 
+        const [updateResult] = await connection.execute<ResultSetHeader>(`UPDATE receive_details 
             SET approval_status = 'APPROVED',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`, [receiveId]);
+            WHERE id = ? AND approval_status = 'PENDING'`, [receiveId]);
+        if (updateResult.affectedRows === 0) {
+            await connection.rollback();
+            sendAlreadyProcessed(res, 'This receive');
+            return;
+        }
         const [stockDetails] = await connection.execute<StockDetailResult[]>(`SELECT * FROM stock_details 
             WHERE nac_code = ?`, [receive.nac_code]);
         let stockQty = typeof receive.received_quantity === 'string'
@@ -982,6 +1002,7 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
     try {
         await connection.beginTransaction();
         const [receiveDetails] = await connection.execute<ReceiveDetailResult[]>(`SELECT 
+                rd.approval_status,
                 rd.nac_code,
                 rd.item_name,
                 rd.part_number,
@@ -996,16 +1017,28 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
                 rd.request_fk
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
-            WHERE rd.id = ?`, [receiveId]);
+            WHERE rd.id = ?
+            FOR UPDATE`, [receiveId]);
         if (!receiveDetails.length) {
             logEvents(`Failed to approve & close - Receive not found: ${receiveId}`, "receiveLog.log");
             throw new Error('Receive record not found');
         }
+        if (receiveDetails[0].approval_status !== 'PENDING') {
+            await connection.rollback();
+            logEvents(`Failed to approve & close - Already processed: ${receiveId}`, "receiveLog.log");
+            sendAlreadyProcessed(res, 'This receive');
+            return;
+        }
         const receive = receiveDetails[0];
-        await connection.execute(`UPDATE receive_details 
+        const [updateResult] = await connection.execute<ResultSetHeader>(`UPDATE receive_details 
             SET approval_status = 'APPROVED',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`, [receiveId]);
+            WHERE id = ? AND approval_status = 'PENDING'`, [receiveId]);
+        if (updateResult.affectedRows === 0) {
+            await connection.rollback();
+            sendAlreadyProcessed(res, 'This receive');
+            return;
+        }
         const [stockDetails] = await connection.execute<StockDetailResult[]>(`SELECT * FROM stock_details 
             WHERE nac_code = ?`, [receive.nac_code]);
         let stockQty = typeof receive.received_quantity === 'string'

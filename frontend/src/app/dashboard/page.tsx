@@ -69,6 +69,9 @@ const MetricCard = ({ label, value, accentClass, icon: Icon, loading, details, i
         <span className="absolute -left-1 top-1/2 hidden h-3 w-3 rotate-45 rounded-[2px] bg-white shadow-md sm:block"/>
       </div>)}
   </div>);
+const formatNpr = (amount: number) =>
+    `NPR ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
 const getDashboardGreeting = (role: string | undefined): string => {
     if (!role)
         return 'welcome to your dashboard';
@@ -136,6 +139,14 @@ const DashboardContent = () => {
         ];
         return items.filter((item) => permissions?.includes(item.permission));
     }, [permissions]);
+    const assetTypePurchaseDetails = totals.assetTypeValues.map((row) => ({
+        label: `${row.typeName} purchase`,
+        value: formatNpr(row.purchaseCost),
+    }));
+    const assetTypeCurrentDetails = totals.assetTypeValues.map((row) => ({
+        label: `${row.typeName} current`,
+        value: formatNpr(row.currentValue),
+    }));
     const metricData = [
         {
             label: 'Purchase receives',
@@ -166,26 +177,51 @@ const DashboardContent = () => {
             icon: ClipboardList,
         },
         {
-            label: 'Spares purchase cost',
-            value: `NPR ${totals.totalSparesValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            label: 'Spares current value',
+            value: formatNpr(totals.totalSparesValue),
             accentClass: 'border-[#10b981]/30 bg-[#d1fae5]',
             icon: DollarSign,
+            details: [
+                { label: 'Opening + purchases', value: formatNpr(totals.totalSparesPurchaseCost) },
+                { label: 'On-hand value', value: formatNpr(totals.totalSparesValue) },
+            ],
         },
         {
             label: 'Capital assets purchase cost',
-            value: `NPR ${totals.totalAssetsValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            value: formatNpr(totals.totalAssetsPurchaseCost),
             accentClass: 'border-[#0d9488]/30 bg-[#ccfbf1]',
             icon: DollarSign,
-            details: [{ label: 'RRCP lines', value: 'Approved · NPR' }],
+            details: assetTypePurchaseDetails.length > 0
+                ? assetTypePurchaseDetails
+                : [{ label: 'No asset types', value: '—' }],
+        },
+        {
+            label: 'Capital assets current value',
+            value: formatNpr(totals.totalAssetsCurrentValue),
+            accentClass: 'border-[#14b8a6]/30 bg-[#ccfbf1]',
+            icon: DollarSign,
+            details: assetTypeCurrentDetails.length > 0
+                ? assetTypeCurrentDetails
+                : [{ label: 'No asset types', value: '—' }],
         },
         {
             label: 'Grand total purchase cost',
-            value: `NPR ${totals.grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            value: formatNpr(totals.grandTotalPurchaseCost),
             accentClass: 'border-[#0369a1]/30 bg-[#e0f2fe]',
             icon: DollarSign,
             details: [
-                { label: 'Spares', value: totals.totalSparesValue },
-                { label: 'Assets', value: totals.totalAssetsValue },
+                { label: 'Spares acquired', value: formatNpr(totals.totalSparesPurchaseCost) },
+                { label: 'Assets purchase', value: formatNpr(totals.totalAssetsPurchaseCost) },
+            ],
+        },
+        {
+            label: 'Grand total current value',
+            value: formatNpr(totals.grandTotalCurrentValue),
+            accentClass: 'border-[#1d4ed8]/30 bg-[#dbeafe]',
+            icon: DollarSign,
+            details: [
+                { label: 'Spares on hand', value: formatNpr(totals.totalSparesValue) },
+                { label: 'Assets book value', value: formatNpr(totals.totalAssetsCurrentValue) },
             ],
         },
     ];
@@ -201,16 +237,24 @@ const DashboardContent = () => {
         { label: 'Diesel issued', value: totals.dieselIssuedQuantity },
         { label: 'Items paid for', value: totals.totalItemsPaidFor },
         {
-            label: 'Spares purchase cost',
-            value: `NPR ${totals.totalSparesValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            label: 'Spares current value',
+            value: formatNpr(totals.totalSparesValue),
         },
         {
             label: 'Capital assets purchase cost',
-            value: `NPR ${totals.totalAssetsValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            value: formatNpr(totals.totalAssetsPurchaseCost),
+        },
+        {
+            label: 'Capital assets current value',
+            value: formatNpr(totals.totalAssetsCurrentValue),
         },
         {
             label: 'Grand total purchase cost',
-            value: `NPR ${totals.grandTotalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+            value: formatNpr(totals.grandTotalPurchaseCost),
+        },
+        {
+            label: 'Grand total current value',
+            value: formatNpr(totals.grandTotalCurrentValue),
         },
     ];
     return (<div className="min-h-screen bg-[#f2f5ff]">

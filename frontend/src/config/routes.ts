@@ -240,6 +240,18 @@ export const routes: RouteConfig[] = [
         permissions: ['can_access_rrp_reports'],
     },
     {
+        path: '/reports/assets',
+        requiresAuth: true,
+        title: 'Assets Report',
+        permissions: ['can_access_report'],
+    },
+    {
+        path: '/reports/insurance',
+        requiresAuth: true,
+        title: 'Insurance Report',
+        permissions: ['can_access_report'],
+    },
+    {
         path: '/reports/current-stock',
         requiresAuth: true,
         title: 'Stock Report',

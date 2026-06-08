@@ -4,6 +4,7 @@ import pool from '../config/db';
 import { formatDate, formatDateForDB, utcToLocalDateString } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
+import { setNoCacheHeaders } from '../utils/approvalResponse';
 import {
     normalizeRrpBaseNumber,
     isLocalOrForeignRrpNumber,
@@ -410,6 +411,7 @@ export const createRRP = async (req: Request, res: Response): Promise<void> => {
 };
 export const getPendingRRPs = async (req: Request, res: Response): Promise<void> => {
     try {
+        setNoCacheHeaders(res);
         const [configRows] = await pool.query<ConfigRow[]>('SELECT config_name, config_value FROM app_config WHERE config_type = ?', ['rrp']);
         const config: Record<string, any> = {};
         configRows.forEach(row => {

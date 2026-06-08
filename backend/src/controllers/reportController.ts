@@ -14,6 +14,7 @@ import ExcelJS from 'exceljs';
 import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpReport';
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
     const connection = await pool.getConnection();
@@ -2745,21 +2746,7 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
         const processedRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status <> 'REJECTED'`);
         const voidRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status = 'REJECTED'`);
         const issueClauseWithAlias = applyAliasToIssueClause('i');
-        let capitalRrpValueClause = `WHERE rd.rrp_category = 'capital' AND rd.approval_status = 'APPROVED' AND rd.asset_fk IS NOT NULL`;
-        const capitalRrpValueParams: string[] = [];
-        if (fromDate && toDate) {
-            capitalRrpValueClause += ' AND rd.date BETWEEN ? AND ?';
-            capitalRrpValueParams.push(fromDate, toDate);
-        }
-        else if (fromDate) {
-            capitalRrpValueClause += ' AND rd.date >= ?';
-            capitalRrpValueParams.push(fromDate);
-        }
-        else if (toDate) {
-            capitalRrpValueClause += ' AND rd.date <= ?';
-            capitalRrpValueParams.push(toDate);
-        }
-        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, sparesTotalsResult, assetsTotalsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult] = await Promise.all([
+        const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult, valuationTotals] = await Promise.all([
             pool.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT request_number) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM receive_details ${receiveWhereClause}`, receiveParams.length > 0 ? receiveParams : undefined),
@@ -2772,15 +2759,6 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM rrp_details ${voidRRPClause}`, rrpParams.length > 0 ? rrpParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM rrp_details ${appendCondition(processedRRPClause, "LOWER(rrp_number) LIKE 'l%'")}`, rrpParams.length > 0 ? rrpParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COUNT(*) as count FROM rrp_details ${appendCondition(processedRRPClause, "LOWER(rrp_number) LIKE 'f%'")}`, rrpParams.length > 0 ? rrpParams : undefined),
-            pool.query<RowDataPacket[]>(`SELECT 
-                    COALESCE(SUM(current_balance), 0) as totalQuantity,
-                    COALESCE(SUM(open_amount), 0) as totalValue
-                 FROM stock_details`),
-            pool.query<RowDataPacket[]>(
-                `SELECT COALESCE(SUM(a.current_value), 0) as totalValue
-                 FROM assets a
-                 WHERE a.current_value IS NOT NULL AND a.current_value > 0`
-            ),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(issue_quantity), 0) as totalQuantity FROM issue_details ${issueWhereClause}`, issueParams.length > 0 ? issueParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(i.issue_quantity), 0) as totalQuantity
                  FROM issue_details i
@@ -2792,7 +2770,8 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
                  ${appendCondition(issueClauseWithAlias, "LOWER(f.fuel_type) = 'diesel'")}`, issueParams.length > 0 ? issueParams : undefined),
             pool.query<RowDataPacket[]>(`SELECT COALESCE(SUM(issue_quantity), 0) as totalQuantity
                  FROM issue_details
-                 ${appendCondition(issueWhereClause, "nac_code NOT IN ('GT 07986', 'GT 00000')")}`, issueParams.length > 0 ? issueParams : undefined)
+                 ${appendCondition(issueWhereClause, "nac_code NOT IN ('GT 07986', 'GT 00000')")}`, issueParams.length > 0 ? issueParams : undefined),
+            computeDashboardValuationTotals(toDate)
         ]);
         const totals = {
             uniqueRequests: uniqueRequestsResult[0][0]?.count || 0,
@@ -2807,12 +2786,16 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
             voidRRPs: voidRRPsResult[0][0]?.count || 0,
             processedLocalRRPs: processedLocalRRPsResult[0][0]?.count || 0,
             processedForeignRRPs: processedForeignRRPsResult[0][0]?.count || 0,
-            totalSparesQuantity: Number(sparesTotalsResult[0][0]?.totalQuantity) || 0,
-            totalSparesValue: Number(sparesTotalsResult[0][0]?.totalValue) || 0,
-            totalAssetsValue: Number(assetsTotalsResult[0][0]?.totalValue) || 0,
-            grandTotalValue:
-                (Number(sparesTotalsResult[0][0]?.totalValue) || 0) +
-                (Number(assetsTotalsResult[0][0]?.totalValue) || 0),
+            totalSparesQuantity: valuationTotals.totalSparesQuantity,
+            totalSparesValue: valuationTotals.totalSparesCurrentValue,
+            totalSparesPurchaseCost: valuationTotals.totalSparesPurchaseCost,
+            totalAssetsValue: valuationTotals.totalAssetsPurchaseCost,
+            totalAssetsPurchaseCost: valuationTotals.totalAssetsPurchaseCost,
+            totalAssetsCurrentValue: valuationTotals.totalAssetsCurrentValue,
+            assetTypeValues: valuationTotals.assetTypeValues,
+            grandTotalValue: valuationTotals.grandTotalCurrentValue,
+            grandTotalPurchaseCost: valuationTotals.grandTotalPurchaseCost,
+            grandTotalCurrentValue: valuationTotals.grandTotalCurrentValue,
             totalItemsIssued: Number(totalItemsIssuedResult[0][0]?.totalQuantity) || 0,
             petrolIssuedQuantity: Number(petrolIssuedQuantityResult[0][0]?.totalQuantity) || 0,
             dieselIssuedQuantity: Number(dieselIssuedQuantityResult[0][0]?.totalQuantity) || 0,

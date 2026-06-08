@@ -1,7 +1,11 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
+import { usePendingIssuesQuery } from '@/hooks/api/usePendingApprovals';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
+import { isAxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { FileText, Eye, X, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,66 +28,50 @@ interface PendingIssue {
     item_name: string;
     items?: PendingIssue[];
 }
+function groupPendingIssues(issues: PendingIssue[]): PendingIssue[] {
+    const nonFuelIssues = issues.filter((issue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000');
+    const groupedIssues = nonFuelIssues.reduce((acc: Record<string, PendingIssue[]>, curr) => {
+        if (!acc[curr.issue_slip_number]) {
+            acc[curr.issue_slip_number] = [];
+        }
+        acc[curr.issue_slip_number].push(curr);
+        return acc;
+    }, {});
+    return Object.values(groupedIssues).map((items) => ({
+        ...items[0],
+        items,
+    }));
+}
+
 export function PendingIssuesCount() {
+    const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
-    const [pendingCount, setPendingCount] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
     const [isOpen, setIsOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isRejectOpen, setIsRejectOpen] = useState(false);
     const [isEditOpen, setIsEditOpen] = useState(false);
-    const [pendingIssues, setPendingIssues] = useState<PendingIssue[]>([]);
     const [selectedIssue, setSelectedIssue] = useState<PendingIssue | null>(null);
     const [editingItem, setEditingItem] = useState<{
         id: number;
         quantity: number;
     } | null>(null);
     const [editQuantity, setEditQuantity] = useState('');
-    const fetchPendingCount = useCallback(async () => {
-        if (!permissions?.includes('can_approve_issues')) {
-            setIsLoading(false);
-            return;
-        }
-        try {
-            const response = await API.get('/api/issue/pending');
-            const nonFuelIssues = response.data.issues.filter((issue: PendingIssue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000');
-            const groupedIssues = nonFuelIssues.reduce((acc: {
-                [key: string]: PendingIssue[];
-            }, curr: PendingIssue) => {
-                if (!acc[curr.issue_slip_number]) {
-                    acc[curr.issue_slip_number] = [];
-                }
-                acc[curr.issue_slip_number].push(curr);
-                return acc;
-            }, {});
-            const uniqueIssues = (Object.entries(groupedIssues) as [
-                string,
-                PendingIssue[]
-            ][]).map(([, items]) => ({
-                ...items[0],
-                items: items
-            }));
-            setPendingIssues(uniqueIssues);
-            setPendingCount(uniqueIssues.length);
-        }
-        catch {
-        }
-        finally {
-            setIsLoading(false);
-        }
-    }, [permissions]);
-    useEffect(() => {
-        fetchPendingCount();
-    }, [fetchPendingCount]);
-    useEffect(() => {
-        if (isDetailsOpen || isEditOpen || isRejectOpen)
-            return;
-        const interval = setInterval(() => {
-            fetchPendingCount();
-        }, 30000);
-        return () => clearInterval(interval);
-    }, [fetchPendingCount, isDetailsOpen, isEditOpen, isRejectOpen]);
+    const [isApproving, setIsApproving] = useState(false);
+    const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen;
+    const { data: pendingRes, isLoading } = usePendingIssuesQuery(
+        Boolean(permissions?.includes('can_approve_issues') && shouldPoll)
+    );
+    const pendingIssues = useMemo(() => {
+        const issues = (pendingRes?.data as { issues?: PendingIssue[] } | undefined)?.issues;
+        if (!issues)
+            return [];
+        return groupPendingIssues(issues);
+    }, [pendingRes?.data]);
+    const pendingCount = pendingIssues.length;
+    const refreshPendingIssues = async () => {
+        await invalidatePendingApprovals(queryClient);
+    };
     const handleViewDetails = async (issueSlipNumber: string) => {
         const issue = pendingIssues.find(issue => issue.issue_slip_number === issueSlipNumber);
         if (issue) {
@@ -92,8 +80,9 @@ export function PendingIssuesCount() {
         }
     };
     const handleApproveIssue = async () => {
-        if (!selectedIssue?.items)
+        if (!selectedIssue?.items || isApproving)
             return;
+        setIsApproving(true);
         try {
             const itemIds = selectedIssue.items.map(item => item.id);
             const response = await API.put(`/api/issue/approve`, {
@@ -106,7 +95,7 @@ export function PendingIssuesCount() {
                     message: "Issue approved successfully",
                     duration: 3000,
                 });
-                await fetchPendingCount();
+                await refreshPendingIssues();
                 setIsDetailsOpen(false);
             }
             else {
@@ -114,11 +103,24 @@ export function PendingIssuesCount() {
             }
         }
         catch (error) {
+            if (isAxiosError(error) && error.response?.status === 409) {
+                await refreshPendingIssues();
+                setIsDetailsOpen(false);
+                showSuccessToast({
+                    title: 'Already processed',
+                    message: 'This issue was already approved.',
+                    duration: 3000,
+                });
+                return;
+            }
             showErrorToast({
                 title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve issue",
                 duration: 5000,
             });
+        }
+        finally {
+            setIsApproving(false);
         }
     };
     const handleRejectClick = () => {
@@ -139,7 +141,7 @@ export function PendingIssuesCount() {
                     message: "Issue rejected successfully",
                     duration: 3000,
                 });
-                await fetchPendingCount();
+                await refreshPendingIssues();
                 setIsDetailsOpen(false);
                 setIsRejectOpen(false);
             }
@@ -171,7 +173,7 @@ export function PendingIssuesCount() {
                     message: "Item deleted successfully",
                     duration: 3000,
                 });
-                await fetchPendingCount();
+                await refreshPendingIssues();
             }
         }
         catch (error) {
@@ -204,7 +206,7 @@ export function PendingIssuesCount() {
                     message: "Quantity updated successfully",
                     duration: 3000,
                 });
-                await fetchPendingCount();
+                await refreshPendingIssues();
                 setIsEditOpen(false);
                 setEditingItem(null);
                 setEditQuantity('');
@@ -308,7 +310,7 @@ export function PendingIssuesCount() {
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full md:w-auto flex-shrink-0">
-                <Button variant="default" size="sm" className="flex-1 md:flex-none flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white transition-colors" onClick={handleApproveIssue}>
+                <Button variant="default" size="sm" disabled={isApproving} className="flex-1 md:flex-none flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white transition-colors" onClick={handleApproveIssue}>
                   <Check className="h-4 w-4"/>
                   <span className="hidden sm:inline">Approve</span>
                 </Button>

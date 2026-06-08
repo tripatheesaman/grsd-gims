@@ -4,6 +4,7 @@ import pool from '../config/db';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { setNoCacheHeaders } from '../utils/approvalResponse';
 
 export interface AssetReceiveRequest {
     receiveDate: string;
@@ -285,6 +286,7 @@ export const rejectAssetReceive = async (req: Request, res: Response): Promise<v
 
 export const getPendingAssetReceives = async (_req: Request, res: Response): Promise<void> => {
     try {
+        setNoCacheHeaders(res);
         const data = await fetchPendingAssetReceivesForDashboard();
         res.status(200).json(data);
     }

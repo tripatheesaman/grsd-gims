@@ -49,9 +49,9 @@ export interface Asset extends RowDataPacket {
     book_value_npr?: number | null;
     elapsed_fiscal_years?: number | null;
     annual_depreciation_npr?: number | null;
-    original_insurance_amount_npr?: number | null;
-    insurance_book_value_npr?: number | null;
-    annual_insurance_depreciation_npr?: number | null;
+    original_insurance_amount_usd?: number | null;
+    insurance_book_value_usd?: number | null;
+    annual_insurance_depreciation_usd?: number | null;
     insurance_amount?: number | null;
     servicability_status?: string | null;
     purchase_currency?: string | null;

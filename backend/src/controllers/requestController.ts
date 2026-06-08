@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { CreateRequestDTO, RequestDetail } from '../types/request';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
@@ -9,6 +9,7 @@ import { generateRequestPdf } from '../services/excelService';
 import fs from 'fs';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
+import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
@@ -825,6 +826,7 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
 
 export const getPendingRequests = async (req: Request, res: Response): Promise<void> => {
     try {
+        setNoCacheHeaders(res);
         const [rows] = await pool.query<PendingRequest[]>(
             `SELECT id,nac_code,request_number, request_date, requested_by 
              FROM request_details 
@@ -1150,15 +1152,32 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
 
         await connection.beginTransaction();
 
-        
-        const [requestItems] = await connection.query<RowDataPacket[]>(
-            `SELECT nac_code FROM request_details WHERE request_number = ?`,
+        const [statusRows] = await connection.query<RowDataPacket[]>(
+            `SELECT approval_status FROM request_details WHERE request_number = ? FOR UPDATE`,
             [requestNumber]
         );
 
-        
-        
-        
+        if (!statusRows.length) {
+            await connection.rollback();
+            res.status(404).json({
+                error: 'Not Found',
+                message: 'Request not found',
+            });
+            return;
+        }
+
+        if (!statusRows.some((row) => row.approval_status === 'PENDING')) {
+            await connection.rollback();
+            logEvents(`Failed to approve request - Already processed: ${requestNumber}`, "requestLog.log");
+            sendAlreadyProcessed(res, 'This request');
+            return;
+        }
+
+        const [requestItems] = await connection.query<RowDataPacket[]>(
+            `SELECT nac_code FROM request_details WHERE request_number = ? AND approval_status = 'PENDING'`,
+            [requestNumber]
+        );
+
         for (const item of requestItems) {
             if (item.nac_code && item.nac_code !== 'N/A') {
                 await connection.query(
@@ -1172,14 +1191,19 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
             }
         }
 
-        
-        await connection.query(
+        const [updateResult] = await connection.query<ResultSetHeader>(
             `UPDATE request_details 
              SET approval_status = 'APPROVED',
                  approved_by = ?
-             WHERE request_number = ?`,
+             WHERE request_number = ? AND approval_status = 'PENDING'`,
             [approvedBy, requestNumber]
         );
+
+        if (updateResult.affectedRows === 0) {
+            await connection.rollback();
+            sendAlreadyProcessed(res, 'This request');
+            return;
+        }
 
         await connection.commit();
         logEvents(`Successfully approved request ${requestNumber} by user: ${approvedBy}`, "requestLog.log");

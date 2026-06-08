@@ -9,9 +9,10 @@ import { Loader2 } from 'lucide-react';
 import { API } from '@/lib/api';
 import {
     formatNprAmount,
+    formatUsdAmount,
     getAssetBookValueNpr,
-    getAssetInsuranceBookValueNpr,
-    getAssetOriginalInsuranceAmountNpr,
+    getAssetInsuranceBookValueUsd,
+    getAssetOriginalInsuranceAmountUsd,
     getAssetOriginalPurchaseCostNpr,
 } from '@/utils/assetValue';
 interface AssetFormProps {
@@ -35,11 +36,10 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
     const [selectedAssetType, setSelectedAssetType] = useState<AssetTypeWithProperties | null>(null);
     const [isLoadingType, setIsLoadingType] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const derivedInsuranceNpr = (() => {
+    const derivedInsuranceUsd = (() => {
         const base = Number(purchaseAmountBase);
-        const fx = Number(purchaseFxRate);
-        if (Number.isFinite(base) && Number.isFinite(fx) && base > 0 && fx > 0) {
-            return base * fx;
+        if (Number.isFinite(base) && base > 0) {
+            return base;
         }
         return null;
     })();
@@ -288,16 +288,16 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
         {initialData ? (
           <>
             <div className="space-y-2">
-              <Label>Insurance base (NPR)</Label>
+              <Label>Insurance base (USD)</Label>
               <p className="text-sm font-medium text-slate-800 tabular-nums">
-                {formatNprAmount(getAssetOriginalInsuranceAmountNpr(initialData))}
+                {formatUsdAmount(getAssetOriginalInsuranceAmountUsd(initialData))}
               </p>
-              <p className="text-xs text-slate-500">Foreign purchase amount × FX rate</p>
+              <p className="text-xs text-slate-500">Purchase amount in foreign currency (USD)</p>
             </div>
             <div className="space-y-2">
-              <Label>Insurance value (NPR)</Label>
+              <Label>Insurance value (USD)</Label>
               <p className="text-sm font-medium text-[#003594] tabular-nums">
-                {formatNprAmount(getAssetInsuranceBookValueNpr(initialData))}
+                {formatUsdAmount(getAssetInsuranceBookValueUsd(initialData))}
               </p>
               {initialData.purchase_fy ? (
                 <p className="text-xs text-slate-500">
@@ -309,12 +309,12 @@ export function AssetForm({ assetTypes, initialData, onSubmit, onCancel }: Asset
           </>
         ) : (
           <div className="space-y-2">
-            <Label>Initial insurance (NPR)</Label>
+            <Label>Initial insurance (USD)</Label>
             <p className="text-sm font-medium text-slate-800 tabular-nums">
-              {formatNprAmount(derivedInsuranceNpr)}
+              {formatUsdAmount(derivedInsuranceUsd)}
             </p>
             <p className="text-xs text-slate-500">
-              Set automatically from purchase amount × FX rate; depreciates 10% per FY
+              Set automatically from purchase amount (USD); depreciates 10% per FY
             </p>
           </div>
         )}

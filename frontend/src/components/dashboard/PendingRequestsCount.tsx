@@ -5,6 +5,8 @@ import { usePendingRequestsQuery, useRequestItemsQuery } from '@/hooks/api/usePe
 import { useApiPut } from '@/hooks/api/useApiMutation';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
+import { isAxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { FileText, Eye, X, Pencil, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -134,8 +136,8 @@ export function PendingRequestsCount() {
     });
     
     const approveRequestMutation = useApiPut({
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
+        onSuccess: async () => {
+            await invalidatePendingApprovals(queryClient);
             showSuccessToast({
                 title: 'Success',
                 message: "Request approved successfully",
@@ -143,7 +145,17 @@ export function PendingRequestsCount() {
             });
             setIsDetailsOpen(false);
         },
-        onError: (error: unknown) => {
+        onError: async (error: unknown) => {
+            if (isAxiosError(error) && error.response?.status === 409) {
+                await invalidatePendingApprovals(queryClient);
+                setIsDetailsOpen(false);
+                showSuccessToast({
+                    title: 'Already processed',
+                    message: 'This request was already approved.',
+                    duration: 3000,
+                });
+                return;
+            }
             showErrorToast({
                 title: 'Error',
                 message: error instanceof Error ? error.message : "Failed to approve request",

@@ -20,13 +20,13 @@ import { logEvents } from '../middlewares/logger';
 
 export const ANNUAL_DEPRECIATION_RATE = 0.2;
 
-/** 10% of original insurance base (FCY purchase × FX rate) per elapsed fiscal year. */
+/** 10% of original insurance base (USD) per elapsed fiscal year. */
 
 export const INSURANCE_ANNUAL_DEPRECIATION_RATE = 0.1;
 
 export const MIN_ASSET_BOOK_VALUE_NPR = 0.1;
 
-export const MIN_INSURANCE_BOOK_VALUE_NPR = 0.1;
+export const MIN_INSURANCE_BOOK_VALUE_USD = 0.1;
 
 /** Insurance book value in historical imports is anchored to this FY. */
 export const HISTORICAL_INSURANCE_BASELINE_FY = '2081/82';
@@ -71,7 +71,8 @@ export interface AssetFinancialMeta {
 
     original_purchase_cost_npr: number;
 
-    original_insurance_amount_npr: number;
+    /** Stored in DB column original_insurance_amount_npr (legacy name). */
+    original_insurance_amount_usd: number;
 
     purchase_fy: string;
 
@@ -85,9 +86,9 @@ export interface AssetFinancialMeta {
 
     annual_depreciation_npr: number;
 
-    insurance_book_value_npr: number;
+    insurance_book_value_usd: number;
 
-    annual_insurance_depreciation_npr: number;
+    annual_insurance_depreciation_usd: number;
 
 }
 
@@ -167,9 +168,17 @@ export function calculateDepreciatedBookValue(
 
     }
 
-    const remaining = originalCostNpr * (1 - annualRate * elapsedFiscalYears);
+    let value = originalCostNpr;
+    const years = Math.max(0, Math.floor(elapsedFiscalYears));
+    for (let i = 0; i < years; i++) {
+        value = value - value * annualRate;
+        if (value <= minValue) {
+            value = minValue;
+            break;
+        }
+    }
 
-    return roundAssetCurrency(Math.max(minValue, remaining));
+    return roundAssetCurrency(Math.max(minValue, value));
 
 }
 
@@ -301,39 +310,41 @@ export function resolveOriginalPurchaseCostNpr(asset: AssetDepreciationRow): num
 
 
 
-/** Insurance baseline: foreign-currency purchase amount × purchase FX rate (NPR). */
+/**
+ * Insurance amounts are always USD.
+ * - Imported/historical rows: FY 2081/82 baseline stored in original_insurance_amount_npr (legacy column name).
+ * - New assets: purchase_amount_base (USD purchase amount), not × FX rate.
+ */
 
-export function resolveOriginalInsuranceAmountNpr(asset: AssetDepreciationRow): number {
+/** Insurance depreciation always starts from FY 2081/82 for imported/historical data unless explicitly set. */
+export function resolveInsuranceBaselineFy(asset: AssetDepreciationRow): string {
+    if (asset.insurance_baseline_fy && FISCAL_YEAR_LABEL_REGEX.test(asset.insurance_baseline_fy)) {
+        return asset.insurance_baseline_fy;
+    }
+    return HISTORICAL_INSURANCE_BASELINE_FY;
+}
 
+export function resolveOriginalInsuranceAmountUsd(asset: AssetDepreciationRow): number {
     const stored = Number(asset.original_insurance_amount_npr);
-
     if (Number.isFinite(stored) && stored > 0) {
-
         return stored;
-
     }
 
     const base = Number(asset.purchase_amount_base);
-
-    const fx = Number(asset.purchase_fx_rate);
-
-    if (Number.isFinite(base) && Number.isFinite(fx) && base > 0 && fx > 0) {
-
-        return roundAssetCurrency(base * fx);
-
+    if (Number.isFinite(base) && base > 0) {
+        return roundAssetCurrency(base);
     }
 
     const insurance = Number(asset.insurance_amount);
-
     if (Number.isFinite(insurance) && insurance > 0) {
-
         return insurance;
-
     }
 
     return 0;
-
 }
+
+/** @deprecated Use resolveOriginalInsuranceAmountUsd */
+export const resolveOriginalInsuranceAmountNpr = resolveOriginalInsuranceAmountUsd;
 
 
 
@@ -347,19 +358,13 @@ export function computeAssetFinancials(
 
     const original = resolveOriginalPurchaseCostNpr(asset);
 
-    const originalInsurance = resolveOriginalInsuranceAmountNpr(asset);
+    const originalInsurance = resolveOriginalInsuranceAmountUsd(asset);
 
     const purchaseFy = resolvePurchaseFyForAsset(asset);
 
     const elapsed = countElapsedFiscalYears(purchaseFy, currentFy);
 
-    const insuranceBaselineFy =
-
-        asset.insurance_baseline_fy && FISCAL_YEAR_LABEL_REGEX.test(asset.insurance_baseline_fy)
-
-            ? asset.insurance_baseline_fy
-
-            : purchaseFy;
+    const insuranceBaselineFy = resolveInsuranceBaselineFy(asset);
 
     const insuranceElapsed = countElapsedFiscalYears(insuranceBaselineFy, currentFy);
 
@@ -383,19 +388,33 @@ export function computeAssetFinancials(
 
         INSURANCE_ANNUAL_DEPRECIATION_RATE,
 
-        MIN_INSURANCE_BOOK_VALUE_NPR
+        MIN_INSURANCE_BOOK_VALUE_USD
 
+    );
+
+    const previousBookValue = calculateDepreciatedBookValue(
+        original,
+        Math.max(0, elapsed - 1),
+        ANNUAL_DEPRECIATION_RATE,
+        MIN_ASSET_BOOK_VALUE_NPR
+    );
+
+    const previousInsuranceBookValue = calculateDepreciatedBookValue(
+        originalInsurance,
+        Math.max(0, insuranceElapsed - 1),
+        INSURANCE_ANNUAL_DEPRECIATION_RATE,
+        MIN_INSURANCE_BOOK_VALUE_USD
     );
 
     return {
 
         original_purchase_cost_npr: original,
 
-        original_insurance_amount_npr: originalInsurance,
+        original_insurance_amount_usd: originalInsurance,
 
         purchase_fy: purchaseFy,
 
-        insurance_baseline_fy: asset.insurance_baseline_fy ?? null,
+        insurance_baseline_fy: insuranceBaselineFy,
 
         current_fy: currentFy,
 
@@ -403,15 +422,15 @@ export function computeAssetFinancials(
 
         book_value_npr: bookValue,
 
-        annual_depreciation_npr: roundAssetCurrency(original * ANNUAL_DEPRECIATION_RATE),
+        annual_depreciation_npr:
+            elapsed > 0 ? roundAssetCurrency(previousBookValue * ANNUAL_DEPRECIATION_RATE) : 0,
 
-        insurance_book_value_npr: insuranceBookValue,
+        insurance_book_value_usd: insuranceBookValue,
 
-        annual_insurance_depreciation_npr: roundAssetCurrency(
-
-            originalInsurance * INSURANCE_ANNUAL_DEPRECIATION_RATE
-
-        ),
+        annual_insurance_depreciation_usd:
+            insuranceElapsed > 0
+                ? roundAssetCurrency(previousInsuranceBookValue * INSURANCE_ANNUAL_DEPRECIATION_RATE)
+                : 0,
 
     };
 
@@ -441,7 +460,7 @@ export function applyDepreciationMetaToAsset<T extends Record<string, unknown>>(
 
         current_value: meta.book_value_npr,
 
-        insurance_amount: meta.insurance_book_value_npr,
+        insurance_amount: meta.insurance_book_value_usd,
 
     };
 
@@ -483,7 +502,7 @@ export async function persistAssetFinancials(
 
             meta.original_purchase_cost_npr,
 
-            meta.original_insurance_amount_npr,
+            meta.original_insurance_amount_usd,
 
             meta.purchase_fy,
 
@@ -491,7 +510,7 @@ export async function persistAssetFinancials(
 
             meta.book_value_npr,
 
-            meta.insurance_book_value_npr,
+            meta.insurance_book_value_usd,
 
             meta.current_fy,
 
@@ -545,6 +564,9 @@ function assetFinancialsNeedPersist(asset: AssetDepreciationRow, meta: AssetFina
 
     const needsPurchaseFy = asset.purchase_fy !== meta.purchase_fy;
 
+    const needsInsuranceBaseline =
+        asset.insurance_baseline_fy !== meta.insurance_baseline_fy;
+
     const needsValue =
 
         asset.current_value == null ||
@@ -553,11 +575,11 @@ function assetFinancialsNeedPersist(asset: AssetDepreciationRow, meta: AssetFina
 
         asset.insurance_amount == null ||
 
-        Number(asset.insurance_amount) !== meta.insurance_book_value_npr ||
+        Number(asset.insurance_amount) !== meta.insurance_book_value_usd ||
 
         asset.last_depreciation_fy !== currentFy;
 
-    return needsOriginal || needsInsuranceOriginal || needsPurchaseFy || needsValue;
+    return needsOriginal || needsInsuranceOriginal || needsPurchaseFy || needsInsuranceBaseline || needsValue;
 
 }
 
@@ -587,7 +609,7 @@ export async function runAnnualAssetDepreciation(
 
             Number(asset.current_value) === meta.book_value_npr &&
 
-            Number(asset.insurance_amount) === meta.insurance_book_value_npr
+            Number(asset.insurance_amount) === meta.insurance_book_value_usd
 
         ) {
 
@@ -747,7 +769,7 @@ export async function initializeAssetCostAndDepreciation(
 
     meta.original_purchase_cost_npr = roundAssetCurrency(purchaseCostNpr);
 
-    meta.original_insurance_amount_npr = resolveOriginalInsuranceAmountNpr(asset);
+    meta.original_insurance_amount_usd = resolveOriginalInsuranceAmountUsd(asset);
 
     await persistAssetFinancials(connection, assetId, meta);
 
@@ -809,7 +831,7 @@ export async function initializeHistoricalImportFinancials(
 
         options.purchaseCostNpr > 0 ? roundAssetCurrency(options.purchaseCostNpr) : 0;
 
-    meta.original_insurance_amount_npr = roundAssetCurrency(options.insuranceAmount2081_82);
+    meta.original_insurance_amount_usd = roundAssetCurrency(options.insuranceAmount2081_82);
 
     meta.insurance_baseline_fy = HISTORICAL_INSURANCE_BASELINE_FY;
 

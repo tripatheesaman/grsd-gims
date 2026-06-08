@@ -1,6 +1,9 @@
 'use client';
-import { createContext, useContext, useMemo, ReactNode } from 'react';
+import { createContext, useContext, useMemo, ReactNode, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
+import { PENDING_APPROVAL_QUERY_OPTIONS } from '@/hooks/api/usePendingApprovals';
+import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 import { queryKeys } from '@/lib/queryKeys';
 import { useAuthContext } from '@/context/AuthContext';
 
@@ -42,7 +45,9 @@ const computeTotal = (counts: ApprovalCounts) => ['requests', 'receives', 'asset
 export const ApprovalCountsProvider = ({ children }: {
     children: ReactNode;
 }) => {
+    const queryClient = useQueryClient();
     const { permissions } = useAuthContext();
+    const pendingQueryOptions = PENDING_APPROVAL_QUERY_OPTIONS;
     
     const hasAnyApprovalPermission = useMemo(() => {
         if (!permissions)
@@ -62,8 +67,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_request'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
     
@@ -73,8 +77,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_receive'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
 
@@ -84,8 +87,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_assets_receive'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
     
@@ -95,8 +97,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_rrp'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
 
@@ -106,8 +107,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_rrp'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
     
@@ -117,8 +117,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_issues'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
     
@@ -128,8 +127,7 @@ export const ApprovalCountsProvider = ({ children }: {
         undefined,
         {
             enabled: hasAnyApprovalPermission && permissions?.includes('can_approve_issues'),
-            refetchInterval: 60000,
-            staleTime: 1000 * 30,
+            ...pendingQueryOptions,
         }
     );
     
@@ -260,14 +258,15 @@ export const ApprovalCountsProvider = ({ children }: {
 
     const loading = requestsLoading || receivesLoading || assetReceivesLoading || rrpsLoading || capitalRrpsLoading || issuesLoading || fuelIssuesLoading;
     
-    const refresh = async () => {
-    };
+    const refresh = useCallback(async () => {
+        await invalidatePendingApprovals(queryClient);
+    }, [queryClient]);
     
     const value = useMemo<ApprovalCountsContextValue>(() => ({
         counts,
         loading,
         refresh
-    }), [counts, loading]);
+    }), [counts, loading, refresh]);
     
     return <ApprovalCountsContext.Provider value={value}>{children}</ApprovalCountsContext.Provider>;
 };

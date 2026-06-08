@@ -386,7 +386,7 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
                 return;
             }
         }
-        const initialInsuranceNpr = roundAssetCurrency(purchaseAmountBaseNum * purchaseFxRateNum);
+        const initialInsuranceUsd = roundAssetCurrency(purchaseAmountBaseNum);
         const [result] = await connection.query<any>(`INSERT INTO assets (asset_type_id, name, equipment_code, location, rrp_status, current_value, insurance_amount, servicability_status, purchase_currency, purchase_fx_rate, purchase_amount_base, created_by) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             asset_type_id,
@@ -395,7 +395,7 @@ export const createAsset = async (req: Request, res: Response): Promise<void> =>
             locationTrimmed,
             rrpStatusTrimmed,
             currentValueNum,
-            initialInsuranceNpr,
+            initialInsuranceUsd,
             servicabilityStatusTrimmed,
             purchaseCurrencyTrimmed,
             purchaseFxRateNum,
