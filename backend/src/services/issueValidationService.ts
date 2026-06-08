@@ -66,23 +66,39 @@ const loadAssetEquipmentCodes = async (
     tokens: string[],
     caches?: IssueValidationCaches
 ): Promise<Set<string>> => {
-    if (caches?.assetEquipmentCodes) {
-        return caches.assetEquipmentCodes;
+    const normalizedTokens = tokens.map((t) => normalizeCode(t)).filter(Boolean);
+    if (normalizedTokens.length === 0) {
+        return caches?.assetEquipmentCodes ?? new Set();
     }
 
-    if (tokens.length === 0) {
-        return new Set();
+    if (!caches) {
+        const [rows] = await connection.query<RowDataPacket[]>(
+            `SELECT equipment_code FROM assets WHERE equipment_code IN (?)`,
+            [normalizedTokens]
+        );
+        return new Set(rows.map((row) => normalizeCode(String(row.equipment_code))).filter(Boolean));
+    }
+
+    if (!caches.assetEquipmentCodes) {
+        caches.assetEquipmentCodes = new Set();
+    }
+    const cached = caches.assetEquipmentCodes;
+    const missing = normalizedTokens.filter((token) => !cached.has(token));
+    if (missing.length === 0) {
+        return cached;
     }
 
     const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT equipment_code FROM assets WHERE equipment_code IN (?)`,
-        [tokens]
+        [missing]
     );
-    const set = new Set(rows.map((row) => normalizeCode(String(row.equipment_code))).filter(Boolean));
-    if (caches) {
-        caches.assetEquipmentCodes = set;
+    for (const row of rows) {
+        const code = normalizeCode(String(row.equipment_code));
+        if (code) {
+            cached.add(code);
+        }
     }
-    return set;
+    return cached;
 };
 
 const tokenMatchesFuelList = (token: string, fuelSet: Set<string>): boolean => {
@@ -114,6 +130,62 @@ const isAllowedFuelToken = (
         return true;
     }
     return false;
+};
+
+const validateAssetOrSectionTarget = async (
+    connection: PoolConnection,
+    equipmentNumber: string,
+    caches: IssueValidationCaches,
+    invalidMessage: string
+): Promise<{ valid: boolean; message?: string }> => {
+    const term = normalizeCode(equipmentNumber);
+    if (!term) {
+        return { valid: false, message: 'Equipment number is required' };
+    }
+    if (isInternalIssuedFor(term)) {
+        return { valid: true };
+    }
+
+    const tokens = expandEquipmentTokens(term);
+    if (tokens.length === 0) {
+        return { valid: false, message: 'Invalid equipment number' };
+    }
+
+    if (!caches.sectionCodes) {
+        caches.sectionCodes = await loadActiveSectionCodes(connection);
+    }
+    const sectionCodes = caches.sectionCodes;
+    const assetCodes = await loadAssetEquipmentCodes(connection, tokens, caches);
+
+    for (const token of tokens) {
+        if (sectionCodes.has(token.toUpperCase())) {
+            continue;
+        }
+        if (assetCodes.has(normalizeCode(token))) {
+            continue;
+        }
+        return { valid: false, message: invalidMessage.replace('{token}', token) };
+    }
+    return { valid: true };
+};
+
+/** Validates equipment/section for request items (including new items with nacCode N/A). */
+export const validateRequestTarget = async (
+    connection: PoolConnection,
+    nacCode: string | null | undefined,
+    equipmentNumber: string,
+    caches: IssueValidationCaches = {}
+): Promise<{ valid: boolean; message?: string }> => {
+    const code = normalizeCode(String(nacCode || ''));
+    if (!code || code === 'N/A') {
+        return validateAssetOrSectionTarget(
+            connection,
+            equipmentNumber,
+            caches,
+            'Equipment "{token}" is not a registered asset and is not a defined section'
+        );
+    }
+    return validateIssuedFor(connection, code, equipmentNumber, caches);
 };
 
 export const validateIssuedFor = async (
@@ -173,23 +245,17 @@ export const validateIssuedFor = async (
     const applicableEquipments = String(stockResults[0].applicable_equipments || '');
 
     if (isConsumableStock(applicableEquipments)) {
-        const assetCodes = await loadAssetEquipmentCodes(connection, tokens, caches);
-        for (const token of tokens) {
-            if (sectionCodes.has(token.toUpperCase())) {
-                continue;
-            }
-            if (assetCodes.has(normalizeCode(token))) {
-                continue;
-            }
-            return {
-                valid: false,
-                message: `Equipment "${token}" is not a registered asset and is not a defined section`,
-            };
-        }
-        return { valid: true };
+        return validateAssetOrSectionTarget(
+            connection,
+            equipmentNumber,
+            caches,
+            'Equipment "{token}" is not a registered asset and is not a defined section'
+        );
     }
 
-    const applicableTokens = expandEquipmentTokens(applicableEquipments);
+    const applicableSet = new Set(
+        expandEquipmentTokens(applicableEquipments).map((t) => normalizeCode(t))
+    );
     const [compatRows] = await connection.query<RowDataPacket[]>(
         `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
         [nacCode, tokens]
@@ -197,10 +263,11 @@ export const validateIssuedFor = async (
     const compatSet = new Set(compatRows.map((row) => normalizeCode(String(row.equipment_code))));
 
     for (const token of tokens) {
-        if (compatSet.has(normalizeCode(token))) {
+        const normalizedToken = normalizeCode(token);
+        if (compatSet.has(normalizedToken)) {
             continue;
         }
-        if (applicableTokens.includes(token)) {
+        if (applicableSet.has(normalizedToken)) {
             continue;
         }
         if (sectionCodes.has(token.toUpperCase())) {
