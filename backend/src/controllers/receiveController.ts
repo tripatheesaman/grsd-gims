@@ -6,6 +6,7 @@ import { logEvents } from '../middlewares/logger';
 import { refreshPredictionMetrics } from '../services/predictionService';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
     request_number: string;
@@ -268,27 +269,7 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
         await ensureAssetSpareSchema();
         const formattedDate = formatDateForDB(receiveData.receiveDate);
         const receiveIds: number[] = [];
-        const expandEquipmentTokens = (input: string): string[] => {
-            const parts = String(input || '')
-                .split(',')
-                .map(p => p.trim())
-                .filter(Boolean);
-            const out: string[] = [];
-            for (const part of parts) {
-                const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
-                if (rangeMatch) {
-                    const start = parseInt(rangeMatch[1], 10);
-                    const end = parseInt(rangeMatch[2], 10);
-                    const step = start <= end ? 1 : -1;
-                    for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
-                        out.push(String(n));
-                    }
-                    continue;
-                }
-                out.push(part);
-            }
-            return out;
-        };
+        const receiveValidationCaches: IssueValidationCaches = {};
         for (const item of receiveData.items) {
             const [requestCheck] = await connection.execute(`SELECT id, request_number, equipment_number FROM request_details 
                 WHERE id = ?`, [item.requestId]);
@@ -316,26 +297,16 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
                 throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the item has a valid NAC Code.`);
             }
 
-            if (requestEquipmentNumber && requestEquipmentNumber.trim() !== '' && finalNacCode && finalNacCode !== 'N/A') {
-                const equipmentTokens = expandEquipmentTokens(requestEquipmentNumber);
-                const [stockRows] = await connection.execute<RowDataPacket[]>(
-                    `SELECT applicable_equipments FROM stock_details WHERE nac_code = ? LIMIT 1`,
-                    [finalNacCode]
+            if (requestEquipmentNumber && requestEquipmentNumber.trim() !== '' && finalNacCode) {
+                const targetCheck = await validateRequestTarget(
+                    connection,
+                    finalNacCode,
+                    requestEquipmentNumber,
+                    receiveValidationCaches
                 );
-                const applicableEquipments = stockRows.length > 0 ? String((stockRows as any)[0].applicable_equipments || '') : '';
-                const [compatRows] = await connection.query<RowDataPacket[]>(
-                    `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
-                    [finalNacCode, equipmentTokens]
-                );
-                const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
-                const applicableTokens = expandEquipmentTokens(applicableEquipments);
-                for (const equipmentCode of equipmentTokens) {
-                    if (compatSet.has(equipmentCode)) {
-                        continue;
-                    }
-                    if (!applicableTokens.includes(equipmentCode)) {
-                        throw new Error('Incompatible equipment selection for this received spare');
-                    }
+                if (!targetCheck.valid) {
+                    const detail = targetCheck.message || 'equipment does not match this item';
+                    throw new Error(`Incompatible equipment selection: ${detail}`);
                 }
             }
             logEvents(`Creating receive for request ${item.requestId} with final nacCode: "${finalNacCode}"`, "receiveLog.log");

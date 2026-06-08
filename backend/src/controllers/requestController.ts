@@ -8,6 +8,7 @@ import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { generateRequestPdf } from '../services/excelService';
 import fs from 'fs';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
@@ -736,64 +737,25 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
-        const expandEquipmentTokens = (input: string): string[] => {
-            const parts = String(input || '')
-                .split(',')
-                .map(p => p.trim())
-                .filter(Boolean);
-            const out: string[] = [];
-            for (const part of parts) {
-                const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
-                if (rangeMatch) {
-                    const start = parseInt(rangeMatch[1], 10);
-                    const end = parseInt(rangeMatch[2], 10);
-                    const step = start <= end ? 1 : -1;
-                    for (let n = start; step === 1 ? n <= end : n >= end; n += step) {
-                        out.push(String(n));
-                    }
-                    continue;
-                }
-                out.push(part);
-            }
-            return out;
-        };
-
-        const nacCodesNeeded = Array.from(new Set(requestData.items.map(i => i.nacCode).filter(n => n && n !== 'N/A')));
-        const applicableByNacCode = new Map<string, string>();
-        if (nacCodesNeeded.length > 0) {
-            const [stockRows] = await connection.query<RowDataPacket[]>(`SELECT nac_code, applicable_equipments FROM stock_details WHERE nac_code IN (?)`, [nacCodesNeeded]);
-            for (const row of stockRows as any[]) {
-                applicableByNacCode.set(row.nac_code, String(row.applicable_equipments || ''));
-            }
-        }
-
+        const validationCaches: IssueValidationCaches = {};
         const compatibilityErrors: Array<{ nacCode: string; message: string; originalIndex: number }> = [];
         for (let i = 0; i < requestData.items.length; i++) {
             const item = requestData.items[i];
-            if (!item.nacCode || item.nacCode === 'N/A') {
+            if (!item.equipmentNumber?.trim()) {
                 continue;
             }
-            const equipmentTokens = expandEquipmentTokens(item.equipmentNumber);
-            const [compatRows] = await connection.query<RowDataPacket[]>(
-                `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
-                [item.nacCode, equipmentTokens]
+            const targetCheck = await validateRequestTarget(
+                connection,
+                item.nacCode,
+                item.equipmentNumber,
+                validationCaches
             );
-            const compatSet = new Set<string>((compatRows as any[]).map(r => String(r.equipment_code)));
-            const applicableEquipments = applicableByNacCode.get(item.nacCode) || '';
-            const applicableTokens = expandEquipmentTokens(applicableEquipments);
-
-            for (const equipmentCode of equipmentTokens) {
-                if (compatSet.has(equipmentCode)) {
-                    continue;
-                }
-                if (!applicableTokens.includes(equipmentCode)) {
-                    compatibilityErrors.push({
-                        nacCode: item.nacCode,
-                        message: `Selected equipment ${item.equipmentNumber} is not compatible with this spare`,
-                        originalIndex: i
-                    });
-                    break;
-                }
+            if (!targetCheck.valid) {
+                compatibilityErrors.push({
+                    nacCode: item.nacCode || 'N/A',
+                    message: targetCheck.message || `Invalid equipment ${item.equipmentNumber}`,
+                    originalIndex: i
+                });
             }
         }
 
@@ -976,6 +938,37 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 [itemsToDelete]
             );
             logEvents(`Deleted ${itemsToDelete.length} items from request ${oldRequestNumber}`, "requestLog.log");
+        }
+
+        const updateValidationCaches: IssueValidationCaches = {};
+        const updateCompatibilityErrors: Array<{ nacCode: string; message: string; originalIndex: number }> = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item.equipmentNumber?.trim()) {
+                continue;
+            }
+            const targetCheck = await validateRequestTarget(
+                connection,
+                item.nacCode,
+                item.equipmentNumber,
+                updateValidationCaches
+            );
+            if (!targetCheck.valid) {
+                updateCompatibilityErrors.push({
+                    nacCode: item.nacCode || 'N/A',
+                    message: targetCheck.message || `Invalid equipment ${item.equipmentNumber}`,
+                    originalIndex: i
+                });
+            }
+        }
+        if (updateCompatibilityErrors.length > 0) {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Validation Failed',
+                message: 'Some items have incompatible equipment selections',
+                validationErrors: updateCompatibilityErrors
+            });
+            return;
         }
 
         for (const item of items) {

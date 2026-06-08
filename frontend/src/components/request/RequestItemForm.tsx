@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,10 +9,10 @@ import { RequestCartItem } from '@/types/request';
 import { SearchResult } from '@/types/search';
 import { PartNumberSelect } from './PartNumberSelect';
 import { EquipmentMultiSelect } from './EquipmentMultiSelect';
-import { EquipmentAssetAutocomplete } from './EquipmentAssetAutocomplete';
+import { ConsumableIssueEquipmentSelect } from '@/components/issue/ConsumableIssueEquipmentSelect';
+import { isConsumableStock } from '@/utils/stockItem';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
-import { expandEquipmentNumbers } from '@/utils/equipmentNumbers';
 import imageCompression from 'browser-image-compression';
 import { processItemName } from '@/utils/utils';
 import { useAuthContext } from '@/context/AuthContext';
@@ -42,6 +42,22 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [requestedById, setRequestedById] = useState<number | null>(null);
     const [requestedByEmail, setRequestedByEmail] = useState<string | null>(null);
+    const [sections, setSections] = useState<{ id: number; name: string; code: string }[]>([]);
+    const fetchSections = useCallback(async () => {
+        try {
+            const res = await API.get('/api/settings/issue/sections/active');
+            setSections(res.data || []);
+        } catch {
+            setSections([]);
+        }
+    }, []);
+    useEffect(() => {
+        if (isOpen) {
+            fetchSections();
+        }
+    }, [isOpen, fetchSections]);
+    const isConsumable = !isManualEntry && item ? isConsumableStock(item.equipmentNumber) : false;
+    const useAssetSectionPicker = isManualEntry || isConsumable;
     useEffect(() => {
         const fetchAvailableUnits = async () => {
             if (!item?.nacCode || item.nacCode === 'N/A') {
@@ -116,28 +132,7 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
             return;
         setIsSubmitting(true);
         try {
-            let finalEquipmentNumber = equipmentNumber;
-            if (isManualEntry) {
-                const expandedSet = expandEquipmentNumbers(equipmentNumber);
-                const expandedList = Array.from(expandedSet);
-                if (expandedList.length === 0) {
-                    setErrors(prev => ({
-                        ...prev,
-                        equipmentNumber: 'Invalid equipment number format',
-                    }));
-                    setIsSubmitting(false);
-                    return;
-                }
-                if (expandedList.length > 1000) {
-                    setErrors(prev => ({
-                        ...prev,
-                        equipmentNumber: 'Equipment number range is too large. Please reduce the range.',
-                    }));
-                    setIsSubmitting(false);
-                    return;
-                }
-                finalEquipmentNumber = equipmentNumber.trim();
-            }
+            const finalEquipmentNumber = equipmentNumber.trim();
             const cartItem: RequestCartItem = {
                 id: isManualEntry ? 'N/A' : (item?.id?.toString() || 'N/A'),
                 nacCode: isManualEntry ? 'N/A' : (item?.nacCode || 'N/A'),
@@ -250,10 +245,25 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
             </div>
             <div className="space-y-2">
               <Label htmlFor="equipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-              {isManualEntry ? (<EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Enter equipment number (code, ranges like 1000-1024)" className={`mt-1 ${errors.equipmentNumber ? "border-red-500" : ""}`} error={errors.equipmentNumber}/>) : (<EquipmentMultiSelect equipmentList={item?.equipmentNumber
-                ? item.equipmentNumber.split(',').map(s => s.trim())
-                : []} value={equipmentNumber} onChange={(value) => setEquipmentNumber(value)} error={errors.equipmentNumber}/>)}
-              {errors.equipmentNumber && !isManualEntry && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
+              {useAssetSectionPicker ? (
+                <ConsumableIssueEquipmentSelect
+                  value={equipmentNumber}
+                  onChange={setEquipmentNumber}
+                  sections={sections}
+                  error={errors.equipmentNumber}
+                />
+              ) : (
+                <EquipmentMultiSelect
+                  equipmentList={[
+                    ...(item?.equipmentNumber ? item.equipmentNumber.split(',').map(s => s.trim()).filter(Boolean) : []),
+                    ...sections.map(s => s.code),
+                  ]}
+                  value={equipmentNumber}
+                  onChange={(value) => setEquipmentNumber(value)}
+                  error={errors.equipmentNumber}
+                />
+              )}
+              {errors.equipmentNumber && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
             </div>
           </div>
 
