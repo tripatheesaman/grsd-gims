@@ -770,25 +770,37 @@ export class ExcelService {
                 worksheet.getCell('I29').value = authorityDetails.quality_check_authority_designation;
                 let currentRow = 7;
                 let sn = 1;
+                let totalG = 0;
+                let totalH = 0;
+                let totalI = 0;
                 for (const item of items) {
                     const itemPrice = Number(item.item_price || 0);
                     const freightCharge = Number(item.freight_charge || 0);
                     const vatPercentage = Number(item.vat_percentage || 0);
                     const totalAmount = Number(item.total_amount || 0);
-                    const vat_amount = Number(((itemPrice + Number(item.freight_charge)) * (vatPercentage / 100)).toFixed(2));
+                    const gValue = Number((itemPrice + freightCharge).toFixed(2));
+                    const vat_amount = Number((gValue * (vatPercentage / 100)).toFixed(2));
+                    const iValue = Number(totalAmount.toFixed(2));
                     worksheet.getCell(`A${currentRow}`).value = sn++;
                     worksheet.getCell(`B${currentRow}`).value = item.item_name || '';
                     worksheet.getCell(`C${currentRow}`).value = item.part_number || '';
                     worksheet.getCell(`D${currentRow}`).value = item.nac_code || '';
                     worksheet.getCell(`E${currentRow}`).value = item.received_quantity || 0;
                     worksheet.getCell(`F${currentRow}`).value = item.unit || '';
-                    worksheet.getCell(`G${currentRow}`).value = Number((itemPrice + freightCharge).toFixed(2));
+                    worksheet.getCell(`G${currentRow}`).value = gValue;
                     worksheet.getCell(`H${currentRow}`).value = vat_amount;
-                    worksheet.getCell(`I${currentRow}`).value = Number(totalAmount.toFixed(2));
+                    worksheet.getCell(`I${currentRow}`).value = iValue;
                     worksheet.getCell(`J${currentRow}`).value = normalizeEquipmentNumbers(item.equipment_number || '');
+                    totalG += gValue;
+                    totalH += vat_amount;
+                    totalI += iValue;
                     currentRow++;
                     freightChargeTotal += freightCharge;
                 }
+                const localFooterRow = footerStartRow + extraDataRows;
+                worksheet.getCell(`G${localFooterRow}`).value = Number(totalG.toFixed(2));
+                worksheet.getCell(`H${localFooterRow}`).value = Number(totalH.toFixed(2));
+                worksheet.getCell(`I${localFooterRow}`).value = Number(totalI.toFixed(2));
             }
             else {
                 const formattedDate = ExcelService.formatDate(rrpDetails.date);
