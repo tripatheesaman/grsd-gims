@@ -17,6 +17,10 @@ const normalizeCode = (value: string): string => String(value || '').trim();
 export const isConsumableStock = (applicableEquipments: string): boolean =>
     String(applicableEquipments || '').toLowerCase().includes('consumable');
 
+/** Request/receive rows may carry a consumable category label instead of an asset or section code. */
+export const isConsumableEquipmentMarker = (equipmentNumber: string): boolean =>
+    isConsumableStock(equipmentNumber);
+
 const isInternalIssuedFor = (equipmentNumber: string): boolean =>
     INTERNAL_ISSUED_FOR_PREFIXES.some((prefix) => equipmentNumber.startsWith(prefix));
 
@@ -145,6 +149,9 @@ const validateAssetOrSectionTarget = async (
     if (isInternalIssuedFor(term)) {
         return { valid: true };
     }
+    if (isConsumableEquipmentMarker(term)) {
+        return { valid: true };
+    }
 
     const tokens = expandEquipmentTokens(term);
     if (tokens.length === 0) {
@@ -158,6 +165,9 @@ const validateAssetOrSectionTarget = async (
     const assetCodes = await loadAssetEquipmentCodes(connection, tokens, caches);
 
     for (const token of tokens) {
+        if (isConsumableEquipmentMarker(token)) {
+            continue;
+        }
         if (sectionCodes.has(token.toUpperCase())) {
             continue;
         }
@@ -167,6 +177,38 @@ const validateAssetOrSectionTarget = async (
         return { valid: false, message: invalidMessage.replace('{token}', token) };
     }
     return { valid: true };
+};
+
+const NAC_CODE_PATTERN = /^(GT|TW|GS) \d{5}$/;
+
+/** Validates receive target: existing stock uses spare rules; new NAC uses asset/section rules. */
+export const validateReceiveTarget = async (
+    connection: PoolConnection,
+    nacCode: string | null | undefined,
+    equipmentNumber: string,
+    caches: IssueValidationCaches = {}
+): Promise<{ valid: boolean; message?: string }> => {
+    const code = normalizeCode(String(nacCode || ''));
+    if (!code || code === 'N/A') {
+        return { valid: false, message: 'NAC code is required. Enter a new code for new items.' };
+    }
+    if (!NAC_CODE_PATTERN.test(code)) {
+        return { valid: false, message: 'NAC code must be GT/TW/GS followed by 5 digits (e.g., GT 12345)' };
+    }
+
+    const [stockResults] = await connection.query<RowDataPacket[]>(
+        `SELECT applicable_equipments FROM stock_details WHERE nac_code = ? LIMIT 1`,
+        [code]
+    );
+    if (stockResults.length === 0) {
+        return validateAssetOrSectionTarget(
+            connection,
+            equipmentNumber,
+            caches,
+            'Equipment "{token}" is not a registered asset and is not a defined section'
+        );
+    }
+    return validateIssuedFor(connection, code, equipmentNumber, caches);
 };
 
 /** Validates equipment/section for request items (including new items with nacCode N/A). */

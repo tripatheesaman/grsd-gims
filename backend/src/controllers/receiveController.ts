@@ -6,7 +6,7 @@ import { logEvents } from '../middlewares/logger';
 import { refreshPredictionMetrics } from '../services/predictionService';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
-import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
+import { validateReceiveTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
@@ -278,34 +278,44 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
         const receiveIds: number[] = [];
         const receiveValidationCaches: IssueValidationCaches = {};
         for (const item of receiveData.items) {
-            const [requestCheck] = await connection.execute(`SELECT id, request_number, equipment_number FROM request_details 
+            const [requestCheck] = await connection.execute<RowDataPacket[]>(`SELECT id, request_number, equipment_number, nac_code FROM request_details 
                 WHERE id = ?`, [item.requestId]);
-            if (!(requestCheck as any[]).length) {
+            if (!requestCheck.length) {
                 logEvents(`Failed to create receive - Request not found: ${item.requestId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
                 throw new Error(`Request ID ${item.requestId} not found`);
             }
-            const requestNumber = (requestCheck as any[])[0].request_number;
-            const requestEquipmentNumber = (requestCheck as any[])[0].equipment_number || '';
-            let finalNacCode = item.nacCode;
-            if (!finalNacCode || finalNacCode.trim() === '' || finalNacCode === 'N/A') {
-                logEvents(`Warning: Empty/null nacCode received for request ${item.requestId}. Fetching from request_details...`, "receiveLog.log");
-                const [requestNacCheck] = await connection.execute(`SELECT nac_code FROM request_details WHERE id = ?`, [item.requestId]);
-                if ((requestNacCheck as any[]).length > 0) {
-                    finalNacCode = (requestNacCheck as any[])[0].nac_code;
-                    logEvents(`Retrieved nacCode from request_details: "${finalNacCode}" for request ${item.requestId}`, "receiveLog.log");
+            const requestNumber = requestCheck[0].request_number;
+            const requestEquipmentNumber = String(requestCheck[0].equipment_number || '');
+            const requestNacCode = String(requestCheck[0].nac_code || '').trim();
+
+            let finalNacCode = String(item.nacCode || '').trim();
+            if (!finalNacCode || finalNacCode === 'N/A') {
+                if (requestNacCode && requestNacCode !== 'N/A') {
+                    finalNacCode = requestNacCode;
+                    logEvents(`Using request nacCode "${finalNacCode}" for request ${item.requestId}`, "receiveLog.log");
+                } else {
+                    logEvents(`Failed to create receive - NAC code required for new item request ${item.requestId}`, "receiveLog.log");
+                    throw new Error(`NAC Code is required for item: ${item.itemName}. Enter a new NAC code when receiving new items.`);
                 }
-                else {
-                    logEvents(`Failed to create receive - Could not fetch nacCode for request ${item.requestId}`, "receiveLog.log");
-                    throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the request has a valid NAC Code.`);
-                }
-            }
-            if (!finalNacCode || finalNacCode.trim() === '') {
-                logEvents(`Failed to create receive - Final nacCode is empty for request ${item.requestId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
-                throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the item has a valid NAC Code.`);
             }
 
-            if (requestEquipmentNumber && requestEquipmentNumber.trim() !== '' && finalNacCode) {
-                const targetCheck = await validateRequestTarget(
+            const isNewNacAssignment =
+                (!requestNacCode || requestNacCode === 'N/A') &&
+                finalNacCode !== 'N/A' &&
+                finalNacCode !== requestNacCode;
+
+            if (isNewNacAssignment) {
+                const [existingStock] = await connection.execute<RowDataPacket[]>(
+                    `SELECT id FROM stock_details WHERE nac_code = ? LIMIT 1`,
+                    [finalNacCode]
+                );
+                if (existingStock.length > 0) {
+                    throw new Error(`NAC Code ${finalNacCode} already exists. Please choose a different NAC code for this new item.`);
+                }
+            }
+
+            if (requestEquipmentNumber.trim() !== '') {
+                const targetCheck = await validateReceiveTarget(
                     connection,
                     finalNacCode,
                     requestEquipmentNumber,
@@ -367,6 +377,15 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
             const [result] = await connection.execute(`INSERT INTO receive_details (${columns.join(', ')}) VALUES (${placeholders})`, values);
             const receiveId = (result as any).insertId;
             receiveIds.push(receiveId);
+
+            if (isNewNacAssignment) {
+                await connection.execute(
+                    `UPDATE request_details SET nac_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+                    [finalNacCode, item.requestId]
+                );
+                logEvents(`Assigned new nacCode "${finalNacCode}" to request ${item.requestId}`, "receiveLog.log");
+            }
+
             logEvents(`Created receive item for request ${requestNumber} with ID ${receiveId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
         }
         await connection.commit();
