@@ -1,5 +1,9 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { expandEquipmentTokens } from './spareEquipmentDisplay';
+import {
+    equipmentCodesEquivalent,
+    expandEquipmentTokens,
+    getEquipmentNumericBase,
+} from './spareEquipmentDisplay';
 
 export const FUEL_NAC_CODES = new Set(['GT 07986', 'GT 00000']);
 
@@ -9,6 +13,11 @@ export interface IssueValidationCaches {
     sectionCodes?: Set<string>;
     fuelEquipmentByNac?: Map<string, Set<string>>;
     assetEquipmentCodes?: Set<string>;
+}
+
+export interface ValidateIssuedForOptions {
+    /** When true, also accept registered assets (e.g. 345 matches asset 345T14). Used for request/receive. */
+    allowRegisteredAssets?: boolean;
 }
 
 const normalizeCode = (value: string): string => String(value || '').trim();
@@ -65,6 +74,38 @@ const loadFuelValidEquipment = async (
     return new Set(codes);
 };
 
+const registerAssetEquipmentCode = (cached: Set<string>, code: string): void => {
+    const normalized = normalizeCode(code);
+    if (!normalized) {
+        return;
+    }
+    cached.add(normalized);
+    const base = getEquipmentNumericBase(normalized);
+    if (base) {
+        cached.add(base);
+    }
+};
+
+const isResolvedAssetToken = (token: string, cached: Set<string>): boolean => {
+    const normalized = normalizeCode(token);
+    if (!normalized || cached.size === 0) {
+        return false;
+    }
+    if (cached.has(normalized)) {
+        return true;
+    }
+    const base = getEquipmentNumericBase(normalized);
+    if (base && cached.has(base)) {
+        return true;
+    }
+    for (const code of cached) {
+        if (equipmentCodesEquivalent(normalized, code)) {
+            return true;
+        }
+    }
+    return false;
+};
+
 const loadAssetEquipmentCodes = async (
     connection: PoolConnection,
     tokens: string[],
@@ -75,40 +116,75 @@ const loadAssetEquipmentCodes = async (
         return caches?.assetEquipmentCodes ?? new Set();
     }
 
-    if (!caches) {
-        const [rows] = await connection.query<RowDataPacket[]>(
-            `SELECT equipment_code FROM assets WHERE equipment_code IN (?)`,
-            [normalizedTokens]
-        );
-        return new Set(rows.map((row) => normalizeCode(String(row.equipment_code))).filter(Boolean));
-    }
-
-    if (!caches.assetEquipmentCodes) {
-        caches.assetEquipmentCodes = new Set();
-    }
-    const cached = caches.assetEquipmentCodes;
-    const missing = normalizedTokens.filter((token) => !cached.has(token));
+    const cached = caches?.assetEquipmentCodes ?? new Set<string>();
+    const missing = normalizedTokens.filter((token) => !isResolvedAssetToken(token, cached));
     if (missing.length === 0) {
+        if (caches) {
+            caches.assetEquipmentCodes = cached;
+        }
         return cached;
     }
 
-    const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT equipment_code FROM assets WHERE equipment_code IN (?)`,
-        [missing]
-    );
-    for (const row of rows) {
-        const code = normalizeCode(String(row.equipment_code));
-        if (code) {
-            cached.add(code);
+    const exactTokens = [...new Set(missing)];
+    const numericBases = [
+        ...new Set(
+            exactTokens
+                .map((token) => getEquipmentNumericBase(token))
+                .filter((base): base is string => Boolean(base))
+        ),
+    ];
+
+    const whereParts: string[] = [];
+    const params: Array<string | string[]> = [];
+    if (exactTokens.length > 0) {
+        whereParts.push('equipment_code IN (?)');
+        params.push(exactTokens);
+    }
+    for (const base of numericBases) {
+        whereParts.push(`(
+            equipment_code = ?
+            OR equipment_code LIKE ?
+            OR equipment_code LIKE ?
+            OR equipment_code REGEXP ?
+        )`);
+        params.push(base, `${base}T%`, `${base} T%`, `^${base}[[:space:]]*T`);
+    }
+
+    if (whereParts.length > 0) {
+        const [rows] = await connection.query<RowDataPacket[]>(
+            `SELECT equipment_code FROM assets WHERE ${whereParts.join(' OR ')}`,
+            params
+        );
+        for (const row of rows) {
+            registerAssetEquipmentCode(cached, String(row.equipment_code));
         }
+    }
+
+    const stillMissing = normalizedTokens.filter((token) => !isResolvedAssetToken(token, cached));
+    if (stillMissing.length > 0) {
+        const [numericAssets] = await connection.query<RowDataPacket[]>(
+            `SELECT equipment_code FROM assets WHERE equipment_code REGEXP '^[0-9]'`
+        );
+        for (const row of numericAssets) {
+            const code = normalizeCode(String(row.equipment_code));
+            if (!code) {
+                continue;
+            }
+            if (stillMissing.some((token) => equipmentCodesEquivalent(token, code))) {
+                registerAssetEquipmentCode(cached, code);
+            }
+        }
+    }
+
+    if (caches) {
+        caches.assetEquipmentCodes = cached;
     }
     return cached;
 };
 
 const tokenMatchesFuelList = (token: string, fuelSet: Set<string>): boolean => {
-    const normalized = normalizeCode(token).toLowerCase();
     for (const code of fuelSet) {
-        if (normalizeCode(code).toLowerCase() === normalized) {
+        if (equipmentCodesEquivalent(token, code)) {
             return true;
         }
     }
@@ -130,7 +206,7 @@ const isAllowedFuelToken = (
     if (tokenMatchesFuelList(token, fuelSet)) {
         return true;
     }
-    if (assetCodes.has(normalizeCode(token))) {
+    if (isResolvedAssetToken(token, assetCodes)) {
         return true;
     }
     return false;
@@ -171,7 +247,7 @@ const validateAssetOrSectionTarget = async (
         if (sectionCodes.has(token.toUpperCase())) {
             continue;
         }
-        if (assetCodes.has(normalizeCode(token))) {
+        if (isResolvedAssetToken(token, assetCodes)) {
             continue;
         }
         return { valid: false, message: invalidMessage.replace('{token}', token) };
@@ -181,7 +257,10 @@ const validateAssetOrSectionTarget = async (
 
 const NAC_CODE_PATTERN = /^(GT|TW|GS) \d{5}$/;
 
-/** Validates receive target: existing stock uses spare rules; new NAC uses asset/section rules. */
+/**
+ * Validates receive equipment: must be a registered asset (345 = 345T15) or issue section.
+ * Spare applicable-equipment lists are not enforced on receive — the request already names the target unit.
+ */
 export const validateReceiveTarget = async (
     connection: PoolConnection,
     nacCode: string | null | undefined,
@@ -196,19 +275,12 @@ export const validateReceiveTarget = async (
         return { valid: false, message: 'NAC code must be GT/TW/GS followed by 5 digits (e.g., GT 12345)' };
     }
 
-    const [stockResults] = await connection.query<RowDataPacket[]>(
-        `SELECT applicable_equipments FROM stock_details WHERE nac_code = ? LIMIT 1`,
-        [code]
+    return validateAssetOrSectionTarget(
+        connection,
+        equipmentNumber,
+        caches,
+        'Equipment "{token}" is not a registered asset and is not a defined section'
     );
-    if (stockResults.length === 0) {
-        return validateAssetOrSectionTarget(
-            connection,
-            equipmentNumber,
-            caches,
-            'Equipment "{token}" is not a registered asset and is not a defined section'
-        );
-    }
-    return validateIssuedFor(connection, code, equipmentNumber, caches);
 };
 
 /** Validates equipment/section for request items (including new items with nacCode N/A). */
@@ -227,14 +299,15 @@ export const validateRequestTarget = async (
             'Equipment "{token}" is not a registered asset and is not a defined section'
         );
     }
-    return validateIssuedFor(connection, code, equipmentNumber, caches);
+    return validateIssuedFor(connection, code, equipmentNumber, caches, { allowRegisteredAssets: true });
 };
 
 export const validateIssuedFor = async (
     connection: PoolConnection,
     nacCode: string,
     equipmentNumber: string,
-    caches: IssueValidationCaches = {}
+    caches: IssueValidationCaches = {},
+    options: ValidateIssuedForOptions = {}
 ): Promise<{ valid: boolean; message?: string }> => {
     const term = normalizeCode(equipmentNumber);
     if (!term) {
@@ -295,24 +368,36 @@ export const validateIssuedFor = async (
         );
     }
 
-    const applicableSet = new Set(
-        expandEquipmentTokens(applicableEquipments).map((t) => normalizeCode(t))
-    );
+    const applicableTokens = expandEquipmentTokens(applicableEquipments).map((t) => normalizeCode(t));
     const [compatRows] = await connection.query<RowDataPacket[]>(
-        `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ? AND equipment_code IN (?)`,
-        [nacCode, tokens]
+        `SELECT equipment_code FROM spare_compatibility WHERE nac_code = ?`,
+        [nacCode]
     );
-    const compatSet = new Set(compatRows.map((row) => normalizeCode(String(row.equipment_code))));
+    const compatCodes = compatRows
+        .map((row) => normalizeCode(String(row.equipment_code)))
+        .filter(Boolean);
+
+    const matchesStockEquipment = (token: string): boolean =>
+        applicableTokens.some((applicable) => equipmentCodesEquivalent(token, applicable));
+
+    const matchesCompatibility = (token: string): boolean =>
+        compatCodes.some((compat) => equipmentCodesEquivalent(token, compat));
+
+    const assetCodes = options.allowRegisteredAssets
+        ? await loadAssetEquipmentCodes(connection, tokens, caches)
+        : null;
 
     for (const token of tokens) {
-        const normalizedToken = normalizeCode(token);
-        if (compatSet.has(normalizedToken)) {
+        if (matchesCompatibility(token)) {
             continue;
         }
-        if (applicableSet.has(normalizedToken)) {
+        if (matchesStockEquipment(token)) {
             continue;
         }
         if (sectionCodes.has(token.toUpperCase())) {
+            continue;
+        }
+        if (assetCodes && isResolvedAssetToken(token, assetCodes)) {
             continue;
         }
         return {
