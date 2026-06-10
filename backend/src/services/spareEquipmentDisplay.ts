@@ -35,6 +35,40 @@ export const SPARE_EQUIPMENT_DISPLAY_SQL = `COALESCE(
   sd.applicable_equipments
 )`;
 
+/**
+ * Base equipment number: digits before an optional T-type suffix.
+ * 344, 344T, 344T14, and 344TXXX (any chars after T) all resolve to "344".
+ */
+export const getEquipmentNumericBase = (code: string): string | null => {
+    const trimmed = String(code || '').trim();
+    if (!trimmed) {
+        return null;
+    }
+    const tSuffixMatch = trimmed.match(/^(\d+)\s*T/i);
+    if (tSuffixMatch) {
+        return tSuffixMatch[1];
+    }
+    if (/^\d+$/.test(trimmed)) {
+        return trimmed;
+    }
+    return null;
+};
+
+/** Whether two codes refer to the same unit (anything after T is ignored). */
+export const equipmentCodesEquivalent = (a: string, b: string): boolean => {
+    const left = String(a || '').trim();
+    const right = String(b || '').trim();
+    if (!left || !right) {
+        return false;
+    }
+    if (left.toLowerCase() === right.toLowerCase()) {
+        return true;
+    }
+    const baseLeft = getEquipmentNumericBase(left);
+    const baseRight = getEquipmentNumericBase(right);
+    return Boolean(baseLeft && baseRight && baseLeft === baseRight);
+};
+
 export const expandEquipmentTokens = (input: string): string[] => {
     const normalized = String(input || '')
         .replace(/\b(ge|GE)\b/g, '')

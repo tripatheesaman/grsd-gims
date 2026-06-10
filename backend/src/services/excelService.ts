@@ -719,7 +719,7 @@ export class ExcelService {
             }
             const layoutSnapshot = snapshotWorksheetLayout(worksheet);
             const itemStartRow = 7;
-            const footerStartRow = rrpType === 'local' ? 22 : 24;
+            const footerStartRow = 22;
             const maxItemRows = footerStartRow - itemStartRow;
             const extraDataRows = Math.max(0, items.length - maxItemRows);
             if (extraDataRows > 0) {
@@ -823,27 +823,48 @@ export class ExcelService {
                 worksheet.getCell('H6').value = `Freight (In ${rrpDetails.currency})`;
                 let currentRow = 7;
                 let sn = 1;
+                let totalG = 0;
+                let totalH = 0;
+                let totalI = 0;
+                let totalJ = 0;
+                let totalK = 0;
                 for (const item of items) {
                     const itemPrice = Number(item.item_price || 0);
                     const customsCharge = (Number(item.customs_charge) + Number(item.customs_service_charge) || 0);
                     const itemPlusFreight = Number(((Number(itemPrice) * Number(rrpDetails.forex_rate) || 1) + Number(item.freight_charge)).toFixed(2));
                     const finalTotal = Number((itemPlusFreight + customsCharge).toFixed(2));
                     const freightCharge = Number(item.freight_charge || 0) / Number(rrpDetails.forex_rate || 1);
+                    const gValue = Number(itemPrice.toFixed(2));
+                    const hValue = freightCharge;
+                    const iValue = itemPlusFreight;
+                    const jValue = Number(customsCharge.toFixed(2));
+                    const kValue = finalTotal;
                     worksheet.getCell(`A${currentRow}`).value = sn++;
                     worksheet.getCell(`B${currentRow}`).value = item.item_name || '';
                     worksheet.getCell(`C${currentRow}`).value = item.part_number || '';
                     worksheet.getCell(`D${currentRow}`).value = item.nac_code || '';
                     worksheet.getCell(`E${currentRow}`).value = item.unit || '';
                     worksheet.getCell(`F${currentRow}`).value = item.received_quantity || 0;
-                    worksheet.getCell(`G${currentRow}`).value = Number(itemPrice.toFixed(2));
-                    worksheet.getCell(`H${currentRow}`).value = freightCharge;
-                    worksheet.getCell(`I${currentRow}`).value = itemPlusFreight;
-                    worksheet.getCell(`J${currentRow}`).value = Number(customsCharge.toFixed(2));
-                    worksheet.getCell(`K${currentRow}`).value = finalTotal;
+                    worksheet.getCell(`G${currentRow}`).value = gValue;
+                    worksheet.getCell(`H${currentRow}`).value = hValue;
+                    worksheet.getCell(`I${currentRow}`).value = iValue;
+                    worksheet.getCell(`J${currentRow}`).value = jValue;
+                    worksheet.getCell(`K${currentRow}`).value = kValue;
                     worksheet.getCell(`L${currentRow}`).value = normalizeEquipmentNumbers(item.equipment_number || '');
+                    totalG += gValue;
+                    totalH += hValue;
+                    totalI += iValue;
+                    totalJ += jValue;
+                    totalK += kValue;
                     freightChargeTotal += freightCharge;
                     currentRow++;
                 }
+                const foreignFooterRow = footerStartRow + extraDataRows;
+                worksheet.getCell(`G${foreignFooterRow}`).value = Number(totalG.toFixed(2));
+                worksheet.getCell(`H${foreignFooterRow}`).value = Number(totalH.toFixed(2));
+                worksheet.getCell(`I${foreignFooterRow}`).value = Number(totalI.toFixed(2));
+                worksheet.getCell(`J${foreignFooterRow}`).value = Number(totalJ.toFixed(2));
+                worksheet.getCell(`K${foreignFooterRow}`).value = Number(totalK.toFixed(2));
                 worksheet.getCell('A31').value = `${createdByUser.first_name} ${createdByUser.last_name}`;
                 worksheet.getCell('A32').value = createdByUser.designation;
                 worksheet.getCell('D31').value = inspectionName || '';
@@ -857,7 +878,9 @@ export class ExcelService {
             flattenWorksheetFormulas(worksheet);
             const sheetsToDelete = workbook.worksheets.filter(sheet => sheet.name !== sheetName);
             sheetsToDelete.forEach(sheet => workbook.removeWorksheet(sheet.id));
-            worksheet.getCell('C24').value = freightChargeTotal < 1 ? 'NA' : freightChargeTotal;
+            if (rrpType === 'local') {
+                worksheet.getCell('C24').value = freightChargeTotal < 1 ? 'NA' : freightChargeTotal;
+            }
             logEvents(`Successfully generated RRP Excel for: ${rrpNumber}`, "excelServiceLog.log");
             return await workbook.xlsx.writeBuffer();
         }
