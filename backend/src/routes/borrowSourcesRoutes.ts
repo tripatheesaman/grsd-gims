@@ -1,10 +1,11 @@
 import express from 'express';
 import * as borrowSourcesController from '../controllers/borrowSourcesController';
 import verifyJWT from '../middlewares/verifyJWT';
+import { checkPermissions, checkAnyPermissions } from '../middlewares/auth';
 const router = express.Router();
-router.get('/', verifyJWT, borrowSourcesController.getAllBorrowSources);
-router.get('/:id', verifyJWT, borrowSourcesController.getBorrowSource);
-router.post('/', verifyJWT, borrowSourcesController.createBorrowSource);
-router.put('/:id', verifyJWT, borrowSourcesController.updateBorrowSource);
-router.delete('/:id', verifyJWT, borrowSourcesController.deleteBorrowSource);
+router.get('/', verifyJWT, checkAnyPermissions(['can_access_receive_settings', 'can_access_settings', 'can_borrow_stocks']), borrowSourcesController.getAllBorrowSources);
+router.get('/:id', verifyJWT, checkAnyPermissions(['can_access_receive_settings', 'can_access_settings', 'can_borrow_stocks']), borrowSourcesController.getBorrowSource);
+router.post('/', verifyJWT, checkPermissions(['can_add_borrow_sources']), borrowSourcesController.createBorrowSource);
+router.put('/:id', verifyJWT, checkPermissions(['can_add_borrow_sources']), borrowSourcesController.updateBorrowSource);
+router.delete('/:id', verifyJWT, checkPermissions(['can_add_borrow_sources']), borrowSourcesController.deleteBorrowSource);
 export default router;

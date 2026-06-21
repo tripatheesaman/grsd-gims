@@ -4,6 +4,7 @@ import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 import { formatDate } from '../utils/dateUtils';
+import { releaseRrpReceives } from '../services/rrpReleaseService';
 export interface RRPRecord {
     id: number;
     rrp_number: string;
@@ -484,36 +485,140 @@ export const getRRPRecordFilters = async (req: Request, res: Response): Promise<
 };
 export const updateRRPStatus = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, reason, updated_by } = req.body as {
+        status: string;
+        reason?: string;
+        updated_by?: string;
+    };
     const connection = await pool.getConnection();
+
     try {
-        const [recordRows] = await connection.execute<RowDataPacket[]>('SELECT rrp_number FROM rrp_details WHERE id = ?', [id]);
-        if (recordRows.length === 0) {
-            res.status(404).json({
-                error: 'Not Found',
-                message: 'RRP record not found'
+        const normalizedStatus = String(status || '').trim().toUpperCase();
+        if (!normalizedStatus) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Status is required',
             });
             return;
         }
-        const rrpNumber = recordRows[0].rrp_number;
-        const [result] = await connection.execute('UPDATE rrp_details SET approval_status = ? WHERE rrp_number = ?', [status, rrpNumber]);
-        const affectedRows = (result as any).affectedRows;
-        logEvents(`Updated status to '${status}' for ${affectedRows} records with RRP number '${rrpNumber}'`, "rrpRecordsLog.log");
+
+        if (['REJECTED', 'VOID'].includes(normalizedStatus)) {
+            const trimmedReason = String(reason || '').trim();
+            if (!trimmedReason) {
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message: `A reason is required when setting status to ${normalizedStatus}`,
+                });
+                return;
+            }
+        }
+
+        await connection.beginTransaction();
+
+        const [recordRows] = await connection.execute<RowDataPacket[]>(
+            `SELECT id, rrp_number, approval_status
+             FROM rrp_details
+             WHERE id = ?
+             FOR UPDATE`,
+            [id]
+        );
+
+        if (recordRows.length === 0) {
+            await connection.rollback();
+            res.status(404).json({
+                error: 'Not Found',
+                message: 'RRP record not found',
+            });
+            return;
+        }
+
+        const rrpNumber = String(recordRows[0].rrp_number);
+        const currentStatus = String(recordRows[0].approval_status || '').toUpperCase();
+
+        if (rrpNumber.toLowerCase() === 'code transfer') {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Balance transfer RRP records cannot be voided or rejected from records',
+            });
+            return;
+        }
+
+        if (currentStatus === normalizedStatus) {
+            await connection.rollback();
+            res.status(409).json({
+                error: 'Conflict',
+                message: `RRP is already ${normalizedStatus}`,
+            });
+            return;
+        }
+
+        if (normalizedStatus === 'VOID' && currentStatus !== 'APPROVED' && currentStatus !== 'PENDING') {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Only pending or approved RRPs can be voided',
+            });
+            return;
+        }
+
+        const actor = updated_by || 'system';
+        const trimmedReason = String(reason || '').trim();
+        const shouldReleaseReceives = ['REJECTED', 'VOID'].includes(normalizedStatus);
+
+        if (shouldReleaseReceives) {
+            const [result] = await connection.execute(
+                `UPDATE rrp_details
+                 SET approval_status = ?,
+                     rejected_by = ?,
+                     rejection_reason = ?,
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE rrp_number = ?`,
+                [normalizedStatus, actor, trimmedReason, rrpNumber]
+            );
+            const affectedRows = (result as { affectedRows?: number }).affectedRows ?? 0;
+
+            const rebuiltNacs = await releaseRrpReceives(connection, rrpNumber);
+
+            await connection.commit();
+            logEvents(
+                `Updated RRP ${rrpNumber} status to ${normalizedStatus} (${affectedRows} lines); released receives; rebuilt ${rebuiltNacs.length} NAC(s)`,
+                'rrpRecordsLog.log'
+            );
+            res.status(200).json({
+                message: `Status updated to ${normalizedStatus} for ${affectedRows} record(s)`,
+                affectedRows,
+                rrpNumber,
+                releasedReceives: true,
+                rebuiltNacs,
+            });
+            return;
+        }
+
+        const [result] = await connection.execute(
+            `UPDATE rrp_details
+             SET approval_status = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE rrp_number = ?`,
+            [normalizedStatus, rrpNumber]
+        );
+        const affectedRows = (result as { affectedRows?: number }).affectedRows ?? 0;
+
+        await connection.commit();
+        logEvents(`Updated status to '${normalizedStatus}' for ${affectedRows} records with RRP number '${rrpNumber}'`, 'rrpRecordsLog.log');
         res.status(200).json({
             message: `Status updated successfully for ${affectedRows} records`,
             affectedRows,
-            rrpNumber
+            rrpNumber,
         });
-    }
-    catch (error) {
+    } catch (error) {
+        await connection.rollback();
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error in updateRRPStatus: ${errorMessage}`, "rrpRecordsLog.log");
+        logEvents(`Error in updateRRPStatus: ${errorMessage}`, 'rrpRecordsLog.log');
         res.status(500).json({
             error: 'Internal Server Error',
-            message: errorMessage
+            message: errorMessage,
         });
-    }
-    finally {
+    } finally {
         connection.release();
     }
 };

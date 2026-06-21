@@ -15,7 +15,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     useEffect(() => {
         const routeConfig = getRouteConfig(pathname);
         if (!routeConfig) {
-            setShouldRedirect('/dashboard');
+            setShouldRedirect('/unauthorized');
             return;
         }
         if (routeConfig.requiresAuth && !isAuthenticated) {

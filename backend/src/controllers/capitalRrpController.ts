@@ -8,6 +8,7 @@ import { fetchRRPConfigMasters } from './rrpController';
 import { generateCapitalRRPExcel } from '../services/capitalRrpExcelService';
 import { setNoCacheHeaders } from '../utils/approvalResponse';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
+import { resolveActorPerson } from '../services/personDetailsService';
 import { initializeAssetCostAndDepreciation } from '../services/assetDepreciationService';
 import {
     normalizeRrpBaseNumber,
@@ -987,6 +988,7 @@ export const getPendingCapitalRRPs = async (_req: Request, res: Response): Promi
                 catch {
                     inspectionDetails = {};
                 }
+                const createdByDetails = await resolveActorPerson(pool, row.created_by);
                 return {
                     ...row,
                     date: formatDateForDB(row.date),
@@ -999,6 +1001,8 @@ export const getPendingCapitalRRPs = async (_req: Request, res: Response): Promi
                     equipment_code: stored?.equipment_code || '',
                     equipment_name: stored?.equipment_name || row.model_name,
                     location: stored?.location || '',
+                    created_by: createdByDetails.name,
+                    createdByDetails,
                 };
             })
         );

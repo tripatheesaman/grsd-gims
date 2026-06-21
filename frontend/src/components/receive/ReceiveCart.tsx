@@ -1,13 +1,17 @@
 'use client';
+
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { ReceiveCartItem } from '@/types/receive';
-import { Trash2, Pencil } from 'lucide-react';
+import { Trash2, Pencil, ShoppingCart, Package } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import Image from 'next/image';
+import { resolveImageUrl } from '@/lib/urls';
+
 interface ReceiveCartProps {
     items: ReceiveCartItem[];
     onUpdateItem: (itemId: string, updates: Partial<ReceiveCartItem>) => void;
@@ -16,71 +20,110 @@ interface ReceiveCartProps {
     isSubmitDisabled: boolean;
     isSubmitting: boolean;
 }
-function CartItem({ item, onEdit, onDelete }: {
+
+function CartItemCard({
+    item,
+    onEdit,
+    onDelete,
+}: {
     item: ReceiveCartItem;
     onEdit: (item: ReceiveCartItem) => void;
     onDelete: (itemId: string) => void;
 }) {
     const imageUrl = useMemo(() => {
-        return item.image ? URL.createObjectURL(item.image) : null;
-    }, [item.image]);
-    return (<div className="flex items-start justify-between p-4 border rounded-lg">
-      <div className="space-y-1">
-        <p className="font-medium">{item.itemName}</p>
-        <p className="text-sm text-muted-foreground">
-          NAC Code: {item.nacCode}
-        </p>
-        <p className="text-sm">
-          Receive Quantity: {item.receiveQuantity}
-        </p>
-        {item.partNumber && (<p className="text-sm">Part Number: {item.partNumber}</p>)}
-        <p className="text-sm">
-          Equipment Number: {item.equipmentNumber}
-        </p>
-        <p className="text-sm">
-          Location: {item.location}
-        </p>
-        {imageUrl && (<div className="mt-2">
-            <Image src={imageUrl} alt="Item" width={200} height={200} className="max-w-[200px] h-auto rounded-md" unoptimized/>
-          </div>)}
-      </div>
-      <div className="flex space-x-2">
-        <Button variant="ghost" size="icon" onClick={() => onEdit(item)}>
-          <Pencil className="h-4 w-4"/>
-        </Button>
-        <Button variant="ghost" size="icon" onClick={() => onDelete(item.id)}>
-          <Trash2 className="h-4 w-4"/>
-        </Button>
-      </div>
-    </div>);
+        if (item.image) return URL.createObjectURL(item.image);
+        if (item.imagePath) return resolveImageUrl(item.imagePath, '/images/nepal_airlines_logo.png');
+        return null;
+    }, [item.image, item.imagePath]);
+
+    const maxQty = item.remainingQuantity ?? item.requestedQuantity;
+
+    return (
+        <div className="rounded-lg border border-[#002a6e]/10 bg-white p-3 shadow-sm hover:border-[#003594]/20 transition-colors">
+            <div className="flex gap-3">
+                <div className="relative w-14 h-14 shrink-0 rounded-md border border-[#002a6e]/10 bg-gray-50 overflow-hidden">
+                    {imageUrl ? (
+                        <Image src={imageUrl} alt={item.itemName} fill className="object-cover" unoptimized />
+                    ) : (
+                        <div className="flex h-full items-center justify-center text-gray-400">
+                            <Package className="h-5 w-5" />
+                        </div>
+                    )}
+                </div>
+                <div className="min-w-0 flex-1">
+                    <p className="font-medium text-sm text-gray-900 line-clamp-2">{item.itemName}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                        {item.requestNumber && (
+                            <Badge variant="outline" className="text-[10px] font-mono">
+                                {item.requestNumber}
+                            </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-[10px] font-mono">
+                            {item.nacCode}
+                        </Badge>
+                        {item.resolvedNacCode && item.resolvedNacCode !== item.nacCode && (
+                            <Badge className="text-[10px] bg-amber-100 text-amber-800 hover:bg-amber-100">
+                                → {item.resolvedNacCode}
+                            </Badge>
+                        )}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-1.5">
+                        Qty <strong>{item.receiveQuantity}</strong> {item.unit}
+                        {item.partNumber && <> · Part {item.partNumber}</>}
+                    </p>
+                    {item.equipmentNumber && (
+                        <p className="text-xs text-gray-500 truncate mt-0.5">{item.equipmentNumber}</p>
+                    )}
+                </div>
+                <div className="flex flex-col gap-1 shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(item)}>
+                        <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700" onClick={() => onDelete(item.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                </div>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-2">Max remaining: {maxQty}</p>
+        </div>
+    );
 }
-export function ReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSubmitDisabled, isSubmitting, }: ReceiveCartProps) {
+
+export function ReceiveCart({
+    items,
+    onUpdateItem,
+    onDeleteItem,
+    onSubmit,
+    isSubmitDisabled,
+    isSubmitting,
+}: ReceiveCartProps) {
     const { showErrorToast } = useCustomToast();
     const [editingItem, setEditingItem] = useState<ReceiveCartItem | null>(null);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [editFormData, setEditFormData] = useState<Partial<ReceiveCartItem>>({});
+
+    const totalQty = items.reduce((sum, i) => sum + i.receiveQuantity, 0);
+
     const handleEdit = (item: ReceiveCartItem) => {
         setEditingItem(item);
         setIsEditDialogOpen(true);
         setEditFormData({
-            itemName: item.itemName,
-            nacCode: item.nacCode,
-            partNumber: item.partNumber,
-            equipmentNumber: item.equipmentNumber,
-            location: item.location,
             receiveQuantity: item.receiveQuantity,
+            partNumber: item.partNumber,
+            location: item.location,
             unit: item.unit,
             image: item.image,
         });
     };
+
     const handleEditSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        if (!editingItem)
-            return;
-        if (editFormData.receiveQuantity && editFormData.receiveQuantity > editingItem.requestedQuantity) {
+        if (!editingItem) return;
+        const maxQty = editingItem.remainingQuantity ?? editingItem.requestedQuantity;
+        if (editFormData.receiveQuantity && editFormData.receiveQuantity > maxQty) {
             showErrorToast({
-                title: 'Error',
-                message: `Receive quantity cannot be greater than requested quantity (${editingItem.requestedQuantity})`,
+                title: 'Invalid quantity',
+                message: `Cannot exceed remaining quantity (${maxQty})`,
                 duration: 3000,
             });
             return;
@@ -88,110 +131,99 @@ export function ReceiveCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSub
         onUpdateItem(editingItem.id, {
             receiveQuantity: editFormData.receiveQuantity,
             partNumber: editFormData.partNumber,
-            equipmentNumber: editFormData.equipmentNumber,
             location: editFormData.location,
             image: editFormData.image,
+            isLocationChanged: editFormData.location !== editingItem.location,
         });
         setIsEditDialogOpen(false);
         setEditingItem(null);
     };
-    const handleEditImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setEditFormData(prev => ({ ...prev, image: file }));
-        }
-    };
-    return (<div className="space-y-4">
-      <h2 className="text-lg font-semibold">Receive Cart</h2>
-      {items.length === 0 ? (<p className="text-muted-foreground">No items in cart</p>) : (<div className="space-y-4">
-          {items.map((item) => (<CartItem key={item.id} item={item} onEdit={handleEdit} onDelete={onDeleteItem}/>))}
-        </div>)}
 
-      <div className="flex justify-end mt-4">
-        <Button onClick={onSubmit} disabled={isSubmitDisabled || isSubmitting} className="w-full sm:w-auto">
-          {isSubmitting ? "Submitting..." : "Submit Receive"}
-        </Button>
-      </div>
-
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-2xl w-[95vw] bg-white">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-              Edit Item Details
-            </DialogTitle>
-            <p className="text-sm text-gray-500 mt-1">
-              Update the item details in your receive
-            </p>
-          </DialogHeader>
-
-          <form onSubmit={handleEditSubmit} className="space-y-6 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="editItemName" className="text-sm font-medium text-[#003594]">Item Name</Label>
-                  <Input id="editItemName" value={editFormData.itemName} onChange={(e) => setEditFormData(prev => ({ ...prev, itemName: e.target.value }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" readOnly/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editNacCode" className="text-sm font-medium text-[#003594]">NAC Code</Label>
-                  <Input id="editNacCode" value={editFormData.nacCode} onChange={(e) => setEditFormData(prev => ({ ...prev, nacCode: e.target.value }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" disabled={editingItem?.nacCode !== 'N/A'}/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editPartNumber" className="text-sm font-medium text-[#003594]">Part Number</Label>
-                  <Input id="editPartNumber" value={editFormData.partNumber} onChange={(e) => setEditFormData(prev => ({ ...prev, partNumber: e.target.value }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" disabled={editingItem?.partNumber !== 'N/A'}/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editEquipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-                  <Input id="editEquipmentNumber" value={editFormData.equipmentNumber} onChange={(e) => setEditFormData(prev => ({ ...prev, equipmentNumber: e.target.value }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" readOnly/>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="editReceiveQuantity" className="text-sm font-medium text-[#003594]">Receive Quantity</Label>
-                  <Input id="editReceiveQuantity" type="number" value={editFormData.receiveQuantity} onChange={(e) => setEditFormData(prev => ({ ...prev, receiveQuantity: Number(e.target.value) }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" min="1" max={editingItem?.requestedQuantity} required/>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Max: {editingItem?.requestedQuantity}
-                  </div>
-                </div>
-
-                <div>
-                  <Label htmlFor="editUnit" className="text-sm font-medium text-[#003594]">Unit</Label>
-                  <Input id="editUnit" value={editFormData.unit} onChange={(e) => setEditFormData(prev => ({ ...prev, unit: e.target.value }))} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" placeholder="Enter unit"/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editLocation" className="text-sm font-medium text-[#003594]">Location</Label>
-                  <Input id="editLocation" value={editFormData.location} onChange={(e) => {
-            setEditFormData(prev => ({
-                ...prev,
-                location: e.target.value,
-                isLocationChanged: true
-            }));
-        }} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20" placeholder="Enter location" disabled={editFormData.nacCode !== 'N/A'}/>
-                </div>
-
-                <div>
-                  <Label htmlFor="editImage" className="text-sm font-medium text-[#003594]">Item Image</Label>
-                  <div className="mt-1">
-                    <Input id="editImage" type="file" accept="image/*" onChange={handleEditImageChange} className="border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-[#003594] file:text-white hover:file:bg-[#d2293b] transition-colors"/>
-                  </div>
-                </div>
-              </div>
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-[#003594] flex items-center gap-2">
+                    <ShoppingCart className="h-5 w-5" />
+                    Receive Cart
+                </h2>
+                {items.length > 0 && (
+                    <Badge className="bg-[#003594]">
+                        {items.length} item{items.length !== 1 ? 's' : ''} · {totalQty} units
+                    </Badge>
+                )}
             </div>
 
-            <div className="flex justify-end gap-4 pt-4 border-t border-[#002a6e]/10">
-              <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)} className="border-[#002a6e]/10 hover:bg-[#003594]/5 hover:text-[#003594] transition-colors">
-                Cancel
-              </Button>
-              <Button type="submit" className="bg-[#003594] hover:bg-[#d2293b] text-white transition-colors">
-                Save Changes
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </div>);
+            {items.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-[#002a6e]/20 p-6 text-center">
+                    <Package className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+                    <p className="text-sm text-muted-foreground">No items in cart</p>
+                    <p className="text-xs text-gray-400 mt-1">Select a request from the list to receive</p>
+                </div>
+            ) : (
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                    {items.map((item) => (
+                        <CartItemCard key={item.id} item={item} onEdit={handleEdit} onDelete={onDeleteItem} />
+                    ))}
+                </div>
+            )}
+
+            <Button
+                onClick={onSubmit}
+                disabled={isSubmitDisabled || isSubmitting}
+                className="w-full bg-[#003594] hover:bg-[#d2293b]"
+            >
+                {isSubmitting ? 'Submitting…' : `Review & Submit (${items.length})`}
+            </Button>
+
+            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent className="sm:max-w-md bg-white">
+                    <DialogHeader>
+                        <DialogTitle className="text-[#003594]">Edit cart item</DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={handleEditSubmit} className="space-y-4">
+                        <div>
+                            <Label>Receive quantity</Label>
+                            <Input
+                                type="number"
+                                min={1}
+                                max={editingItem?.remainingQuantity ?? editingItem?.requestedQuantity}
+                                value={editFormData.receiveQuantity ?? ''}
+                                onChange={(e) =>
+                                    setEditFormData((prev) => ({ ...prev, receiveQuantity: Number(e.target.value) }))
+                                }
+                                className="mt-1"
+                            />
+                        </div>
+                        <div>
+                            <Label>Location</Label>
+                            <Input
+                                value={editFormData.location ?? ''}
+                                onChange={(e) => setEditFormData((prev) => ({ ...prev, location: e.target.value }))}
+                                className="mt-1"
+                                disabled={editingItem?.nacCode !== 'N/A'}
+                            />
+                        </div>
+                        <div>
+                            <Label>Replace photo</Label>
+                            <Input
+                                type="file"
+                                accept="image/*"
+                                className="mt-1"
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) setEditFormData((prev) => ({ ...prev, image: file }));
+                                }}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button type="submit">Save</Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
 }

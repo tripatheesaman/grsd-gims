@@ -53,13 +53,23 @@ export function normalizeEquipmentSearchQuery(raw: string): string | undefined {
     }
     return trimmed;
 }
+import { collapseEquipmentSelectionValue } from './formatApplicableEquipments';
+
+export { collapseEquipmentSelectionValue };
+
 export function normalizeEquipmentNumbers(equipmentNumbers: string): string {
     let normalized = String(equipmentNumbers);
     normalized = normalized.replace(/\b(ge|GE)\b/g, '');
     const items = normalized.split(',').map(item => item.trim());
     const numbers: number[] = [];
+    const explicitRanges: string[] = [];
     const descriptions = new Set<string>();
     for (const item of items) {
+        const rangeMatch = item.match(/^(\d+)\s*-\s*(\d+)$/);
+        if (rangeMatch) {
+            explicitRanges.push(`${rangeMatch[1]}-${rangeMatch[2]}`);
+            continue;
+        }
         if (/^\d+$/.test(item)) {
             numbers.push(parseInt(item, 10));
         }
@@ -99,6 +109,9 @@ export function normalizeEquipmentNumbers(equipmentNumbers: string): string {
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' '));
     const resultParts: string[] = [];
+    if (explicitRanges.length > 0) {
+        resultParts.push(explicitRanges.join(', '));
+    }
     if (rangeNumbers.length > 0) {
         resultParts.push(rangeNumbers.join(', '));
     }

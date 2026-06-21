@@ -12,7 +12,6 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
-    DialogFooter,
     DialogDescription,
 } from '@/components/ui/dialog';
 import {
@@ -23,6 +22,9 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Trash2 } from 'lucide-react';
+import { ApprovalProcessingOverlay } from '@/components/dashboard/ApprovalProcessingOverlay';
+import { ApprovalActionBar, ApprovalRejectModal, ApprovalConfirmModal } from '@/components/approvals';
+import { approvalTheme } from '@/components/approvals/approvalTheme';
 import {
     Table,
     TableBody,
@@ -141,6 +143,9 @@ export function CapitalRRPDetailsModal({
     const { showErrorToast } = useCustomToast();
     const [isEditMode, setIsEditMode] = useState(false);
     const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+    const [isApproving, setIsApproving] = useState(false);
+    const [isRejecting, setIsRejecting] = useState(false);
+    const isProcessing = isApproving || isRejecting;
     const [rejectionReason, setRejectionReason] = useState('');
     const [itemToDelete, setItemToDelete] = useState<number | null>(null);
     const [editData, setEditData] = useState<CapitalRRPApprovalData | null>(null);
@@ -148,8 +153,6 @@ export function CapitalRRPDetailsModal({
     const vatRate = Number(config.vat_rate) || 0;
     const settings = config.asset_settings || {};
     const servicabilityOptions: string[] = settings.servicability_statuses || [];
-    const weightUnits: string[] = settings.weight_units || ['KG'];
-    const sizeUnits: string[] = settings.size_units || ['M'];
     const qtyUnits: string[] = settings.quantity_units || ['EA'];
     const locations: string[] = settings.locations || [];
     const suppliers = config.supplier_list_capital || [];
@@ -197,11 +200,25 @@ export function CapitalRRPDetailsModal({
         }
     };
 
+    const handleApprove = async () => {
+        if (isProcessing) return;
+        setIsApproving(true);
+        try {
+            await onApprove();
+        } catch {
+            showErrorToast({ title: 'Error', message: 'Failed to approve capital RRP', duration: 3000 });
+        } finally {
+            setIsApproving(false);
+        }
+    };
+
     const handleReject = async () => {
+        if (isProcessing) return;
         if (!rejectionReason.trim()) {
             showErrorToast({ title: 'Error', message: 'Please provide a reason for rejection', duration: 3000 });
             return;
         }
+        setIsRejecting(true);
         try {
             await onReject(rejectionReason);
             setIsRejectDialogOpen(false);
@@ -209,6 +226,9 @@ export function CapitalRRPDetailsModal({
         }
         catch {
             showErrorToast({ title: 'Error', message: 'Failed to reject capital RRP', duration: 3000 });
+        }
+        finally {
+            setIsRejecting(false);
         }
     };
 
@@ -265,17 +285,21 @@ export function CapitalRRPDetailsModal({
     return (
         <>
             <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-                <DialogContent className="max-w-[95vw] max-h-[90vh] overflow-y-auto bg-white text-gray-900">
-                    <DialogHeader className="border-b pb-4">
-                        <DialogTitle className="text-2xl font-bold text-[#002a6e]">
+                <DialogContent className="relative flex w-full max-w-[min(96vw,72rem)] flex-col gap-0 overflow-hidden p-0 text-gray-900 sm:rounded-2xl">
+                    <ApprovalProcessingOverlay
+                        active={isProcessing}
+                        label={isApproving ? 'Approving capital RRP…' : 'Rejecting capital RRP…'}
+                    />
+                    <DialogHeader className="shrink-0 border-b border-slate-100 px-4 py-4 sm:px-6">
+                        <DialogTitle className={`text-lg font-bold sm:text-2xl ${approvalTheme.titleGradient}`}>
                             Capital RRP (RRCP) — {display.rrpNumber}
                         </DialogTitle>
-                        <DialogDescription>
-                            Review and edit RRCP details before approval. Approving registers equipment in Asset Management.
+                        <DialogDescription className="text-sm text-slate-600">
+                            Review RRCP details before approval. Approving registers equipment in Asset Management.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-6 py-2">
+                    <div className={`${approvalTheme.modalScrollBody} space-y-6`}>
                         <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
                             <h3 className="text-lg font-bold text-gray-900 mb-4">RRP Information</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -706,87 +730,69 @@ export function CapitalRRPDetailsModal({
                         </div>
                     </div>
 
-                    <DialogFooter className="flex justify-end gap-2 border-t pt-4">
+                    <div className="sticky bottom-0 z-10 -mx-4 border-t border-slate-100 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
                         {!isEditMode ? (
-                            <>
-                                <Button variant="outline" onClick={() => setIsRejectDialogOpen(true)}>
-                                    Reject
-                                </Button>
-                                <Button
-                                    className="bg-[#003594] hover:bg-[#003594]/90"
-                                    onClick={() => onApprove()}
-                                >
-                                    Approve &amp; add to assets
-                                </Button>
-                                <Button className="bg-[#003594] hover:bg-[#003594]/90" onClick={handleEditClick}>
-                                    Edit
-                                </Button>
-                            </>
+                            <ApprovalActionBar
+                                onApprove={handleApprove}
+                                onReject={() => setIsRejectDialogOpen(true)}
+                                onEdit={handleEditClick}
+                                isApproving={isApproving}
+                                isRejecting={isRejecting}
+                                disabled={isProcessing}
+                                approveLabel="Approve & add to assets"
+                            />
                         ) : (
-                            <>
-                                <Button variant="outline" onClick={() => { setIsEditMode(false); setEditData(null); }}>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        setIsEditMode(false);
+                                        setEditData(null);
+                                    }}
+                                    className="w-full sm:w-auto"
+                                >
                                     Cancel
                                 </Button>
-                                <Button className="bg-[#003594] hover:bg-[#003594]/90" onClick={handleSaveEdit}>
+                                <Button
+                                    className="w-full bg-[#003594] hover:bg-[#003594]/90 sm:w-auto"
+                                    onClick={handleSaveEdit}
+                                >
                                     Save changes
                                 </Button>
-                            </>
+                            </div>
                         )}
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-                <DialogContent className="bg-white">
-                    <DialogHeader>
-                        <DialogTitle className="text-[#002a6e]">Reject Capital RRP</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-2 py-2">
-                        <Label>Reason for rejection</Label>
-                        <Input
-                            value={rejectionReason}
-                            onChange={(e) => setRejectionReason(e.target.value)}
-                            placeholder="Enter reason"
-                            className="bg-white"
-                        />
                     </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsRejectDialogOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button className="bg-[#003594]" onClick={handleReject}>
-                            Confirm rejection
-                        </Button>
-                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={itemToDelete !== null} onOpenChange={() => setItemToDelete(null)}>
-                <DialogContent className="bg-white">
-                    <DialogHeader>
-                        <DialogTitle>Delete equipment line</DialogTitle>
-                        <DialogDescription>This cannot be undone. Receive quantity will be restored.</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setItemToDelete(null)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            onClick={async () => {
-                                if (itemToDelete !== null && editData && onDeleteItem) {
-                                    const updated = editData.items.filter((i) => i.id !== itemToDelete);
-                                    setEditData({ ...editData, items: updated });
-                                    await onDeleteItem(itemToDelete);
-                                    setItemToDelete(null);
-                                }
-                            }}
-                        >
-                            Delete
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ApprovalRejectModal
+                open={isRejectDialogOpen}
+                onOpenChange={setIsRejectDialogOpen}
+                title="Reject Capital RRP"
+                description="Please provide a reason for rejecting this capital RRP."
+                reason={rejectionReason}
+                onReasonChange={setRejectionReason}
+                onConfirm={handleReject}
+                onCancel={() => setRejectionReason('')}
+                isRejecting={isRejecting}
+                confirmLabel="Confirm rejection"
+            />
+
+            <ApprovalConfirmModal
+                open={itemToDelete !== null}
+                onOpenChange={(open) => !open && setItemToDelete(null)}
+                title="Delete equipment line"
+                description="This cannot be undone. Receive quantity will be restored."
+                onConfirm={async () => {
+                    if (itemToDelete !== null && editData && onDeleteItem) {
+                        const updated = editData.items.filter((i) => i.id !== itemToDelete);
+                        setEditData({ ...editData, items: updated });
+                        await onDeleteItem(itemToDelete);
+                        setItemToDelete(null);
+                    }
+                }}
+                confirmLabel="Delete line"
+            />
         </>
     );
 }

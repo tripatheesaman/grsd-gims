@@ -4,6 +4,8 @@ import pool from '../config/db';
 import { formatDate, formatDateForDB, utcToLocalDateString } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
+import { releaseRrpReceives } from '../services/rrpReleaseService';
+import { resolveActorPerson } from '../services/personDetailsService';
 import { setNoCacheHeaders } from '../utils/approvalResponse';
 import {
     normalizeRrpBaseNumber,
@@ -468,15 +470,22 @@ export const getPendingRRPs = async (req: Request, res: Response): Promise<void>
             WHERE rd.approval_status = 'PENDING'
               AND (rd.rrp_category IS NULL OR rd.rrp_category <> 'capital')
             ORDER BY rd.date DESC`);
-        const formattedRows = rows.map(row => ({
-            ...row,
-            date: formatDateForDB(row.date),
-            invoice_date: formatDateForDB(row.invoice_date),
-            receive_date: formatDateForDB(row.receive_date),
-            request_date: formatDateForDB(row.request_date),
-            customs_date: formatDateForDB(row.customs_date),
-            inspection_details: JSON.parse(row.inspection_details)
-        }));
+        const formattedRows = await Promise.all(
+            rows.map(async (row) => {
+                const createdByDetails = await resolveActorPerson(pool, row.created_by);
+                return {
+                    ...row,
+                    date: formatDateForDB(row.date),
+                    invoice_date: formatDateForDB(row.invoice_date),
+                    receive_date: formatDateForDB(row.receive_date),
+                    request_date: formatDateForDB(row.request_date),
+                    customs_date: formatDateForDB(row.customs_date),
+                    inspection_details: JSON.parse(row.inspection_details),
+                    created_by: createdByDetails.name,
+                    createdByDetails,
+                };
+            })
+        );
         logEvents(`Successfully fetched ${formattedRows.length} pending RRPs`, "rrpLog.log");
         res.status(200).json({
             config,
@@ -606,13 +615,7 @@ export const rejectRRP = async (req: Request, res: Response): Promise<void> => {
             });
             return;
         }
-        await connection.query(`UPDATE receive_details rd
-             SET rrp_fk = NULL
-             WHERE EXISTS (
-                 SELECT 1 FROM rrp_details rrp
-                 WHERE rrp.receive_fk = rd.id
-                 AND rrp.rrp_number = ?
-             )`, [rrpNumber]);
+        await releaseRrpReceives(connection, rrpNumber);
         await connection.query(`INSERT INTO notifications 
              (user_id, reference_type, message, reference_id)
              VALUES (?, ?, ?, ?)`, [

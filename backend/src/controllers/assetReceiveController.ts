@@ -5,6 +5,7 @@ import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { setNoCacheHeaders } from '../utils/approvalResponse';
+import { resolveActorPerson } from '../services/personDetailsService';
 
 export interface AssetReceiveRequest {
     receiveDate: string;
@@ -84,6 +85,7 @@ export const getAssetReceiveDetails = async (req: Request, res: Response): Promi
             return;
         }
         const row = rows[0] as any;
+        const receivedByDetails = await resolveActorPerson(pool, row.received_by);
         res.status(200).json({
             receiveId: row.id,
             requestNumber: '',
@@ -99,7 +101,8 @@ export const getAssetReceiveDetails = async (req: Request, res: Response): Promi
             requestedUnit: 'EA',
             nacCode: 'ASSETS',
             receiveSource: 'assets',
-            receivedBy: row.received_by,
+            receivedBy: receivedByDetails.name,
+            receivedByDetails,
             approvalStatus: row.approval_status,
             imagePath: row.image_path || '',
         });

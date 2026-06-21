@@ -3,13 +3,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { IssueCartItem } from '@/types/issue';
 import { format } from 'date-fns';
-import { EquipmentSelect } from './EquipmentSelect';
-import { ConsumableIssueEquipmentSelect } from '@/components/issue/ConsumableIssueEquipmentSelect';
-import { isConsumableStock } from '@/utils/stockItem';
+import { IssueEquipmentSelect } from '@/components/issue/IssueEquipmentSelect';
+import { isEquipmentOutsideApplicable } from '@/utils/issueEquipmentUtils';
 import { API } from '@/lib/api';
-import { Pencil, Check, X, Trash2, Loader2, Package, Calendar, Hash, Scale } from 'lucide-react';
+import { Pencil, Check, X, Trash2, Loader2, Package, Calendar, Hash, Scale, AlertTriangle } from 'lucide-react';
+import { cn } from '@/utils/utils';
+
 interface IssuePreviewModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -20,16 +22,20 @@ interface IssuePreviewModalProps {
     date: Date;
     isSubmitting?: boolean;
 }
-interface EditableRowProps {
+
+function PreviewItemCard({
+    item,
+    onUpdate,
+    onDelete,
+}: {
     item: IssueCartItem;
     onUpdate: (updates: Partial<IssueCartItem>) => void;
     onDelete: (itemId: string) => void;
-}
-function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
+}) {
     const [isEditing, setIsEditing] = useState(false);
     const [editedItem, setEditedItem] = useState(item);
     const [sections, setSections] = useState<{ id: number; name: string; code: string }[]>([]);
-    const isConsumable = isConsumableStock(item.equipmentNumber);
+
     const fetchSections = useCallback(async () => {
         try {
             const res = await API.get('/api/settings/issue/sections/active');
@@ -38,174 +44,221 @@ function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
             setSections([]);
         }
     }, []);
+
     useEffect(() => {
-        if (isConsumable) {
-            fetchSections();
-        }
-    }, [isConsumable, fetchSections]);
+        void fetchSections();
+    }, [fetchSections]);
+
+    useEffect(() => {
+        setEditedItem(item);
+    }, [item]);
+
     const handleSave = () => {
         onUpdate(editedItem);
         setIsEditing(false);
     };
-    const handleCancel = () => {
-        setEditedItem(item);
-        setIsEditing(false);
-    };
-    if (isEditing) {
-        return (<tr className="hover:bg-gray-50">
-        <td className="px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-[#003594]"/>
-            <span className="font-medium text-[#003594]">{item.nacCode}</span>
-          </div>
-        </td>
-        <td className="px-6 py-4">
-          <span className="text-gray-900">{item.itemName}</span>
-        </td>
-        <td className="px-6 py-4">
-          {isConsumable ? (
-            <ConsumableIssueEquipmentSelect
-              value={editedItem.selectedEquipment}
-              onChange={(value) => setEditedItem({ ...editedItem, selectedEquipment: value })}
-              sections={sections}
-            />
-          ) : (
-            <EquipmentSelect equipmentList={item.equipmentNumber} value={editedItem.selectedEquipment} onChange={(value) => setEditedItem({ ...editedItem, selectedEquipment: value })}/>
-          )}
-        </td>
-        <td className="px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Scale className="h-4 w-4 text-[#003594]"/>
-            <Input type="number" value={editedItem.issueQuantity.toString()} onChange={(e) => setEditedItem({ ...editedItem, issueQuantity: parseFloat(e.target.value) })} className="w-24 border-[#002a6e]/10 focus-visible:ring-[#003594]" min={1} max={item.currentBalance} step="0.01"/>
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            Max: {item.currentBalance}
-          </div>
-        </td>
-        <td className="px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Hash className="h-4 w-4 text-[#003594]"/>
-            <span className="text-gray-900">{item.partNumber || 'NA'}</span>
-          </div>
-        </td>
-        <td className="px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={handleSave} className="h-8 w-8 text-[#003594] hover:text-[#002a6e] hover:bg-[#003594]/5">
-              <Check className="h-4 w-4"/>
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleCancel} className="h-8 w-8 text-[#d2293b] hover:text-[#d2293b] hover:bg-[#d2293b]/5">
-              <X className="h-4 w-4"/>
-            </Button>
-          </div>
-        </td>
-      </tr>);
-    }
-    return (<tr className="hover:bg-gray-50">
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <Package className="h-4 w-4 text-[#003594]"/>
-          <span className="font-medium text-[#003594]">{item.nacCode}</span>
+
+    return (
+        <div
+            className={cn(
+                'rounded-xl border p-4 transition-colors',
+                isEditing ? 'border-[#003594]/30 bg-[#003594]/5' : 'border-slate-200 bg-white'
+            )}
+        >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                        <Package className="h-4 w-4 text-[#003594] shrink-0" />
+                        <p className="font-semibold text-gray-900">{item.itemName}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-sm">
+                        <Badge variant="outline" className="font-mono">
+                            {item.nacCode}
+                        </Badge>
+                        <Badge variant="secondary">{item.partNumber || 'NA'}</Badge>
+                    </div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                    {!isEditing ? (
+                        <>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsEditing(true)}>
+                                <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-red-500"
+                                onClick={() => onDelete(item.id)}
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleSave}>
+                                <Check className="h-4 w-4 text-green-600" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => {
+                                    setEditedItem(item);
+                                    setIsEditing(false);
+                                }}
+                            >
+                                <X className="h-4 w-4 text-red-500" />
+                            </Button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div>
+                    <p className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1">
+                        <Hash className="h-3 w-3" /> Equipment
+                    </p>
+                    {isEditing ? (
+                        <IssueEquipmentSelect
+                            value={editedItem.selectedEquipment}
+                            onChange={(value) =>
+                                setEditedItem({ ...editedItem, selectedEquipment: value })
+                            }
+                            sections={sections}
+                        />
+                    ) : (
+                        <div className="space-y-1">
+                            <p className="font-medium text-gray-800">{item.selectedEquipment}</p>
+                            {isEquipmentOutsideApplicable(
+                                item.selectedEquipment,
+                                item.equipmentNumber,
+                                sections.map((s) => s.code)
+                            ) && (
+                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 text-[10px]">
+                                    <AlertTriangle className="h-3 w-3 mr-1 inline" />
+                                    New applicable equipment
+                                </Badge>
+                            )}
+                        </div>
+                    )}
+                </div>
+                <div>
+                    <p className="text-xs font-medium text-gray-500 flex items-center gap-1 mb-1">
+                        <Scale className="h-3 w-3" /> Quantity
+                    </p>
+                    {isEditing ? (
+                        <>
+                            <Input
+                                type="number"
+                                value={editedItem.issueQuantity.toString()}
+                                onChange={(e) =>
+                                    setEditedItem({
+                                        ...editedItem,
+                                        issueQuantity: parseFloat(e.target.value) || 1,
+                                    })
+                                }
+                                className="h-9 w-full max-w-[120px]"
+                                min={0.01}
+                                max={item.currentBalance}
+                                step="0.01"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Max: {item.currentBalance}</p>
+                        </>
+                    ) : (
+                        <p className="font-semibold text-[#003594]">{item.issueQuantity}</p>
+                    )}
+                </div>
+                <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">True balance (ref.)</p>
+                    <p className="font-medium text-emerald-700">{item.currentBalance}</p>
+                </div>
+            </div>
         </div>
-      </td>
-      <td className="px-6 py-4">
-        <span className="text-gray-900">{item.itemName}</span>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <Hash className="h-4 w-4 text-[#003594]"/>
-          <span className="text-gray-900">{item.selectedEquipment}</span>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <Scale className="h-4 w-4 text-[#003594]"/>
-          <span className="text-gray-900">{item.issueQuantity}</span>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <Hash className="h-4 w-4 text-[#003594]"/>
-          <span className="text-gray-900">{item.partNumber || 'NA'}</span>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => setIsEditing(true)} className="h-8 w-8 text-[#003594] hover:text-[#002a6e] hover:bg-[#003594]/5">
-            <Pencil className="h-4 w-4"/>
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => onDelete(item.id)} className="h-8 w-8 text-[#d2293b] hover:text-[#d2293b] hover:bg-[#d2293b]/5">
-            <Trash2 className="h-4 w-4"/>
-          </Button>
-        </div>
-      </td>
-    </tr>);
+    );
 }
-export function IssuePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, onDeleteItem, items, date, isSubmitting = false, }: IssuePreviewModalProps) {
-    return (<Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl border-[#002a6e]/10 bg-white flex flex-col max-h-[80vh]">
-        <DialogHeader>
-          <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-            Preview Issue Request
-          </DialogTitle>
-          <DialogDescription className="text-gray-600">
-            Review your issue request before submitting
-          </DialogDescription>
-        </DialogHeader>
 
-        
-        <div className="space-y-6 overflow-y-auto flex-1 min-h-0">
-          <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg border border-[#002a6e]/10">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-[#003594]"/>
-              <div>
-                <p className="text-sm text-gray-500">Issue Date</p>
-                <p className="font-medium text-[#003594]">{format(date, 'PPP')}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-[#003594]"/>
-              <div>
-                <p className="text-sm text-gray-500">Total Items</p>
-                <p className="font-medium text-[#003594]">{items.length}</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="border border-[#002a6e]/10 rounded-lg overflow-hidden">
-            <div className="overflow-x-auto">
-              <div className="max-h-[40vh] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-[#002a6e]/10 sticky top-0 z-10">
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">NAC Code</th>
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">Item Name</th>
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">Equipment</th>
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">Quantity</th>
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">Part Number</th>
-                      <th className="px-6 py-3 text-left font-medium text-[#003594]">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#002a6e]/10">
-                    {items.map((item) => (<EditableRow key={item.id} item={item} onUpdate={(updates) => onUpdateItem(item.id, updates)} onDelete={onDeleteItem}/>))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
+export function IssuePreviewModal({
+    isOpen,
+    onClose,
+    onConfirm,
+    onUpdateItem,
+    onDeleteItem,
+    items,
+    date,
+    isSubmitting = false,
+}: IssuePreviewModalProps) {
+    const totalQty = items.reduce((sum, i) => sum + i.issueQuantity, 0);
 
-        
-        <DialogFooter className="gap-3 pt-4 border-t border-[#002a6e]/10">
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting} className="border-[#002a6e]/10 hover:border-[#d2293b] hover:bg-[#d2293b]/5 text-[#d2293b]">
-            Cancel
-          </Button>
-          <Button onClick={onConfirm} disabled={isSubmitting} className="bg-[#003594] hover:bg-[#002a6e] text-white transition-colors">
-            {isSubmitting ? (<>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin"/>
-                Submitting...
-              </>) : ('Confirm Submit')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>);
+    return (
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="max-w-3xl border-[#002a6e]/10 bg-white flex flex-col max-h-[85vh]">
+                <DialogHeader>
+                    <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
+                        Review Issue Request
+                    </DialogTitle>
+                    <DialogDescription className="text-gray-600">
+                        Confirm items and quantities before submitting for approval
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 overflow-y-auto flex-1 min-h-0 py-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-xl border border-[#002a6e]/10 bg-slate-50 p-4">
+                        <div className="flex items-center gap-2">
+                            <Calendar className="h-5 w-5 text-[#003594]" />
+                            <div>
+                                <p className="text-xs text-gray-500">Issue date</p>
+                                <p className="font-semibold text-[#003594]">{format(date, 'PPP')}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Package className="h-5 w-5 text-[#003594]" />
+                            <div>
+                                <p className="text-xs text-gray-500">Line items</p>
+                                <p className="font-semibold text-[#003594]">{items.length}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Scale className="h-5 w-5 text-[#003594]" />
+                            <div>
+                                <p className="text-xs text-gray-500">Total quantity</p>
+                                <p className="font-semibold text-[#003594]">{totalQty}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        {items.map((item) => (
+                            <PreviewItemCard
+                                key={item.id}
+                                item={item}
+                                onUpdate={(updates) => onUpdateItem(item.id, updates)}
+                                onDelete={onDeleteItem}
+                            />
+                        ))}
+                    </div>
+                </div>
+
+                <DialogFooter className="gap-2 pt-4 border-t border-[#002a6e]/10">
+                    <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
+                        Back
+                    </Button>
+                    <Button
+                        onClick={onConfirm}
+                        disabled={isSubmitting}
+                        className="bg-[#003594] hover:bg-[#002a6e] text-white min-w-[140px]"
+                    >
+                        {isSubmitting ? (
+                            <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Submitting…
+                            </>
+                        ) : (
+                            'Confirm & Submit'
+                        )}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
 }

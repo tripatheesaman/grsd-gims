@@ -7,6 +7,10 @@ import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
 import { sendAlreadyProcessed } from '../utils/approvalResponse';
 import { ResultSetHeader } from 'mysql2';
+import {
+    analyzeFuelConsumptionBatch,
+    fuelTypeToNacCode,
+} from '../services/fuelConsumptionService';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -659,4 +663,53 @@ export const getLastReceive = async (req: Request, res: Response): Promise<void>
   } finally {
     connection.release();
   }
-}; 
+};
+
+export const previewFuelConsumption = async (req: Request, res: Response): Promise<void> => {
+    const { fuel_type, issue_date, records, previous_kilometers_by_equipment } = req.body as {
+        fuel_type?: string;
+        issue_date?: string;
+        records?: Array<{ equipment_number: string; kilometers: number; quantity: number }>;
+        previous_kilometers_by_equipment?: Record<string, number>;
+    };
+
+    if (!fuel_type || !Array.isArray(records) || records.length === 0) {
+        res.status(400).json({
+            error: 'Bad Request',
+            message: 'fuel_type and records are required',
+        });
+        return;
+    }
+
+    try {
+        fuelTypeToNacCode(fuel_type);
+    } catch {
+        res.status(400).json({ error: 'Bad Request', message: `Invalid fuel type: ${fuel_type}` });
+        return;
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        const analyses = await analyzeFuelConsumptionBatch(
+            connection,
+            fuel_type,
+            issue_date,
+            records,
+            { previousKilometersByEquipment: previous_kilometers_by_equipment }
+        );
+
+        res.status(200).json({
+            lines: analyses,
+            hasWarnings: analyses.some((line) => line.exceedsAverage),
+        });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error previewing fuel consumption: ${errorMessage}`, 'fuelLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
+        });
+    } finally {
+        connection.release();
+    }
+};

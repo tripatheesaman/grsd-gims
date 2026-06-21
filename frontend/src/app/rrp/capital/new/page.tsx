@@ -179,7 +179,7 @@ export default function NewCapitalRRPPage() {
             }
         };
         load();
-    }, []);
+    }, [isFromNotification, searchParams]);
 
     useEffect(() => {
         if (!isFromNotification && latestRRPInfo?.nextRRPNumber && !allowManualRRPNumberEdit) {
@@ -258,7 +258,7 @@ export default function NewCapitalRRPPage() {
                 return;
             }
         }
-        if (!/^C\d{3}$/i.test(rrpNumber)) {
+        if (!RRP_NUMBER_PATTERN.test(rrpNumber)) {
             showErrorToast({
                 title: 'Error',
                 message: `Invalid RRP number format. Must be ${RRP_PREFIX}001 (sequence resets each fiscal year)`,

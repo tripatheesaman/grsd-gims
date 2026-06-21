@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
+import { getNacCodeValidationError } from '../utils/nacCodeUtils';
 export interface TenderReceiveRequest {
     receiveDate: string;
     tenderNumber: string;
@@ -48,6 +49,10 @@ export const createTenderReceive = async (req: Request, res: Response): Promise<
             if (!item.nacCode || item.nacCode.trim() === '') {
                 logEvents(`Failed to create tender receive - Empty/null nacCode for tender ${receiveData.tenderNumber} by user: ${receiveData.receivedBy}`, "receiveLog.log");
                 throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the item has a valid NAC Code.`);
+            }
+            const nacFormatError = getNacCodeValidationError(item.nacCode, { allowSuffix: true });
+            if (nacFormatError) {
+                throw new Error(`${nacFormatError} (item: ${item.itemName})`);
             }
             logEvents(`Creating tender receive for tender ${receiveData.tenderNumber} with nacCode: "${item.nacCode}"`, "receiveLog.log");
             if (item.isNewItem === true) {

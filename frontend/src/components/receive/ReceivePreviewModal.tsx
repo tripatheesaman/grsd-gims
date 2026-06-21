@@ -34,6 +34,7 @@ export function ReceivePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, 
         itemName: item.itemName,
         equipmentNumber: item.equipmentNumber,
         location: item.location,
+        virtualBalance: 0,
         currentBalance: '0',
         unit: item.unit,
         specifications: '',
@@ -41,8 +42,9 @@ export function ReceivePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, 
         previousRate: '0',
         trueBalance: 0,
         averageCostPerUnit: 0,
-        requestedQuantity: item.receiveQuantity,
-        requestNumber: '',
+        requestedQuantity: item.requestedQuantity,
+        remainingQuantity: item.remainingQuantity ?? item.requestedQuantity,
+        requestNumber: item.requestNumber || '',
         requestDate: '',
         requestedBy: '',
         approvalStatus: ''
@@ -95,6 +97,10 @@ export function ReceivePreviewModal({ isOpen, onClose, onConfirm, onUpdateItem, 
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Package className="h-4 w-4"/>
                           <span>Quantity: {item.receiveQuantity}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Hash className="h-4 w-4"/>
+                          <span>NAC: {item.nacCode}{item.resolvedNacCode && item.resolvedNacCode !== item.nacCode ? ` → ${item.resolvedNacCode}` : ''}</span>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-gray-600">
                           <Hash className="h-4 w-4"/>

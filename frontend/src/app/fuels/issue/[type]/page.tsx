@@ -14,6 +14,8 @@ import { cn } from '@/lib/utils';
 import { useAuthContext } from '@/context/AuthContext';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { getErrorMessage } from '@/lib/errorHandling';
+import { FuelIssueConfirmModal } from '@/components/fuel/FuelIssueConfirmModal';
+import type { FuelConsumptionPreviewLine } from '@/types/fuel';
 interface FuelRecord {
     equipment_number: string;
     kilometers: number | '';
@@ -70,6 +72,9 @@ export default function FuelIssueFormPage() {
         [key: number]: number;
     }>({});
     const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+    const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+    const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+    const [consumptionPreview, setConsumptionPreview] = useState<FuelConsumptionPreviewLine[]>([]);
     const inputRefs = useRef<{
         [key: number]: HTMLInputElement | null;
     }>({});
@@ -260,6 +265,44 @@ export default function FuelIssueFormPage() {
             });
             return;
         }
+
+        setIsConfirmOpen(true);
+        setIsLoadingPreview(true);
+        setConsumptionPreview([]);
+        try {
+            const previousKmMap: Record<string, number> = {};
+            records.forEach((record) => {
+                if (record.equipment_number && config) {
+                    previousKmMap[record.equipment_number] =
+                        config.equipment_kilometers[record.equipment_number] ?? 0;
+                }
+            });
+            const previewRes = await API.post('/api/fuel/preview-consumption', {
+                fuel_type: type,
+                issue_date: format(date, 'yyyy-MM-dd'),
+                records: records.map((record) => ({
+                    equipment_number: record.equipment_number,
+                    kilometers: record.kilometers === '' ? 0 : Number(record.kilometers),
+                    quantity: record.quantity === '' ? 0 : Number(record.quantity),
+                })),
+                previous_kilometers_by_equipment: previousKmMap,
+            });
+            setConsumptionPreview(previewRes.data?.lines || []);
+        } catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to analyze fuel consumption'),
+            });
+            setIsConfirmOpen(false);
+        } finally {
+            setIsLoadingPreview(false);
+        }
+    };
+
+    const handleConfirmSubmit = async () => {
+        if (!user?.UserInfo?.username) {
+            return;
+        }
         setIsSubmitting(true);
         try {
             const recordsWithPrice = records.map(record => ({
@@ -281,6 +324,7 @@ export default function FuelIssueFormPage() {
                     title: 'Success',
                     message: 'Fuel records created successfully',
                 });
+                setIsConfirmOpen(false);
                 router.push('/fuels/issue');
             }
             else {
@@ -419,12 +463,25 @@ export default function FuelIssueFormPage() {
                 <Plus className="h-4 w-4"/>
                 Add Record
               </Button>
-              <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-[#003594] hover:bg-[#002a7a]">
-                {isSubmitting ? 'Submitting...' : 'Submit'}
+              <Button onClick={handleSubmit} disabled={isSubmitting || isLoadingPreview} className="bg-[#003594] hover:bg-[#002a7a]">
+                {isLoadingPreview ? 'Checking…' : 'Review & Submit'}
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <FuelIssueConfirmModal
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        onConfirm={handleConfirmSubmit}
+        isSubmitting={isSubmitting}
+        isLoadingPreview={isLoadingPreview}
+        fuelType={type}
+        issueDate={date}
+        price={price}
+        lines={consumptionPreview}
+        records={records}
+      />
     </div>);
 }

@@ -10,6 +10,10 @@ export interface IssueItem {
 export interface IssueCartItem extends IssueItem {
     selectedEquipment: string;
     issueQuantity: number;
+    virtualBalance?: number;
+    trueBalance?: number;
+    /** Part number hint from search — pre-select matching variant */
+    preferredPartNumber?: string;
 }
 export interface IssueRequest {
     issueDate: string;

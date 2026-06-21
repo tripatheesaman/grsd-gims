@@ -55,7 +55,7 @@ const formatUsd = (value: number) =>
 
 export default function InsuranceReportPage() {
     const { permissions } = useAuthContext();
-    const canAccessReport = permissions?.includes('can_access_report');
+    const canAccessReport = permissions?.includes('can_access_insurance_report') || permissions?.includes('can_access_report');
     const { fiscalYear, loading: fyLoading } = useFiscalYear();
     const { showErrorToast, showSuccessToast } = useCustomToast();
 

@@ -1,4 +1,5 @@
 'use client';
+
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthContext } from '@/context/AuthContext';
@@ -6,16 +7,33 @@ import { API } from '@/lib/api';
 import { usePendingReceivesQuery } from '@/hooks/api/usePendingApprovals';
 import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 import { isAxiosError } from 'axios';
+import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { Eye, X, Pencil, Check, Package } from 'lucide-react';
+import { Check, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTrigger, } from '@/components/ui/modal';
+import { ModalTitle } from '@/components/ui/modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { useCustomToast } from '@/components/ui/custom-toast';
-import Image from 'next/image';
+import {
+    ApprovalListModal,
+    ApprovalListCard,
+    ApprovalDetailModal,
+    ApprovalActionBar,
+    ApprovalMetaGrid,
+    ApprovalRejectModal,
+    ApprovalModalShell,
+    ApprovalModalBody,
+    ApprovalModalHeaderSection,
+    formatApprovalDate,
+    approvalTheme,
+    type ApprovalMetaItem,
+    personDetailsMetaBlock,
+} from '@/components/approvals';
+import type { PersonDetails } from '@/types/personDetails';
+import { ApprovalImagePreviewModal } from '@/components/approvals/ApprovalImagePreviewModal';
 import { resolveImageUrl, withBasePath } from '@/lib/urls';
+
 interface PendingReceive {
     id: number;
     nacCode: string;
@@ -32,6 +50,7 @@ interface PendingReceive {
     borrowSourceCode?: string;
     requestFk?: number;
 }
+
 interface ReceiveDetails {
     id: number;
     requestNumber: string;
@@ -57,7 +76,10 @@ interface ReceiveDetails {
     borrowSourceName?: string;
     borrowSourceCode?: string;
     requestFk?: number;
+    requestedByDetails?: PersonDetails;
+    receivedByDetails?: PersonDetails;
 }
+
 interface EditData {
     receivedQuantity: number;
     receivedPartNumber: string;
@@ -65,7 +87,209 @@ interface EditData {
     newRequestedImage?: File;
     newReceivedImage?: File;
 }
+
 const FALLBACK_IMAGE = '/images/nepal_airlines_logo.jpeg';
+
+function buildHeaderSummaryItems(receive: ReceiveDetails): ApprovalMetaItem[] {
+    if (receive.receiveSource === 'tender') {
+        return [
+            { label: 'Tender Reference', value: receive.tenderReferenceNumber || 'N/A' },
+            { label: 'Receive Date', value: formatApprovalDate(receive.receiveDate) },
+            { label: 'Equipment Number', value: receive.equipmentNumber || 'N/A' },
+        ];
+    }
+    if (receive.receiveSource === 'borrow') {
+        return [
+            {
+                label: 'Borrow Source',
+                value: (
+                    <>
+                        {receive.borrowSourceName || 'N/A'}
+                        {receive.borrowSourceCode && ` (${receive.borrowSourceCode})`}
+                    </>
+                ),
+            },
+            { label: 'Borrow Date', value: formatApprovalDate(receive.borrowDate) },
+            { label: 'Borrow Reference', value: receive.borrowReferenceNumber || 'N/A' },
+        ];
+    }
+    return [
+        { label: 'Request Date', value: formatApprovalDate(receive.requestDate) },
+        { label: 'Receive Date', value: formatApprovalDate(receive.receiveDate) },
+        { label: 'Equipment Number', value: receive.equipmentNumber || 'N/A' },
+        ...(receive.requestedByDetails
+            ? [personDetailsMetaBlock('Requested By', receive.requestedByDetails, 'sm:col-span-2 lg:col-span-3')]
+            : []),
+    ];
+}
+
+function buildRequestedColumnItems(
+    receive: ReceiveDetails,
+    onImageClick: (url: string) => void
+): ApprovalMetaItem[] {
+    const imageAlt =
+        receive.receiveSource === 'tender'
+            ? 'Tender Item'
+            : receive.receiveSource === 'borrow'
+              ? 'Borrow Item'
+              : 'Requested Item';
+
+    if (receive.receiveSource === 'tender') {
+        return [
+            { label: 'Tender Reference', value: receive.tenderReferenceNumber || 'N/A' },
+            { label: 'Item Name', value: receive.itemName },
+            { label: 'Part Number', value: receive.receivedPartNumber },
+            {
+                label: 'Image',
+                value: (
+                    <Image
+                        src={resolveImageUrl(receive.requestedImage, FALLBACK_IMAGE)}
+                        alt={imageAlt}
+                        width={160}
+                        height={160}
+                        className="h-40 w-40 cursor-pointer rounded-lg border border-slate-200 object-cover transition-opacity hover:opacity-80"
+                        onClick={() => receive.requestedImage && onImageClick(receive.requestedImage)}
+                        unoptimized
+                    />
+                ),
+            },
+        ];
+    }
+
+    if (receive.receiveSource === 'borrow') {
+        return [
+            {
+                label: 'Borrow Source',
+                value: (
+                    <>
+                        {receive.borrowSourceName || 'N/A'}
+                        {receive.borrowSourceCode && ` (${receive.borrowSourceCode})`}
+                    </>
+                ),
+            },
+            { label: 'Borrow Date', value: formatApprovalDate(receive.borrowDate) },
+            { label: 'Borrow Reference', value: receive.borrowReferenceNumber || 'N/A' },
+            { label: 'Item Name', value: receive.itemName },
+            { label: 'Part Number', value: receive.receivedPartNumber },
+            {
+                label: 'Image',
+                value: (
+                    <Image
+                        src={resolveImageUrl(receive.requestedImage, FALLBACK_IMAGE)}
+                        alt={imageAlt}
+                        width={160}
+                        height={160}
+                        className="h-40 w-40 cursor-pointer rounded-lg border border-slate-200 object-cover transition-opacity hover:opacity-80"
+                        onClick={() => receive.requestedImage && onImageClick(receive.requestedImage)}
+                        unoptimized
+                    />
+                ),
+            },
+        ];
+    }
+
+    return [
+        { label: 'Item Name', value: receive.itemName },
+        { label: 'Part Number', value: receive.requestedPartNumber },
+        {
+            label: 'Quantity',
+            value: (
+                <>
+                    {receive.requestedQuantity}
+                    {receive.requestedUnit && (
+                        <span className="ml-1 text-sm font-normal text-slate-600">
+                            {receive.requestedUnit}
+                        </span>
+                    )}
+                </>
+            ),
+        },
+        {
+            label: 'Image',
+            value: (
+                <Image
+                    src={resolveImageUrl(receive.requestedImage, FALLBACK_IMAGE)}
+                    alt={imageAlt}
+                    width={160}
+                    height={160}
+                    className="h-40 w-40 cursor-pointer rounded-lg border border-slate-200 object-cover transition-opacity hover:opacity-80"
+                    onClick={() => receive.requestedImage && onImageClick(receive.requestedImage)}
+                    unoptimized
+                />
+            ),
+        },
+    ];
+}
+
+function buildReceivedColumnItems(
+    receive: ReceiveDetails,
+    onImageClick: (url: string) => void
+): ApprovalMetaItem[] {
+    const items: ApprovalMetaItem[] = [
+        { label: 'Part Number', value: receive.receivedPartNumber },
+        {
+            label: 'Quantity',
+            value: (
+                <>
+                    {receive.receivedQuantity}
+                    {receive.unit && (
+                        <span className="ml-1 text-sm font-normal text-slate-600">{receive.unit}</span>
+                    )}
+                </>
+            ),
+        },
+        { label: 'Unit', value: receive.unit || 'N/A' },
+    ];
+
+    if (
+        receive.requestedUnit &&
+        receive.unit &&
+        receive.requestedUnit !== receive.unit &&
+        receive.conversionBase
+    ) {
+        items.push({
+            label: 'Conversion',
+            value: (
+                <div className="space-y-1">
+                    <p>
+                        1 {receive.requestedUnit} = {receive.conversionBase} {receive.unit}
+                    </p>
+                    <p className="text-xs font-normal text-slate-500">
+                        Effective stock added:{' '}
+                        {(receive.receivedQuantity / (receive.conversionBase || 1)).toFixed(4)}{' '}
+                        {receive.requestedUnit}
+                    </p>
+                </div>
+            ),
+        });
+    }
+
+    if (receive.location) {
+        items.push({ label: 'Location', value: receive.location });
+    }
+
+    if (receive.receivedByDetails) {
+        items.push(personDetailsMetaBlock('Received By', receive.receivedByDetails));
+    }
+
+    items.push({
+        label: 'Image',
+        value: (
+            <Image
+                src={resolveImageUrl(receive.receivedImage, FALLBACK_IMAGE)}
+                alt="Received Item"
+                width={160}
+                height={160}
+                className="h-40 w-40 cursor-pointer rounded-lg border border-slate-200 object-cover transition-opacity hover:opacity-80"
+                onClick={() => receive.receivedImage && onImageClick(receive.receivedImage)}
+                unoptimized
+            />
+        ),
+    });
+
+    return items;
+}
+
 export function PendingReceivesCount() {
     const queryClient = useQueryClient();
     const { permissions, user } = useAuthContext();
@@ -81,12 +305,20 @@ export function PendingReceivesCount() {
     const [selectedReceive, setSelectedReceive] = useState<ReceiveDetails | null>(null);
     const [editData, setEditData] = useState<EditData | null>(null);
     const [isApproving, setIsApproving] = useState(false);
+    const [isRejecting, setIsRejecting] = useState(false);
+    const isProcessing = isApproving || isRejecting;
+
+    const refreshPendingReceives = () => {
+        void invalidatePendingApprovals(queryClient, ['receive']);
+    };
+
     const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen && !isImagePreviewOpen;
     const { data: pendingRes, isLoading } = usePendingReceivesQuery(
         Boolean(permissions?.includes('can_approve_receive') && shouldPoll)
     );
     const pendingReceives = (pendingRes?.data as PendingReceive[] | undefined) ?? [];
     const pendingCount = pendingReceives.length;
+
     const handleViewDetails = async (receiveId: number) => {
         try {
             const response = await API.get(`/api/receive/${receiveId}/details`);
@@ -115,39 +347,39 @@ export function PendingReceivesCount() {
                     borrowDate: response.data.borrowDate,
                     borrowSourceName: response.data.borrowSourceName,
                     borrowSourceCode: response.data.borrowSourceCode,
-                    requestFk: response.data.requestFk
+                    requestFk: response.data.requestFk,
                 };
                 setSelectedReceive(receiveData);
                 setIsDetailsOpen(true);
             }
-        }
-        catch {
+        } catch {
             showErrorToast({
                 title: 'Error',
-                message: "Failed to fetch receive details",
+                message: 'Failed to fetch receive details',
                 duration: 3000,
             });
         }
     };
+
     const handleImageClick = (imageUrl: string) => {
         setSelectedImage(resolveImageUrl(imageUrl, FALLBACK_IMAGE));
         setIsImagePreviewOpen(true);
     };
+
     const handleEditClick = () => {
-        if (!selectedReceive)
-            return;
+        if (!selectedReceive) return;
         setEditData({
             receivedQuantity: selectedReceive.receivedQuantity,
             receivedPartNumber: selectedReceive.receivedPartNumber,
             unit: selectedReceive.unit,
             newRequestedImage: undefined,
-            newReceivedImage: undefined
+            newReceivedImage: undefined,
         });
         setIsEditOpen(true);
     };
+
     const handleSaveEdit = async () => {
-        if (!editData || !selectedReceive)
-            return;
+        if (!editData || !selectedReceive) return;
         setIsSaving(true);
         try {
             let newRequestedImagePath: string | undefined;
@@ -163,13 +395,16 @@ export function PendingReceivesCount() {
                     });
                     if (!uploadResponse.ok) {
                         const errorData = await uploadResponse.json();
-                        throw new Error(`Failed to upload requested image: ${errorData.error || uploadResponse.statusText}`);
+                        throw new Error(
+                            `Failed to upload requested image: ${errorData.error || uploadResponse.statusText}`
+                        );
                     }
                     const uploadResult = await uploadResponse.json();
                     newRequestedImagePath = uploadResult.path;
-                }
-                catch (error) {
-                    throw new Error(`Failed to upload requested image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                } catch (error) {
+                    throw new Error(
+                        `Failed to upload requested image: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    );
                 }
             }
             if (editData.newReceivedImage) {
@@ -183,13 +418,16 @@ export function PendingReceivesCount() {
                     });
                     if (!uploadResponse.ok) {
                         const errorData = await uploadResponse.json();
-                        throw new Error(`Failed to upload received image: ${errorData.error || uploadResponse.statusText}`);
+                        throw new Error(
+                            `Failed to upload received image: ${errorData.error || uploadResponse.statusText}`
+                        );
                     }
                     const uploadResult = await uploadResponse.json();
                     newReceivedImagePath = uploadResult.path;
-                }
-                catch (error) {
-                    throw new Error(`Failed to upload received image: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                } catch (error) {
+                    throw new Error(
+                        `Failed to upload received image: ${error instanceof Error ? error.message : 'Unknown error'}`
+                    );
                 }
             }
             const updatePayload: {
@@ -199,7 +437,7 @@ export function PendingReceivesCount() {
                 nacCode?: string;
             } = {
                 receivedQuantity: editData.receivedQuantity,
-                receivedPartNumber: editData.receivedPartNumber
+                receivedPartNumber: editData.receivedPartNumber,
             };
             const trimmedNacCode = selectedReceive.nacCode?.trim();
             if (trimmedNacCode && trimmedNacCode !== 'N/A') {
@@ -215,103 +453,103 @@ export function PendingReceivesCount() {
                     try {
                         await API.put(`/api/receive/${selectedReceive.id}/update-images`, {
                             requestedImagePath: newRequestedImagePath,
-                            receivedImagePath: newReceivedImagePath
+                            receivedImagePath: newReceivedImagePath,
                         });
-                    }
-                    catch {
+                    } catch {
                         showErrorToast({
                             title: 'Error',
-                            message: "Details updated but image update failed. Please try updating images again.",
+                            message:
+                                'Details updated but image update failed. Please try updating images again.',
                             duration: 5000,
                         });
                     }
                 }
                 showSuccessToast({
                     title: 'Success',
-                    message: "Receive details updated successfully",
+                    message: 'Receive details updated successfully',
                     duration: 3000,
                 });
                 setIsEditOpen(false);
                 handleViewDetails(selectedReceive.id);
-            }
-            else {
+            } else {
                 throw new Error(response.data?.message || 'Failed to update receive details');
             }
-        }
-        catch (error) {
+        } catch (error) {
             showErrorToast({
                 title: 'Error',
-                message: error instanceof Error ? error.message : "Failed to update receive details",
+                message: error instanceof Error ? error.message : 'Failed to update receive details',
                 duration: 5000,
             });
-        }
-        finally {
+        } finally {
             setIsSaving(false);
         }
     };
+
     const handleRejectClick = () => {
         setIsRejectOpen(true);
     };
+
     const handleRejectReceive = async () => {
-        if (!selectedReceive || !rejectionReason.trim()) {
-            showErrorToast({
-                title: 'Error',
-                message: "Please provide a reason for rejection",
-                duration: 3000,
-            });
+        if (!selectedReceive || !rejectionReason.trim() || isProcessing) {
+            if (!rejectionReason.trim()) {
+                showErrorToast({
+                    title: 'Error',
+                    message: 'Please provide a reason for rejection',
+                    duration: 3000,
+                });
+            }
             return;
         }
+        setIsRejecting(true);
         try {
             const response = await API.put(`/api/receive/${selectedReceive.id}/reject`, {
                 rejectedBy: user?.UserInfo?.username,
-                rejectionReason: rejectionReason.trim()
+                rejectionReason: rejectionReason.trim(),
             });
             if (response.status === 200) {
                 showSuccessToast({
                     title: 'Success',
-                    message: "Receive rejected successfully",
+                    message: 'Receive rejected successfully',
                     duration: 3000,
                 });
-                await invalidatePendingApprovals(queryClient);
                 setIsDetailsOpen(false);
                 setIsRejectOpen(false);
                 setRejectionReason('');
-            }
-            else {
+                refreshPendingReceives();
+            } else {
                 throw new Error(response.data?.message || 'Failed to reject receive');
             }
-        }
-        catch (error) {
+        } catch (error) {
             showErrorToast({
                 title: 'Error',
-                message: error instanceof Error ? error.message : "Failed to reject receive",
+                message: error instanceof Error ? error.message : 'Failed to reject receive',
                 duration: 5000,
             });
+        } finally {
+            setIsRejecting(false);
         }
     };
+
     const handleApproveReceive = async () => {
-        if (!selectedReceive || isApproving)
-            return;
+        if (!selectedReceive || isProcessing) return;
         setIsApproving(true);
         try {
             const response = await API.put(`/api/receive/${selectedReceive.id}/approve`);
             if (response.status === 200) {
                 showSuccessToast({
                     title: 'Success',
-                    message: "Receive approved successfully",
+                    message: 'Receive approved successfully',
                     duration: 3000,
                 });
-                await invalidatePendingApprovals(queryClient);
                 setIsDetailsOpen(false);
-            }
-            else {
+                refreshPendingReceives();
+            } else {
                 throw new Error(response.data?.message || 'Failed to approve receive');
             }
-        }
-        catch (error) {
+        } catch (error) {
             if (isAxiosError(error) && error.response?.status === 409) {
-                await invalidatePendingApprovals(queryClient);
                 setIsDetailsOpen(false);
+                refreshPendingReceives();
                 showSuccessToast({
                     title: 'Already processed',
                     message: 'This receive was already approved.',
@@ -321,496 +559,424 @@ export function PendingReceivesCount() {
             }
             showErrorToast({
                 title: 'Error',
-                message: error instanceof Error ? error.message : "Failed to approve receive",
+                message: error instanceof Error ? error.message : 'Failed to approve receive',
                 duration: 5000,
             });
-        }
-        finally {
+        } finally {
             setIsApproving(false);
         }
     };
+
+    const handleApproveAndClose = async () => {
+        if (!selectedReceive || isProcessing) return;
+        setIsApproving(true);
+        try {
+            const response = await API.put(`/api/receive/${selectedReceive.id}/approve-and-close`);
+            if (response.status === 200) {
+                showSuccessToast({
+                    title: 'Success',
+                    message: 'Receive approved and request force-closed',
+                    duration: 3000,
+                });
+                setIsDetailsOpen(false);
+                refreshPendingReceives();
+            } else {
+                throw new Error(response.data?.message || 'Failed to approve and close');
+            }
+        } catch (error) {
+            if (isAxiosError(error) && error.response?.status === 409) {
+                setIsDetailsOpen(false);
+                refreshPendingReceives();
+                showSuccessToast({
+                    title: 'Already processed',
+                    message: 'This receive was already approved.',
+                    duration: 3000,
+                });
+                return;
+            }
+            showErrorToast({
+                title: 'Error',
+                message: error instanceof Error ? error.message : 'Failed to approve and close',
+                duration: 5000,
+            });
+        } finally {
+            setIsApproving(false);
+        }
+    };
+
     const handleCloseEditModal = () => {
         setIsEditOpen(false);
         setEditData(null);
         setIsSaving(false);
     };
+
     const handleImageChange = (type: 'requested' | 'received', file: File) => {
-        if (!editData)
-            return;
-        setEditData(prev => prev ? {
-            ...prev,
-            [type === 'requested' ? 'newRequestedImage' : 'newReceivedImage']: file
-        } : null);
+        if (!editData) return;
+        setEditData((prev) =>
+            prev
+                ? {
+                      ...prev,
+                      [type === 'requested' ? 'newRequestedImage' : 'newReceivedImage']: file,
+                  }
+                : null
+        );
     };
+
+    const showApproveAndClose =
+        Boolean(selectedReceive?.requestFk) &&
+        (selectedReceive?.requestFk ?? 0) > 0 &&
+        selectedReceive?.receiveSource !== 'tender';
+
+    const requestedColumnTitle =
+        selectedReceive?.receiveSource === 'tender'
+            ? 'Tender Details'
+            : selectedReceive?.receiveSource === 'borrow'
+              ? 'Borrow Details'
+              : 'Requested Details';
+
     if (!permissions?.includes('can_approve_receive')) {
         return null;
     }
+
     if (isLoading) {
-        return (<div className="flex items-center justify-center h-24">
-        <div className="animate-spin rounded-full h-8 w-8 border-3 border-[#003594] border-t-transparent"></div>
-      </div>);
+        return (
+            <div className="flex h-24 items-center justify-center">
+                <div className="h-8 w-8 animate-spin rounded-full border-3 border-[#003594] border-t-transparent" />
+            </div>
+        );
     }
-    return (<>
-      <Modal open={isOpen} onOpenChange={setIsOpen}>
-        <ModalTrigger asChild>
-          <Card className="cursor-pointer hover:bg-[#003594]/5 transition-colors border-[#002a6e]/10">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-base font-semibold text-[#003594]">Pending Receives</CardTitle>
-              <Package className="h-5 w-5 text-[#003594]"/>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (<div className="text-3xl font-bold text-[#003594]">...</div>) : (<div className="text-3xl font-bold text-[#003594]">{pendingCount ?? 0}</div>)}
-              <p className="text-sm text-gray-500 mt-1">Items awaiting approval</p>
-            </CardContent>
-          </Card>
-        </ModalTrigger>
-        <ModalContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-              Pending Receives
-            </ModalTitle>
-            <ModalDescription className="text-gray-600">
-              Review and manage pending receives
-            </ModalDescription>
-          </ModalHeader>
 
-          <div className="mt-6 space-y-4">
-            {pendingReceives.map((receive) => (<div key={receive.id} className="rounded-lg border border-[#002a6e]/10 p-6 hover:bg-[#003594]/5 cursor-pointer transition-colors" onDoubleClick={() => handleViewDetails(receive.id)}>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">NAC Code</p>
-                    <p className="text-base font-semibold text-gray-900">{receive.nacCode}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Item Name</p>
-                    <p className="text-base font-semibold text-gray-900">{receive.itemName}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Part Number</p>
-                    <p className="text-base font-semibold text-gray-900">{receive.partNumber}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Received Quantity</p>
-                    <p className="text-base font-semibold text-gray-900">{receive.receivedQuantity}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Equipment Number</p>
-                    <p className="text-base font-semibold text-gray-900">{receive.equipmentNumber || 'N/A'}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Received Date</p>
-                    <p className="text-base font-semibold text-gray-900">{new Date(receive.receiveDate).toLocaleDateString()}</p>
-                  </div>
-                </div>
-                <div className="mt-4 text-xs text-gray-500 flex items-center gap-1">
-                  <Eye className="h-3 w-3"/>
-                  Double-click to view full details
-                </div>
-              </div>))}
-          </div>
-        </ModalContent>
-      </Modal>
+    return (
+        <>
+            <Card
+                className="cursor-pointer border-[#002a6e]/10 transition-colors hover:bg-[#003594]/5"
+                onClick={() => setIsOpen(true)}
+            >
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-base font-semibold text-[#003594]">
+                        Pending Receives
+                    </CardTitle>
+                    <Package className="h-5 w-5 text-[#003594]" />
+                </CardHeader>
+                <CardContent>
+                    {isLoading ? (
+                        <div className="text-3xl font-bold text-[#003594]">...</div>
+                    ) : (
+                        <div className="text-3xl font-bold text-[#003594]">{pendingCount ?? 0}</div>
+                    )}
+                    <p className="mt-1 text-sm text-gray-500">Items awaiting approval</p>
+                </CardContent>
+            </Card>
 
-      <Modal open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <ModalContent className="max-w-5xl max-h-[90vh] overflow-y-auto bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="flex items-center gap-2">
-                  <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-                    Receive Details
-                  </ModalTitle>
-                  {selectedReceive?.receiveSource === 'borrow' && (<span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                      BORROWED
-                    </span>)}
-                </div>
-                <ModalDescription className="mt-1 text-gray-600">
-                  {selectedReceive?.receiveSource === 'tender'
-            ? `Tender Reference: ${selectedReceive?.tenderReferenceNumber || 'N/A'}`
-            : selectedReceive?.receiveSource === 'borrow'
-                ? `Borrowed from: ${selectedReceive?.borrowSourceName || 'N/A'}`
-                : `Request #${selectedReceive?.requestNumber}`}
-                </ModalDescription>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" size="sm" className="flex items-center gap-2 border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594]" onClick={handleEditClick}>
-                  <Pencil className="h-4 w-4"/>
-                  Edit Details
-                </Button>
-                <Button variant="default" size="sm" disabled={isApproving} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white" onClick={handleApproveReceive}>
-                  <Check className="h-4 w-4"/>
-                  Approve
-                </Button>
-                {selectedReceive?.requestFk && selectedReceive.requestFk > 0 && selectedReceive.receiveSource !== 'tender' && (<Button variant="default" size="sm" disabled={isApproving} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" onClick={async () => {
-                if (isApproving)
-                    return;
-                setIsApproving(true);
-                try {
-                    const response = await API.put(`/api/receive/${selectedReceive.id}/approve-and-close`);
-                    if (response.status === 200) {
-                        showSuccessToast({
-                            title: 'Success',
-                            message: 'Receive approved and request force-closed',
-                            duration: 3000,
-                        });
-                        await invalidatePendingApprovals(queryClient);
-                        setIsDetailsOpen(false);
-                    }
-                    else {
-                        throw new Error(response.data?.message || 'Failed to approve and close');
-                    }
-                }
-                catch (error) {
-                    if (isAxiosError(error) && error.response?.status === 409) {
-                        await invalidatePendingApprovals(queryClient);
-                        setIsDetailsOpen(false);
-                        showSuccessToast({
-                            title: 'Already processed',
-                            message: 'This receive was already approved.',
-                            duration: 3000,
-                        });
-                        return;
-                    }
-                    showErrorToast({
-                        title: 'Error',
-                        message: error instanceof Error ? error.message : 'Failed to approve and close',
-                        duration: 5000,
-                    });
-                }
-                finally {
-                    setIsApproving(false);
-                }
-            }}>
-                    <Check className="h-4 w-4"/>
-                    Approve & Close Request
-                  </Button>)}
-                <Button variant="destructive" size="sm" className="flex items-center gap-2 bg-[#d2293b] hover:bg-[#d2293b]/90" onClick={handleRejectClick}>
-                  <X className="h-4 w-4"/>
-                  Reject
-                </Button>
-              </div>
-            </div>
-          </ModalHeader>
-          <div className="mt-6 space-y-6">
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 bg-[#003594]/5 rounded-lg">
-              {selectedReceive?.receiveSource === 'tender' ? (<>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Tender Reference</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.tenderReferenceNumber || 'N/A'}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Receive Date</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.receiveDate && new Date(selectedReceive.receiveDate).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Equipment Number</p>
-                    <p className="text-base font-semibold text-gray-900">{selectedReceive?.equipmentNumber || 'N/A'}</p>
-                  </div>
-                </>) : selectedReceive?.receiveSource === 'borrow' ? (<>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Borrow Source</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.borrowSourceName || 'N/A'}
-                      {selectedReceive?.borrowSourceCode && ` (${selectedReceive.borrowSourceCode})`}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Borrow Date</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.borrowDate && new Date(selectedReceive.borrowDate).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Borrow Reference</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.borrowReferenceNumber || 'N/A'}
-                    </p>
-                  </div>
-                </>) : (<>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Request Date</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.requestDate && new Date(selectedReceive.requestDate).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Receive Date</p>
-                    <p className="text-base font-semibold text-gray-900">
-                      {selectedReceive?.receiveDate && new Date(selectedReceive.receiveDate).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Equipment Number</p>
-                    <p className="text-base font-semibold text-gray-900">{selectedReceive?.equipmentNumber || 'N/A'}</p>
-                  </div>
-                </>)}
-            </div>
+            <ApprovalListModal
+                open={isOpen}
+                onOpenChange={setIsOpen}
+                title="Pending Receives"
+                description="Review and manage pending receives"
+                count={pendingCount}
+                isEmpty={!isLoading && pendingReceives.length === 0}
+                emptyMessage="No pending receives"
+                size="xl"
+            >
+                {pendingReceives.map((receive) => (
+                    <ApprovalListCard
+                        key={receive.id}
+                        onView={() => handleViewDetails(receive.id)}
+                        onClick={() => handleViewDetails(receive.id)}
+                        hint="Double-click or tap to view full details"
+                    >
+                        <ApprovalMetaGrid
+                            columns={3}
+                            items={[
+                                { label: 'NAC Code', value: receive.nacCode },
+                                { label: 'Item Name', value: receive.itemName },
+                                { label: 'Part Number', value: receive.partNumber },
+                                { label: 'Received Quantity', value: receive.receivedQuantity },
+                                { label: 'Equipment Number', value: receive.equipmentNumber || 'N/A' },
+                                {
+                                    label: 'Received Date',
+                                    value: formatApprovalDate(receive.receiveDate),
+                                },
+                            ]}
+                        />
+                    </ApprovalListCard>
+                ))}
+            </ApprovalListModal>
 
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              
-              <div className="space-y-6 p-6 border border-[#002a6e]/10 rounded-lg bg-white">
-                <h3 className="text-lg font-semibold text-[#003594]">
-                  {selectedReceive?.receiveSource === 'tender' ? 'Tender Details'
-            : selectedReceive?.receiveSource === 'borrow' ? 'Borrow Details'
-                : 'Requested Details'}
-                </h3>
-                <div className="space-y-6">
-                  {selectedReceive?.receiveSource === 'tender' ? (<>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Tender Reference</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.tenderReferenceNumber || 'N/A'}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Item Name</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.itemName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Part Number</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.receivedPartNumber}</p>
-                      </div>
-                    </>) : selectedReceive?.receiveSource === 'borrow' ? (<>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Borrow Source</p>
-                        <p className="text-base text-gray-900">
-                          {selectedReceive?.borrowSourceName || 'N/A'}
-                          {selectedReceive?.borrowSourceCode && ` (${selectedReceive.borrowSourceCode})`}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Borrow Date</p>
-                        <p className="text-base text-gray-900">
-                          {selectedReceive?.borrowDate && new Date(selectedReceive.borrowDate).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Borrow Reference</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.borrowReferenceNumber || 'N/A'}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Item Name</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.itemName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Part Number</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.receivedPartNumber}</p>
-                      </div>
-                    </>) : (<>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Item Name</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.itemName}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Part Number</p>
-                        <p className="text-base text-gray-900">{selectedReceive?.requestedPartNumber}</p>
-                      </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Quantity</p>
-                    <p className="text-base text-gray-900">
-                      {selectedReceive?.requestedQuantity}
-                      {selectedReceive?.requestedUnit && (<span className="ml-1 text-sm text-gray-600">
-                          {selectedReceive.requestedUnit}
-                        </span>)}
-                    </p>
-                  </div>
-                    </>)}
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Image</p>
-                    <div className="mt-2">
-                      <Image src={resolveImageUrl(selectedReceive?.requestedImage, FALLBACK_IMAGE)} alt={selectedReceive?.receiveSource === 'tender' ? 'Tender Item' : 'Requested Item'} width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.requestedImage && handleImageClick(selectedReceive.requestedImage)} unoptimized/>
+            <ApprovalDetailModal
+                open={isDetailsOpen}
+                onOpenChange={setIsDetailsOpen}
+                title="Receive Details"
+                description={
+                    selectedReceive?.receiveSource === 'tender'
+                        ? `Tender Reference: ${selectedReceive?.tenderReferenceNumber || 'N/A'}`
+                        : selectedReceive?.receiveSource === 'borrow'
+                          ? `Borrowed from: ${selectedReceive?.borrowSourceName || 'N/A'}`
+                          : `Request #${selectedReceive?.requestNumber}`
+                }
+                badges={
+                    selectedReceive?.receiveSource === 'borrow' ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800">
+                            BORROWED
+                        </span>
+                    ) : undefined
+                }
+                meta={
+                    selectedReceive ? (
+                        <ApprovalMetaGrid
+                            columns={3}
+                            items={buildHeaderSummaryItems(selectedReceive)}
+                            className="mt-1"
+                        />
+                    ) : undefined
+                }
+                processing={isProcessing}
+                processingLabel={isApproving ? 'Approving receive…' : 'Rejecting receive…'}
+                size="xl"
+                actions={
+                    <ApprovalActionBar
+                        onEdit={handleEditClick}
+                        onApprove={handleApproveReceive}
+                        onReject={handleRejectClick}
+                        isApproving={isApproving}
+                        isRejecting={isRejecting}
+                        editLabel="Edit Details"
+                        extraActions={
+                            showApproveAndClose ? (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    disabled={isProcessing}
+                                    onClick={handleApproveAndClose}
+                                    className="w-full bg-emerald-600 hover:bg-emerald-700 sm:w-auto"
+                                >
+                                    <Check className="mr-1.5 h-4 w-4" />
+                                    Approve & Close Request
+                                </Button>
+                            ) : undefined
+                        }
+                    />
+                }
+            >
+                {selectedReceive && (
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
+                        <div className="space-y-3">
+                            <h3 className="text-base font-semibold text-[#003594]">
+                                {requestedColumnTitle}
+                            </h3>
+                            <ApprovalMetaGrid
+                                columns={1}
+                                items={buildRequestedColumnItems(selectedReceive, handleImageClick)}
+                            />
+                        </div>
+                        <div className="space-y-3">
+                            <h3 className="text-base font-semibold text-[#003594]">Received Details</h3>
+                            <ApprovalMetaGrid
+                                columns={1}
+                                items={buildReceivedColumnItems(selectedReceive, handleImageClick)}
+                            />
+                        </div>
                     </div>
-                  </div>
-                </div>
-              </div>
+                )}
+            </ApprovalDetailModal>
 
-              
-              <div className="space-y-6 p-6 border border-[#002a6e]/10 rounded-lg bg-white">
-                <h3 className="text-lg font-semibold text-[#003594]">Received Details</h3>
-                <div className="space-y-6">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Part Number</p>
-                    <p className="text-base text-gray-900">{selectedReceive?.receivedPartNumber}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Quantity</p>
-                    <p className="text-base text-gray-900">
-                      {selectedReceive?.receivedQuantity}
-                      {selectedReceive?.unit && (<span className="ml-1 text-sm text-gray-600">
-                          {selectedReceive.unit}
-                        </span>)}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Unit</p>
-                    <p className="text-base text-gray-900">
-                      {selectedReceive?.unit || 'N/A'}
-                    </p>
-                  </div>
-                  {selectedReceive?.requestedUnit &&
-            selectedReceive.unit &&
-            selectedReceive.requestedUnit !== selectedReceive.unit &&
-            selectedReceive.conversionBase && (<div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Conversion</p>
-                        <p className="text-sm text-gray-900">
-                          1 {selectedReceive.requestedUnit} ={' '}
-                          {selectedReceive.conversionBase} {selectedReceive.unit}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Effective stock added:{' '}
-                          {(selectedReceive.receivedQuantity /
-                (selectedReceive.conversionBase || 1)).toFixed(4)}{' '}
-                          {selectedReceive.requestedUnit}
-                        </p>
-                      </div>)}
-                  {selectedReceive?.location && (<div className="space-y-1">
-                      <p className="text-sm font-medium text-[#003594]">Location</p>
-                      <p className="text-base text-gray-900">{selectedReceive.location}</p>
-                    </div>)}
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Image</p>
-                    <div className="mt-2">
-                      <Image src={resolveImageUrl(selectedReceive?.receivedImage, FALLBACK_IMAGE)} alt="Received Item" width={160} height={160} className="w-40 h-40 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => selectedReceive?.receivedImage && handleImageClick(selectedReceive.receivedImage)} unoptimized/>
+            <ApprovalModalShell
+                open={isEditOpen}
+                onOpenChange={setIsEditOpen}
+                size="md"
+                layout="flex"
+            >
+                <ApprovalModalHeaderSection>
+                    <ModalTitle className={`text-xl font-semibold ${approvalTheme.titleGradient}`}>
+                        Edit Receive Details
+                    </ModalTitle>
+                </ApprovalModalHeaderSection>
+                <ApprovalModalBody>
+                    <div className="space-y-6">
+                        <div className="space-y-2">
+                            <Label htmlFor="receivedPartNumber" className="text-[#003594]">
+                                Received Part Number
+                            </Label>
+                            <Input
+                                id="receivedPartNumber"
+                                value={editData?.receivedPartNumber || ''}
+                                onChange={(e) =>
+                                    setEditData((prev) =>
+                                        prev ? { ...prev, receivedPartNumber: e.target.value } : null
+                                    )
+                                }
+                                className="border-slate-200 focus:border-[#003594] focus:ring-[#003594]/20"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="receivedQuantity" className="text-[#003594]">
+                                Received Quantity
+                            </Label>
+                            <Input
+                                id="receivedQuantity"
+                                type="number"
+                                value={editData?.receivedQuantity || ''}
+                                onChange={(e) =>
+                                    setEditData((prev) =>
+                                        prev
+                                            ? { ...prev, receivedQuantity: parseInt(e.target.value) || 0 }
+                                            : null
+                                    )
+                                }
+                                className="border-slate-200 focus:border-[#003594] focus:ring-[#003594]/20"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="unit" className="text-[#003594]">
+                                Unit
+                            </Label>
+                            <Input
+                                id="unit"
+                                value={editData?.unit || ''}
+                                onChange={(e) =>
+                                    setEditData((prev) => (prev ? { ...prev, unit: e.target.value } : null))
+                                }
+                                className="border-slate-200 focus:border-[#003594] focus:ring-[#003594]/20"
+                            />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-[#003594]">Update Images</h3>
+
+                            <div className="space-y-3">
+                                <Label className="font-medium text-[#003594]">Requested Image</Label>
+                                <div className="flex items-center gap-4">
+                                    {selectedReceive?.requestedImage && (
+                                        <div className="relative">
+                                            <Image
+                                                src={resolveImageUrl(
+                                                    selectedReceive.requestedImage,
+                                                    FALLBACK_IMAGE
+                                                )}
+                                                alt="Current Requested Image"
+                                                width={80}
+                                                height={80}
+                                                className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
+                                                unoptimized
+                                                onError={(e) => {
+                                                    const target = e.target as HTMLImageElement;
+                                                    target.src = withBasePath(FALLBACK_IMAGE);
+                                                }}
+                                            />
+                                            <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-xs text-white">
+                                                Current
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="flex-1">
+                                        <Input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) handleImageChange('requested', file);
+                                            }}
+                                            className="border-slate-200 focus:border-[#003594] focus:ring-[#003594]/20"
+                                        />
+                                        <p className="mt-1 text-xs text-slate-500">
+                                            {editData?.newRequestedImage
+                                                ? `New image: ${editData.newRequestedImage.name}`
+                                                : 'Select new image to replace current'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <Label className="font-medium text-[#003594]">Received Image</Label>
+                                <div className="flex items-center gap-4">
+                                    {selectedReceive?.receivedImage && (
+                                        <div className="relative">
+                                            <Image
+                                                src={resolveImageUrl(
+                                                    selectedReceive.receivedImage,
+                                                    FALLBACK_IMAGE
+                                                )}
+                                                alt="Current Received Image"
+                                                width={80}
+                                                height={80}
+                                                className="h-20 w-20 rounded-lg border border-slate-200 object-cover"
+                                                unoptimized
+                                                onError={(e) => {
+                                                    const target = e.target as HTMLImageElement;
+                                                    target.src = withBasePath(FALLBACK_IMAGE);
+                                                }}
+                                            />
+                                            <div className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-xs text-white">
+                                                Current
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="flex-1">
+                                        <Input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) handleImageChange('received', file);
+                                            }}
+                                            className="border-slate-200 focus:border-[#003594] focus:ring-[#003594]/20"
+                                        />
+                                        <p className="mt-1 text-xs text-slate-500">
+                                            {editData?.newReceivedImage
+                                                ? `New image: ${editData.newReceivedImage.name}`
+                                                : 'Select new image to replace current'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                  </div>
+                </ApprovalModalBody>
+                <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
+                    <Button
+                        variant="outline"
+                        onClick={handleCloseEditModal}
+                        className="w-full border-slate-200 hover:bg-[#003594]/5 hover:text-[#003594] sm:w-auto"
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleSaveEdit}
+                        disabled={isSaving}
+                        className="w-full bg-[#003594] hover:bg-[#003594]/90 disabled:opacity-50 sm:w-auto"
+                    >
+                        {isSaving ? (
+                            <>
+                                <div className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                                Saving...
+                            </>
+                        ) : (
+                            'Save Changes'
+                        )}
+                    </Button>
                 </div>
-              </div>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
+            </ApprovalModalShell>
 
-      <Modal open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <ModalContent className="max-w-2xl bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Edit Receive Details</ModalTitle>
-          </ModalHeader>
-          <div className="p-6 space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="receivedPartNumber" className="text-[#003594]">Received Part Number</Label>
-              <Input id="receivedPartNumber" value={editData?.receivedPartNumber || ''} onChange={(e) => setEditData(prev => prev ? { ...prev, receivedPartNumber: e.target.value } : null)} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="receivedQuantity" className="text-[#003594]">Received Quantity</Label>
-              <Input id="receivedQuantity" type="number" value={editData?.receivedQuantity || ''} onChange={(e) => setEditData(prev => prev ? { ...prev, receivedQuantity: parseInt(e.target.value) || 0 } : null)} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="unit" className="text-[#003594]">Unit</Label>
-              <Input id="unit" value={editData?.unit || ''} onChange={(e) => setEditData(prev => prev ? { ...prev, unit: e.target.value } : null)} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
-            </div>
+            <ApprovalRejectModal
+                open={isRejectOpen}
+                onOpenChange={setIsRejectOpen}
+                title="Reject Receive"
+                description="Please provide a reason for rejecting this receive."
+                reason={rejectionReason}
+                onReasonChange={setRejectionReason}
+                onConfirm={handleRejectReceive}
+                onCancel={() => setRejectionReason('')}
+                isRejecting={isRejecting}
+                confirmLabel="Reject Receive"
+            />
 
-            
-            <div className="space-y-4">
-              <h3 className="text-lg font-semibold text-[#003594]">Update Images</h3>
-              
-              
-              <div className="space-y-3">
-                <Label className="text-[#003594] font-medium">Requested Image</Label>
-                <div className="flex items-center gap-4">
-                  {selectedReceive?.requestedImage && (<div className="relative">
-                      <Image src={resolveImageUrl(selectedReceive.requestedImage, FALLBACK_IMAGE)} alt="Current Requested Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = withBasePath(FALLBACK_IMAGE);
-            }}/>
-                      <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                        Current
-                      </div>
-                    </div>)}
-                  <div className="flex-1">
-                    <Input type="file" accept="image/*" onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file)
-                handleImageChange('requested', file);
-        }} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {editData?.newRequestedImage ? `New image: ${editData.newRequestedImage.name}` : 'Select new image to replace current'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              
-              <div className="space-y-3">
-                <Label className="text-[#003594] font-medium">Received Image</Label>
-                <div className="flex items-center gap-4">
-                  {selectedReceive?.receivedImage && (<div className="relative">
-                      <Image src={resolveImageUrl(selectedReceive.receivedImage, FALLBACK_IMAGE)} alt="Current Received Image" width={80} height={80} className="w-20 h-20 object-cover rounded-lg border border-[#002a6e]/10" unoptimized onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = withBasePath(FALLBACK_IMAGE);
-            }}/>
-                      <div className="absolute -top-2 -right-2 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                        Current
-                      </div>
-                    </div>)}
-                  <div className="flex-1">
-                    <Input type="file" accept="image/*" onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file)
-                handleImageChange('received', file);
-        }} className="border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20"/>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {editData?.newReceivedImage ? `New image: ${editData.newReceivedImage.name}` : 'Select new image to replace current'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={handleCloseEditModal} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594]">
-                Cancel
-              </Button>
-              <Button onClick={handleSaveEdit} disabled={isSaving} className="bg-[#003594] hover:bg-[#003594]/90 disabled:opacity-50">
-                {isSaving ? (<>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                    Saving...
-                  </>) : ('Save Changes')}
-              </Button>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
-
-      <Modal open={isRejectOpen} onOpenChange={setIsRejectOpen}>
-        <ModalContent className="max-w-md bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Reject Receive</ModalTitle>
-            <ModalDescription className="text-gray-600">
-              Please provide a reason for rejecting this receive.
-            </ModalDescription>
-          </ModalHeader>
-          <div className="p-6 space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="rejectionReason" className="text-[#003594]">Reason for Rejection</Label>
-              <Textarea id="rejectionReason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="Enter the reason for rejection" className="min-h-[100px] border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20" required/>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => {
-            setIsRejectOpen(false);
-            setRejectionReason('');
-        }} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594]">
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleRejectReceive} disabled={!rejectionReason.trim()} className="bg-[#d2293b] hover:bg-[#d2293b]/90 disabled:opacity-50">
-                Confirm Rejection
-              </Button>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
-
-      <Modal open={isImagePreviewOpen} onOpenChange={setIsImagePreviewOpen}>
-        <ModalContent className="max-w-3xl bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Image Preview</ModalTitle>
-          </ModalHeader>
-          <div className="p-6 flex justify-center">
-            <Image src={selectedImage || withBasePath(FALLBACK_IMAGE)} alt="Preview" width={400} height={400} className="max-w-full max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
-          </div>
-        </ModalContent>
-      </Modal>
-    </>);
+            <ApprovalImagePreviewModal
+                open={isImagePreviewOpen}
+                onOpenChange={setIsImagePreviewOpen}
+                src={selectedImage || withBasePath(FALLBACK_IMAGE)}
+                title="Image Preview"
+            />
+        </>
+    );
 }

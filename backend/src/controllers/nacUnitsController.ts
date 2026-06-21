@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
+import { getNacCodeValidationError } from '../utils/nacCodeUtils';
 export const getAllNacUnits = async (req: Request, res: Response): Promise<void> => {
     try {
         const { search = '', onlyDefault = 'false', page = '1', pageSize = '20' } = req.query;
@@ -106,6 +107,14 @@ export const createNacUnit = async (req: Request, res: Response): Promise<void> 
             res.status(400).json({
                 error: 'Bad Request',
                 message: 'NAC code and unit are required'
+            });
+            return;
+        }
+        const nacFormatError = getNacCodeValidationError(String(nacCode), { allowSuffix: true });
+        if (nacFormatError) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: nacFormatError
             });
             return;
         }

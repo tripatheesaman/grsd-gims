@@ -1,13 +1,37 @@
 'use client';
-import { useAuthContext } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState, useRef } from 'react';
-import { API } from '@/lib/api';
-import { useCustomToast } from '@/components/ui/custom-toast';
-import { Button } from '@/components/ui/button';
-import { Plus, Edit, Trash2, RefreshCw, X, Search } from 'lucide-react';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Edit, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { FiscalYearFilterSelect } from '@/components/fiscal-year/FiscalYearFilterSelect';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
+import { useCustomToast } from '@/components/ui/custom-toast';
+import { API } from '@/lib/api';
+import {
+    RecordsPageShell,
+    RecordsFilterPanel,
+    RecordsFilterInput,
+    RecordsFilterSelect,
+    RecordsTable,
+    RecordsTableScroll,
+    RecordsTableElement,
+    RecordsTableHead,
+    RecordsTableHeadRow,
+    RecordsTableHeadCell,
+    RecordsTableBody,
+    RecordsTableRow,
+    RecordsTableCell,
+    RecordsPagination,
+    RecordsModal,
+    RecordsModalActions,
+    RecordStatusBadge,
+    recordsTheme,
+    useRecordsPageAuth,
+} from '@/components/records';
+import {
+    SpareIssueRecordFormBody,
+    type SpareIssueFormData,
+} from '@/components/records/forms/SpareIssueRecordFormBody';
+
 interface SpareIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -24,72 +48,69 @@ interface SpareIssueRecord {
         staffId: string;
     };
     approval_status: string;
-    created_at: string;
-    updated_at: string;
 }
-interface SpareIssueRecordsResponse {
-    records: SpareIssueRecord[];
-    pagination: {
-        total: number;
-        page: number;
-        limit: number;
-        totalPages: number;
-    };
-}
-interface SpareIssueFormData {
-    issue_slip_number: string;
-    issue_date: string;
-    nac_code: string;
-    part_number: string;
-    issue_quantity: number;
-    issue_cost: number;
-    remaining_balance: number;
-    issued_for: string;
-    issued_by: {
-        name: string;
-        staffId: string;
-    };
-    approval_status: string;
-}
+
 interface FilterOptions {
     issueSlipNumbers: string[];
-    nacCodes: Array<{
-        nac_code: string;
-        item_name: string;
-    }>;
+    nacCodes: Array<{ nac_code: string; item_name: string }>;
     equipmentNumbers: string[];
     approvalStatuses: string[];
 }
+
+const EMPTY_FORM: SpareIssueFormData = {
+    issue_slip_number: '',
+    issue_date: '',
+    nac_code: '',
+    part_number: '',
+    issue_quantity: 0,
+    issue_cost: 0,
+    remaining_balance: 0,
+    issued_for: '',
+    issued_by: { name: '', staffId: '' },
+    approval_status: 'PENDING',
+};
+
+const SORTABLE_COLUMNS: Array<{ key: string; label: string }> = [
+    { key: 'issue_slip_number', label: 'Issue slip #' },
+    { key: 'issue_date', label: 'Issue date' },
+    { key: 'nac_code', label: 'NAC code' },
+    { key: 'issue_quantity', label: 'Quantity' },
+    { key: 'issue_cost', label: 'Cost' },
+    { key: 'approval_status', label: 'Status' },
+];
+
+function formatDate(dateString: string) {
+    return new Date(dateString).toLocaleDateString();
+}
+
+function formatCurrency(amount: number) {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'NPR' }).format(amount);
+}
+
 export default function SpareIssueRecordsPage() {
-    const { user, permissions } = useAuthContext();
-    const router = useRouter();
+    const { canAccess, permissions } = useRecordsPageAuth('can_access_spares_issue_records');
+    const canCreate = permissions.includes('can_add_spares_issue_item');
+    const canEdit = permissions.includes('can_edit_spares_issue_item');
+    const canDelete = permissions.includes('can_delete_spares_issue_item');
+
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const showErrorToastRef = useRef(showErrorToast);
-    useEffect(() => { showErrorToastRef.current = showErrorToast; }, [showErrorToast]);
-    const latestRequestRef = useRef<number>(0);
+    useEffect(() => {
+        showErrorToastRef.current = showErrorToast;
+    }, [showErrorToast]);
+
+    const latestRequestRef = useRef(0);
     const { fiscalYear: currentFiscalYear } = useFiscalYear();
-    const [fiscalYearFilter, setFiscalYearFilter] = useState<string>('');
-    useEffect(() => {
-        if (currentFiscalYear && !fiscalYearFilter) {
-            setFiscalYearFilter(currentFiscalYear);
-        }
-    }, [currentFiscalYear, fiscalYearFilter]);
-    useEffect(() => {
-        if (!user) {
-            router.push('/login');
-            return;
-        }
-        if (!permissions.includes('can_access_spares_issue_records')) {
-            router.push('/unauthorized');
-            return;
-        }
-    }, [user, permissions, router]);
+
+    const [fiscalYearFilter, setFiscalYearFilter] = useState('');
     const [records, setRecords] = useState<SpareIssueRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    const [currentPage, setCurrentPage] = useState(1);
+    const [error, setError] = useState<string | null>(null);
+    const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
     const [totalPages, setTotalPages] = useState(1);
-    const [totalRecords, setTotalRecords] = useState(0);
+    const [totalCount, setTotalCount] = useState(0);
+
     const [searchTerm, setSearchTerm] = useState('');
     const [issueSlipNumber, setIssueSlipNumber] = useState('');
     const [partNumber, setPartNumber] = useState('');
@@ -97,38 +118,47 @@ export default function SpareIssueRecordsPage() {
     const [nacCode, setNacCode] = useState('');
     const [issuedFor, setIssuedFor] = useState('');
     const [status, setStatus] = useState('all');
-    const [issuedBy, setIssuedBy] = useState('all');
     const [sortBy, setSortBy] = useState('issue_date');
     const [sortOrder, setSortOrder] = useState<'ASC' | 'DESC'>('DESC');
+
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         issueSlipNumbers: [],
         nacCodes: [],
         equipmentNumbers: [],
-        approvalStatuses: []
+        approvalStatuses: [],
     });
-    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedRecord, setSelectedRecord] = useState<SpareIssueRecord | null>(null);
-    const [formData, setFormData] = useState<SpareIssueFormData>({
-        issue_slip_number: '',
-        issue_date: '',
-        nac_code: '',
-        part_number: '',
-        issue_quantity: 0,
-        issue_cost: 0,
-        remaining_balance: 0,
-        issued_for: '',
-        issued_by: { name: '', staffId: '' },
-        approval_status: 'PENDING'
-    });
+    const [formData, setFormData] = useState<SpareIssueFormData>(EMPTY_FORM);
+    const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        if (currentFiscalYear && !fiscalYearFilter) {
+            setFiscalYearFilter(currentFiscalYear);
+        }
+    }, [currentFiscalYear, fiscalYearFilter]);
+
+    const handleSort = (field: string) => {
+        if (sortBy === field) {
+            setSortOrder(sortOrder === 'ASC' ? 'DESC' : 'ASC');
+        } else {
+            setSortBy(field);
+            setSortOrder('ASC');
+        }
+    };
+
     const fetchData = useCallback(async () => {
         const requestId = latestRequestRef.current + 1;
         latestRequestRef.current = requestId;
         setLoading(true);
+        setError(null);
         try {
             const params = new URLSearchParams({
-                page: currentPage.toString(),
+                page: page.toString(),
                 limit: pageSize.toString(),
                 search: searchTerm,
                 issueSlipNumber,
@@ -137,134 +167,161 @@ export default function SpareIssueRecordsPage() {
                 nacCode,
                 issuedFor,
                 status: status === 'all' ? '' : status,
-                issuedBy: issuedBy === 'all' ? '' : issuedBy,
                 sortBy,
                 sortOrder,
                 ...(fiscalYearFilter && { fiscalYear: fiscalYearFilter }),
             });
             const response = await API.get(`/api/spare-issue-records?${params}`);
-            if (requestId !== latestRequestRef.current) {
-                return;
-            }
-            const data: SpareIssueRecordsResponse = response.data;
+            if (requestId !== latestRequestRef.current) return;
+
+            const data = response.data;
             setRecords(data.records);
             setTotalPages(data.pagination.totalPages);
-            setTotalRecords(data.pagination.total);
-        }
-        catch {
-            if (requestId !== latestRequestRef.current) {
-                return;
-            }
+            setTotalCount(data.pagination.total);
+        } catch {
+            if (requestId !== latestRequestRef.current) return;
+            setError('Failed to fetch spare issue records');
             showErrorToastRef.current({
-                title: "Error",
-                message: "Failed to fetch spare issue records",
+                title: 'Error',
+                message: 'Failed to fetch spare issue records',
                 duration: 3000,
             });
-        }
-        finally {
+        } finally {
             if (requestId === latestRequestRef.current) {
                 setLoading(false);
             }
         }
-    }, [currentPage, pageSize, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder, fiscalYearFilter]);
+    }, [
+        page,
+        pageSize,
+        searchTerm,
+        issueSlipNumber,
+        partNumber,
+        itemName,
+        nacCode,
+        issuedFor,
+        status,
+        sortBy,
+        sortOrder,
+        fiscalYearFilter,
+    ]);
+
     const fetchFilterOptions = useCallback(async () => {
         try {
             const response = await API.get('/api/spare-issue-records/filters/options');
             setFilterOptions(response.data.filters);
-        }
-        catch {
+        } catch {
+            /* ignore */
         }
     }, []);
+
     useEffect(() => {
-        fetchData();
-    }, [currentPage, searchTerm, issueSlipNumber, partNumber, itemName, nacCode, issuedFor, status, issuedBy, sortBy, sortOrder, fiscalYearFilter, fetchData]);
+        if (canAccess) fetchFilterOptions();
+    }, [canAccess, fetchFilterOptions]);
+
     useEffect(() => {
-        fetchFilterOptions();
-    }, [fetchFilterOptions]);
-    const handleSort = (field: string) => {
-        if (sortBy === field) {
-            setSortOrder(sortOrder === 'ASC' ? 'DESC' : 'ASC');
-        }
-        else {
-            setSortBy(field);
-            setSortOrder('ASC');
-        }
+        if (canAccess) fetchData();
+    }, [canAccess, fetchData]);
+
+    const resetForm = () => {
+        setFormData(EMPTY_FORM);
+        setFormErrors({});
     };
+
+    const validateForm = (): boolean => {
+        const errors: Record<string, string> = {};
+        if (!formData.issue_slip_number.trim()) errors.issue_slip_number = 'Required';
+        if (!formData.issue_date) errors.issue_date = 'Required';
+        if (!formData.nac_code.trim()) errors.nac_code = 'Required';
+        if (!formData.part_number.trim()) errors.part_number = 'Required';
+        if (formData.issue_quantity <= 0) errors.issue_quantity = 'Must be greater than 0';
+        if (!formData.issued_for.trim()) errors.issued_for = 'Required';
+        if (!formData.issued_by.name.trim()) errors['issued_by.name'] = 'Required';
+        if (!formData.issued_by.staffId.trim()) errors['issued_by.staffId'] = 'Required';
+        setFormErrors(errors);
+        return Object.keys(errors).length === 0;
+    };
+
     const handleCreate = async () => {
+        if (!validateForm()) return;
         try {
+            setSubmitting(true);
             await API.post('/api/spare-issue-records', formData);
             showSuccessToast({
                 title: 'Success',
-                message: "Spare issue record created successfully",
+                message: 'Spare issue record created successfully',
                 duration: 3000,
             });
-            setIsCreateModalOpen(false);
+            setShowCreateModal(false);
             resetForm();
             fetchData();
-        }
-        catch {
+        } catch {
             showErrorToast({
                 title: 'Error',
-                message: "Failed to create spare issue record",
+                message: 'Failed to create spare issue record',
                 duration: 3000,
             });
+        } finally {
+            setSubmitting(false);
         }
     };
+
     const handleEdit = async () => {
-        if (!selectedRecord)
-            return;
+        if (!selectedRecord || !validateForm()) return;
         try {
+            setSubmitting(true);
             await API.put(`/api/spare-issue-records/${selectedRecord.id}`, formData);
-            let message = "Spare issue record updated successfully";
-            if (formData.issue_slip_number && formData.issue_slip_number !== selectedRecord.issue_slip_number) {
-                message += " (Date auto-adjusted to match slip number)";
+            let message = 'Spare issue record updated successfully';
+            if (formData.issue_slip_number !== selectedRecord.issue_slip_number) {
+                message += ' (Date auto-adjusted to match slip number)';
+            } else if (formData.issue_date !== selectedRecord.issue_date.split('T')[0]) {
+                message += ' (Slip number auto-generated for new date)';
             }
-            else if (formData.issue_date && formData.issue_date !== selectedRecord.issue_date) {
-                message += " (Slip number auto-generated for new date)";
-            }
-            showSuccessToast({
-                title: 'Success',
-                message: message,
-                duration: 4000,
-            });
-            setIsEditModalOpen(false);
+            showSuccessToast({ title: 'Success', message, duration: 4000 });
+            setShowEditModal(false);
+            setSelectedRecord(null);
             resetForm();
             fetchData();
-        }
-        catch {
+        } catch {
             showErrorToast({
                 title: 'Error',
-                message: "Failed to update spare issue record",
+                message: 'Failed to update spare issue record',
                 duration: 3000,
             });
+        } finally {
+            setSubmitting(false);
         }
     };
+
     const handleDelete = async () => {
-        if (!selectedRecord)
-            return;
+        if (!selectedRecord) return;
         try {
+            setSubmitting(true);
             await API.delete(`/api/spare-issue-records/${selectedRecord.id}`);
             showSuccessToast({
                 title: 'Success',
-                message: "Spare issue record deleted successfully (Stock balance updated)",
+                message: 'Spare issue record deleted successfully (Stock balance updated)',
                 duration: 3000,
             });
-            setIsDeleteModalOpen(false);
+            setShowDeleteModal(false);
             setSelectedRecord(null);
             fetchData();
-        }
-        catch {
+        } catch {
             showErrorToast({
                 title: 'Error',
-                message: "Failed to delete spare issue record",
+                message: 'Failed to delete spare issue record',
                 duration: 3000,
             });
+        } finally {
+            setSubmitting(false);
         }
     };
+
     const openCreateModal = () => {
         resetForm();
-        setIsCreateModalOpen(true);
+        setShowCreateModal(true);
     };
+
     const openEditModal = (record: SpareIssueRecord) => {
         setSelectedRecord(record);
         setFormData({
@@ -277,542 +334,381 @@ export default function SpareIssueRecordsPage() {
             remaining_balance: record.remaining_balance,
             issued_for: record.issued_for,
             issued_by: record.issued_by,
-            approval_status: record.approval_status
+            approval_status: record.approval_status,
         });
-        setIsEditModalOpen(true);
+        setFormErrors({});
+        setShowEditModal(true);
     };
+
     const openDeleteModal = (record: SpareIssueRecord) => {
         setSelectedRecord(record);
-        setIsDeleteModalOpen(true);
+        setShowDeleteModal(true);
     };
-    const resetForm = () => {
-        setFormData({
-            issue_slip_number: '',
-            issue_date: '',
-            nac_code: '',
-            part_number: '',
-            issue_quantity: 0,
-            issue_cost: 0,
-            remaining_balance: 0,
-            issued_for: '',
-            issued_by: { name: '', staffId: '' },
-            approval_status: 'PENDING'
-        });
-    };
-    const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString();
-    };
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'NPR'
-        }).format(amount);
-    };
-    if (!user || !permissions.includes('can_access_spares_issue_records')) {
-        return null;
-    }
-    return (<div className="container mx-auto p-6">
-      <div className="max-w-7xl mx-auto space-y-8">
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-            Spare Issue Records
-          </h1>
-          {permissions.includes('can_add_spares_issue_item') && (<Button onClick={openCreateModal} className="bg-[#003594] hover:bg-[#002a6e]">
-              <Plus className="w-4 h-4 mr-2"/>
-              Add Record
-            </Button>)}
-        </div>
 
-        
-        <div className="bg-white p-6 rounded-lg shadow-sm border border-black/10">
-          <div className="space-y-4">
-            
-            <div className="flex gap-4 mb-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-black/40 w-4 h-4"/>
-                  <input type="text" placeholder="Search by Issue Slip#, Part#, Item Name, Equipment..." value={searchTerm} onChange={(e) => {
-            setSearchTerm(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full pl-10 pr-4 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"/>
+    if (!canAccess) return null;
+
+    return (
+        <RecordsPageShell
+            title="Spare Issue Records"
+            description="Manage spare parts issue slips and stock deductions"
+            actions={
+                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={() => fetchData()}
+                        disabled={loading}
+                        className={recordsTheme.outlineBtn}
+                    >
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
+                    {canCreate && (
+                        <button type="button" onClick={openCreateModal} className={recordsTheme.primaryBtn}>
+                            <Plus className="h-4 w-4" />
+                            Add record
+                        </button>
+                    )}
                 </div>
-              </div>
-              <Button type="button" variant="outline" onClick={() => {
-            setSearchTerm('');
-            setIssueSlipNumber('');
-            setPartNumber('');
-            setItemName('');
-            setNacCode('');
-            setIssuedFor('');
-            setStatus('all');
-            setIssuedBy('all');
-            setCurrentPage(1);
-        }} className="border-black/20 text-black hover:bg-black/5">
-                <RefreshCw className="w-4 h-4 mr-2"/>
-                Reset
-              </Button>
-            </div>
+            }
+            filters={
+                <RecordsFilterPanel
+                    fields={[
+                        {
+                            id: 'search',
+                            label: 'Search',
+                            element: (
+                                <RecordsFilterInput
+                                    id="search"
+                                    value={searchTerm}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setSearchTerm(v);
+                                    }}
+                                    placeholder="Slip#, part#, item, equipment…"
+                                />
+                            ),
+                            className: 'space-y-1.5 md:col-span-2 lg:col-span-3',
+                        },
+                        {
+                            id: 'issueSlipNumber',
+                            label: 'Issue slip number',
+                            element: (
+                                <RecordsFilterInput
+                                    id="issueSlipNumber"
+                                    value={issueSlipNumber}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setIssueSlipNumber(v);
+                                    }}
+                                    placeholder="Enter slip number"
+                                />
+                            ),
+                        },
+                        {
+                            id: 'partNumber',
+                            label: 'Part number',
+                            element: (
+                                <RecordsFilterInput
+                                    id="partNumber"
+                                    value={partNumber}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setPartNumber(v);
+                                    }}
+                                    placeholder="Enter part number"
+                                />
+                            ),
+                        },
+                        {
+                            id: 'itemName',
+                            label: 'Item name',
+                            element: (
+                                <RecordsFilterInput
+                                    id="itemName"
+                                    value={itemName}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setItemName(v);
+                                    }}
+                                    placeholder="Enter item name"
+                                />
+                            ),
+                        },
+                        {
+                            id: 'fiscalYear',
+                            label: 'Fiscal year',
+                            element: (
+                                <FiscalYearFilterSelect
+                                    value={fiscalYearFilter}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setFiscalYearFilter(v);
+                                    }}
+                                />
+                            ),
+                        },
+                        {
+                            id: 'nacCode',
+                            label: 'NAC code',
+                            element: (
+                                <RecordsFilterSelect
+                                    id="nacCode"
+                                    value={nacCode}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setNacCode(v);
+                                    }}
+                                    options={[
+                                        { value: '', label: 'All NAC codes' },
+                                        ...filterOptions.nacCodes.map((o) => ({
+                                            value: o.nac_code,
+                                            label: `${o.nac_code} — ${o.item_name}`,
+                                        })),
+                                    ]}
+                                />
+                            ),
+                        },
+                        {
+                            id: 'issuedFor',
+                            label: 'Issued for',
+                            element: (
+                                <RecordsFilterSelect
+                                    id="issuedFor"
+                                    value={issuedFor}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setIssuedFor(v);
+                                    }}
+                                    options={[
+                                        { value: '', label: 'All equipment' },
+                                        ...filterOptions.equipmentNumbers.map((eq) => ({
+                                            value: eq,
+                                            label: eq,
+                                        })),
+                                    ]}
+                                />
+                            ),
+                        },
+                        {
+                            id: 'status',
+                            label: 'Status',
+                            element: (
+                                <RecordsFilterSelect
+                                    id="status"
+                                    value={status}
+                                    onChange={(v) => {
+                                        setPage(1);
+                                        setStatus(v);
+                                    }}
+                                    options={[
+                                        { value: 'all', label: 'All statuses' },
+                                        ...filterOptions.approvalStatuses.map((s) => ({
+                                            value: s,
+                                            label: s,
+                                        })),
+                                    ]}
+                                />
+                            ),
+                        },
+                    ]}
+                />
+            }
+        >
+            <RecordsTable loading={loading} error={error} emptyMessage={records.length === 0 && !loading ? 'No records found' : undefined}>
+                {records.length > 0 && (
+                    <RecordsTableScroll>
+                        <RecordsTableElement>
+                            <RecordsTableHead>
+                                <RecordsTableHeadRow>
+                                    {SORTABLE_COLUMNS.slice(0, 3).map((col) => (
+                                        <RecordsTableHeadCell key={col.key}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSort(col.key)}
+                                                className="flex items-center gap-1 hover:text-white/90"
+                                            >
+                                                {col.label}
+                                                {sortBy === col.key && (
+                                                    <span className="text-xs">{sortOrder === 'ASC' ? '↑' : '↓'}</span>
+                                                )}
+                                            </button>
+                                        </RecordsTableHeadCell>
+                                    ))}
+                                    <RecordsTableHeadCell>Item name</RecordsTableHeadCell>
+                                    <RecordsTableHeadCell>Part number</RecordsTableHeadCell>
+                                    {SORTABLE_COLUMNS.slice(3).map((col) => (
+                                        <RecordsTableHeadCell key={col.key}>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSort(col.key)}
+                                                className="flex items-center gap-1 hover:text-white/90"
+                                            >
+                                                {col.label}
+                                                {sortBy === col.key && (
+                                                    <span className="text-xs">{sortOrder === 'ASC' ? '↑' : '↓'}</span>
+                                                )}
+                                            </button>
+                                        </RecordsTableHeadCell>
+                                    ))}
+                                    <RecordsTableHeadCell>Equipment</RecordsTableHeadCell>
+                                    {(canEdit || canDelete) && (
+                                        <RecordsTableHeadCell>Actions</RecordsTableHeadCell>
+                                    )}
+                                </RecordsTableHeadRow>
+                            </RecordsTableHead>
+                            <RecordsTableBody>
+                                {records.map((record) => (
+                                    <RecordsTableRow key={record.id}>
+                                        <RecordsTableCell className="font-medium">
+                                            {record.issue_slip_number}
+                                        </RecordsTableCell>
+                                        <RecordsTableCell>{formatDate(record.issue_date)}</RecordsTableCell>
+                                        <RecordsTableCell className="font-mono text-xs">
+                                            {record.nac_code}
+                                        </RecordsTableCell>
+                                        <RecordsTableCell>{record.item_name}</RecordsTableCell>
+                                        <RecordsTableCell className="font-mono text-xs">
+                                            {record.part_number}
+                                        </RecordsTableCell>
+                                        <RecordsTableCell>{record.issue_quantity}</RecordsTableCell>
+                                        <RecordsTableCell>{formatCurrency(record.issue_cost)}</RecordsTableCell>
+                                        <RecordsTableCell>
+                                            <RecordStatusBadge status={record.approval_status} />
+                                        </RecordsTableCell>
+                                        <RecordsTableCell>{record.issued_for}</RecordsTableCell>
+                                        {(canEdit || canDelete) && (
+                                            <RecordsTableCell>
+                                                <div className="flex gap-1">
+                                                    {canEdit && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openEditModal(record)}
+                                                            className={recordsTheme.iconBtn}
+                                                            title="Edit"
+                                                        >
+                                                            <Edit className="h-4 w-4" />
+                                                        </button>
+                                                    )}
+                                                    {canDelete && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => openDeleteModal(record)}
+                                                            className={recordsTheme.iconBtnDanger}
+                                                            title="Delete"
+                                                        >
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </RecordsTableCell>
+                                        )}
+                                    </RecordsTableRow>
+                                ))}
+                            </RecordsTableBody>
+                        </RecordsTableElement>
+                    </RecordsTableScroll>
+                )}
+            </RecordsTable>
 
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">Issue Slip Number</label>
-                <input type="text" placeholder="Enter issue slip number" value={issueSlipNumber} onChange={(e) => {
-            setIssueSlipNumber(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"/>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">Part Number</label>
-                <input type="text" placeholder="Enter part number" value={partNumber} onChange={(e) => {
-            setPartNumber(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"/>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">Item Name</label>
-                <input type="text" placeholder="Enter item name" value={itemName} onChange={(e) => {
-            setItemName(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"/>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <FiscalYearFilterSelect
-                value={fiscalYearFilter}
-                onChange={(v) => {
-                  setFiscalYearFilter(v);
-                  setCurrentPage(1);
+            <RecordsPagination
+                page={page}
+                pageSize={pageSize}
+                totalCount={totalCount}
+                totalPages={totalPages}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                    setPage(1);
+                    setPageSize(size);
                 }}
-              />
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">NAC Code</label>
-                <select value={nacCode} onChange={(e) => {
-            setNacCode(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent">
-                  <option value="">All NAC Codes</option>
-                  {filterOptions.nacCodes.map((option) => (<option key={option.nac_code} value={option.nac_code}>
-                      {option.nac_code} - {option.item_name}
-                    </option>))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">Issued For</label>
-                <select value={issuedFor} onChange={(e) => {
-            setIssuedFor(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent">
-                  <option value="">All Equipment</option>
-                  {filterOptions.equipmentNumbers.map((equipment) => (<option key={equipment} value={equipment}>
-                      {equipment}
-                    </option>))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-black mb-1">Status</label>
-                <select value={status} onChange={(e) => {
-            setStatus(e.target.value);
-            setCurrentPage(1);
-        }} className="w-full px-3 py-2 border border-black/20 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent">
-                  <option value="all">All Statuses</option>
-                  {filterOptions.approvalStatuses.map((statusOption) => (<option key={statusOption} value={statusOption}>
-                      {statusOption}
-                    </option>))}
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
+            />
 
-        
-        <div className="bg-white rounded-lg shadow-sm border border-black/10 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-black/5">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('issue_slip_number')}>
-                    Issue Slip #
-                    {sortBy === 'issue_slip_number' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('issue_date')}>
-                    Issue Date
-                    {sortBy === 'issue_date' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('nac_code')}>
-                    NAC Code
-                    {sortBy === 'nac_code' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/60 uppercase tracking-wider">
-                    Item Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/60 uppercase tracking-wider">
-                    Part Number
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('issue_quantity')}>
-                    Quantity
-                    {sortBy === 'issue_quantity' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('issue_cost')}>
-                    Cost
-                    {sortBy === 'issue_cost' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/60 uppercase tracking-wider">
-                    Equipment
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/70 uppercase tracking-wider cursor-pointer hover:bg-black/10" onClick={() => handleSort('approval_status')}>
-                    Status
-                    {sortBy === 'approval_status' && (<span className="ml-1">{sortOrder === 'ASC' ? '↑' : '↓'}</span>)}
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-black/60 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-black/10">
-                {loading ? (<tr>
-                    <td colSpan={10} className="px-6 py-4 text-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#003594] mx-auto"></div>
-                    </td>
-                  </tr>) : records.length === 0 ? (<tr>
-                    <td colSpan={10} className="px-6 py-4 text-center text-black/60">
-                      No records found
-                    </td>
-                  </tr>) : (records.map((record) => (<tr key={record.id} className="hover:bg-black/5">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-black">
-                        {record.issue_slip_number}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {formatDate(record.issue_date)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {record.nac_code}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {record.item_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {record.part_number}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {record.issue_quantity}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {formatCurrency(record.issue_cost)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-black/60">
-                        {record.issued_for}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${record.approval_status === 'APPROVED'
-                ? 'bg-green-100 text-green-800'
-                : record.approval_status === 'PENDING'
-                    ? 'bg-yellow-100 text-yellow-800'
-                    : 'bg-red-100 text-red-800'}`}>
-                          {record.approval_status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
-                          {permissions.includes('can_edit_spares_issue_item') && (<Button variant="outline" size="sm" onClick={() => openEditModal(record)}>
-                              <Edit className="w-4 h-4"/>
-                            </Button>)}
-                          {permissions.includes('can_delete_spares_issue_item') && (<Button variant="outline" size="sm" onClick={() => openDeleteModal(record)} className="text-red-600 hover:text-red-700">
-                              <Trash2 className="w-4 h-4"/>
-                            </Button>)}
-                        </div>
-                      </td>
-                    </tr>)))}
-              </tbody>
-            </table>
-          </div>
+            {showCreateModal && (
+                <RecordsModal
+                    open={showCreateModal}
+                    title="Create spare issue record"
+                    description="Add a new spare parts issue with full details."
+                    onClose={() => setShowCreateModal(false)}
+                    size="2xl"
+                    submitting={submitting}
+                    footer={
+                        <RecordsModalActions
+                            onCancel={() => setShowCreateModal(false)}
+                            onSubmit={handleCreate}
+                            submitLabel="Create"
+                            submitting={submitting}
+                        />
+                    }
+                >
+                    <SpareIssueRecordFormBody
+                        formData={formData}
+                        setFormData={setFormData}
+                        errors={formErrors}
+                        remainingBalanceReadOnly
+                    />
+                </RecordsModal>
+            )}
 
-          
-          {totalPages > 1 && (<div className="bg-white px-4 py-3 flex items-center justify-between border-t border-black/10 sm:px-6">
-              <div className="flex-1 flex justify-between sm:hidden">
-                <Button variant="outline" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1}>
-                  Previous
-                </Button>
-                <Button variant="outline" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages}>
-                  Next
-                </Button>
-              </div>
-              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-black">
-                    Showing <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-                    <span className="font-medium">
-                      {Math.min(currentPage * pageSize, totalRecords)}
-                    </span>{' '}
-                    of <span className="font-medium">{totalRecords}</span> results
-                  </p>
-                </div>
-                <div>
-                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                    <select value={pageSize} onChange={(e) => {
-            setPageSize(Number(e.target.value));
-            setCurrentPage(1);
-        }} className="mr-2 px-2 py-1 border border-black/20 rounded bg-white text-sm">
-                      <option value={10}>10 / page</option>
-                      <option value={25}>25 / page</option>
-                      <option value={50}>50 / page</option>
-                      <option value={100}>100 / page</option>
-                    </select>
-                    <Button variant="outline" onClick={() => setCurrentPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="rounded-l-md">
-                      Previous
-                    </Button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (<Button key={page} variant={currentPage === page ? "default" : "outline"} onClick={() => setCurrentPage(page)} className={`px-4 py-2 ${currentPage === page
-                    ? 'bg-[#003594] text-white'
-                    : 'bg-white text-black hover:bg-black/5'}`}>
-                        {page}
-                      </Button>))}
-                    <Button variant="outline" onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="rounded-r-md">
-                      Next
-                    </Button>
-                  </nav>
-                </div>
-              </div>
-            </div>)}
-        </div>
+            {showEditModal && selectedRecord && (
+                <RecordsModal
+                    open={showEditModal}
+                    title="Edit spare issue record"
+                    description={`Slip #${selectedRecord.issue_slip_number}`}
+                    onClose={() => {
+                        setShowEditModal(false);
+                        setSelectedRecord(null);
+                    }}
+                    size="2xl"
+                    submitting={submitting}
+                    footer={
+                        <RecordsModalActions
+                            onCancel={() => {
+                                setShowEditModal(false);
+                                setSelectedRecord(null);
+                            }}
+                            onSubmit={handleEdit}
+                            submitLabel="Save changes"
+                            submitting={submitting}
+                        />
+                    }
+                >
+                    <SpareIssueRecordFormBody
+                        formData={formData}
+                        setFormData={setFormData}
+                        errors={formErrors}
+                        remainingBalanceReadOnly
+                    />
+                </RecordsModal>
+            )}
 
-        
-        {isCreateModalOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Create Spare Issue Record</h2>
-                <Button variant="outline" size="sm" onClick={() => setIsCreateModalOpen(false)}>
-                  <X className="w-4 h-4"/>
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Slip Number
-                  </label>
-                  <input type="text" value={formData.issue_slip_number} onChange={(e) => setFormData({ ...formData, issue_slip_number: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Date
-                  </label>
-                  <input type="date" value={formData.issue_date} onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    NAC Code
-                  </label>
-                  <input type="text" value={formData.nac_code} onChange={(e) => setFormData({ ...formData, nac_code: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Part Number
-                  </label>
-                  <input type="text" value={formData.part_number} onChange={(e) => setFormData({ ...formData, part_number: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Quantity
-                  </label>
-                  <input type="number" value={formData.issue_quantity} onChange={(e) => setFormData({ ...formData, issue_quantity: Number(e.target.value) })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Cost
-                  </label>
-                  <input type="number" step="0.01" value={formData.issue_cost} onChange={(e) => setFormData({ ...formData, issue_cost: Number(e.target.value) })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]"/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Equipment Number
-                  </label>
-                  <input type="text" value={formData.issued_for} onChange={(e) => setFormData({ ...formData, issued_for: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Approval Status
-                  </label>
-                  <select value={formData.approval_status} onChange={(e) => setFormData({ ...formData, approval_status: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]">
-                    <option value="PENDING">Pending</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="REJECTED">Rejected</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issued By Name
-                  </label>
-                  <input type="text" value={formData.issued_by.name} onChange={(e) => setFormData({
-                ...formData,
-                issued_by: { ...formData.issued_by, name: e.target.value }
-            })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Staff ID
-                  </label>
-                  <input type="text" value={formData.issued_by.staffId} onChange={(e) => setFormData({
-                ...formData,
-                issued_by: { ...formData.issued_by, staffId: e.target.value }
-            })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-              </div>
-              
-              <div className="flex justify-end space-x-2 mt-6">
-                <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleCreate} className="bg-[#003594] hover:bg-[#002a6e]">
-                  Create
-                </Button>
-              </div>
-            </div>
-          </div>)}
-
-        
-        {isEditModalOpen && selectedRecord && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Edit Spare Issue Record</h2>
-                <Button variant="outline" size="sm" onClick={() => setIsEditModalOpen(false)}>
-                  <X className="w-4 h-4"/>
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Slip Number
-                  </label>
-                  <input type="text" value={formData.issue_slip_number} onChange={(e) => setFormData({ ...formData, issue_slip_number: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Date
-                  </label>
-                  <input type="date" value={formData.issue_date} onChange={(e) => setFormData({ ...formData, issue_date: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    NAC Code
-                  </label>
-                  <input type="text" value={formData.nac_code} onChange={(e) => setFormData({ ...formData, nac_code: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Part Number
-                  </label>
-                  <input type="text" value={formData.part_number} onChange={(e) => setFormData({ ...formData, part_number: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Quantity
-                  </label>
-                  <input type="number" value={formData.issue_quantity} onChange={(e) => setFormData({ ...formData, issue_quantity: Number(e.target.value) })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issue Cost
-                  </label>
-                  <input type="number" step="0.01" value={formData.issue_cost} onChange={(e) => setFormData({ ...formData, issue_cost: Number(e.target.value) })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]"/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Equipment Number
-                  </label>
-                  <input type="text" value={formData.issued_for} onChange={(e) => setFormData({ ...formData, issued_for: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Approval Status
-                  </label>
-                  <select value={formData.approval_status} onChange={(e) => setFormData({ ...formData, approval_status: e.target.value })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]">
-                    <option value="PENDING">Pending</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="REJECTED">Rejected</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Issued By Name
-                  </label>
-                  <input type="text" value={formData.issued_by.name} onChange={(e) => setFormData({
-                ...formData,
-                issued_by: { ...formData.issued_by, name: e.target.value }
-            })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-black mb-1">
-                    Staff ID
-                  </label>
-                  <input type="text" value={formData.issued_by.staffId} onChange={(e) => setFormData({
-                ...formData,
-                issued_by: { ...formData.issued_by, staffId: e.target.value }
-            })} className="w-full px-3 py-2 border border-black/20 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003594]" required/>
-                </div>
-              </div>
-              
-              <div className="flex justify-end space-x-2 mt-6">
-                <Button variant="outline" onClick={() => setIsEditModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleEdit} className="bg-[#003594] hover:bg-[#002a6e]">
-                  Update
-                </Button>
-              </div>
-            </div>
-          </div>)}
-
-        
-        {isDeleteModalOpen && selectedRecord && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold text-red-600">Delete Record</h2>
-                <Button variant="outline" size="sm" onClick={() => setIsDeleteModalOpen(false)}>
-                  <X className="w-4 h-4"/>
-                </Button>
-              </div>
-              
-              <p className="text-black/60 mb-6">
-                Are you sure you want to delete this spare issue record? This action cannot be undone.
-              </p>
-              
-              <div className="bg-black/5 p-4 rounded-lg mb-6">
-                <p><strong>Issue Slip:</strong> {selectedRecord.issue_slip_number}</p>
-                <p><strong>NAC Code:</strong> {selectedRecord.nac_code}</p>
-                <p><strong>Item:</strong> {selectedRecord.item_name}</p>
-                <p><strong>Quantity:</strong> {selectedRecord.issue_quantity}</p>
-              </div>
-              
-              <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
-                  Delete
-                </Button>
-              </div>
-            </div>
-          </div>)}
-      </div>
-    </div>);
+            {showDeleteModal && selectedRecord && (
+                <RecordsModal
+                    open={showDeleteModal}
+                    title="Delete spare issue record"
+                    onClose={() => {
+                        setShowDeleteModal(false);
+                        setSelectedRecord(null);
+                    }}
+                    size="md"
+                    submitting={submitting}
+                    footer={
+                        <RecordsModalActions
+                            onCancel={() => {
+                                setShowDeleteModal(false);
+                                setSelectedRecord(null);
+                            }}
+                            onSubmit={handleDelete}
+                            submitLabel="Delete"
+                            submitting={submitting}
+                            danger
+                        />
+                    }
+                >
+                    <p className="text-sm text-slate-600">
+                        Delete spare issue slip <strong>{selectedRecord.issue_slip_number}</strong> for{' '}
+                        <strong>{selectedRecord.item_name}</strong>? Stock balance will be restored.
+                    </p>
+                </RecordsModal>
+            )}
+        </RecordsPageShell>
+    );
 }

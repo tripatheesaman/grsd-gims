@@ -2,7 +2,7 @@ export const queryKeys = {
   search: {
     all: ['search'] as const,
     stock: (params: Record<string, unknown>) => ['search', 'stock', params] as const,
-    item: (id: number) => ['search', 'item', id] as const,
+    item: (id: number, partNumber?: string) => ['search', 'item', id, partNumber || ''] as const,
   },
   request: {
     all: ['request'] as const,

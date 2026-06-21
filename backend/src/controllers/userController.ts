@@ -3,6 +3,15 @@ import pool from '../config/db';
 import { User, Role, UserWithRole } from '../interfaces/user';
 import bcrypt from 'bcryptjs';
 import { logEvents } from '../middlewares/logger';
+import { normalizeUserStatusForApi, normalizeUserStatusForDb } from '../utils/userStatus';
+
+function sanitizeUserForResponse<T extends Record<string, unknown>>(user: T) {
+    const { password, ...userWithoutPassword } = user;
+    return {
+        ...userWithoutPassword,
+        status: normalizeUserStatusForApi(userWithoutPassword.status),
+    };
+}
 export const getUsers = async (req: Request, res: Response): Promise<void> => {
     try {
         const { currentUser } = req.query;
@@ -33,10 +42,7 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
              JOIN roles r ON u.role_id = r.role_id
              WHERE r.heirarchy >= ?
              ORDER BY r.heirarchy ASC, u.username ASC`, [currentUserHierarchy]);
-        const sanitizedUsers = users.map(user => {
-            const { password, ...userWithoutPassword } = user;
-            return userWithoutPassword;
-        });
+        const sanitizedUsers = users.map((user) => sanitizeUserForResponse(user));
         logEvents(`Successfully fetched ${sanitizedUsers.length} users for current user: ${currentUser}`, "userLog.log");
         res.status(200).json(sanitizedUsers);
     }
@@ -81,7 +87,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
             staffId,
             role,
             designation,
-            status,
+            normalizeUserStatusForDb(status),
             created_by
         ]);
         const userId = (result as any).insertId;
@@ -157,7 +163,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
         }
         const { password, ...userWithoutPassword } = users[0];
         logEvents(`Successfully fetched user details for ID: ${id}`, "userLog.log");
-        res.status(200).json(userWithoutPassword);
+        res.status(200).json(sanitizeUserForResponse(userWithoutPassword));
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -217,7 +223,7 @@ export const updateUser = async (req: Request, res: Response): Promise<void> => 
             staffId,
             role,
             designation,
-            status,
+            normalizeUserStatusForDb(status),
             can_reset_password,
             updated_by,
             id

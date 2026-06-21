@@ -9,13 +9,22 @@ import { API } from '@/lib/api';
 import { useState, useEffect, useRef } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/utils/utils';
+import Unauthorized from '@/app/(fallback)/unauthorized/page';
+
+function canAccessAppSettings(permissions: string[] | undefined): boolean {
+    return Boolean(
+        permissions?.includes('can_access_app_settings')
+        || permissions?.includes('can_access_settings')
+    );
+}
+
 export default function AppSettingsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const { permissions } = useAuthContext();
+    const hasAppSettingsAccess = canAccessAppSettings(permissions);
     const [fiscalYear, setFiscalYear] = useState<string>("");
     const [fyStartBs, setFyStartBs] = useState<string>("");
     const [fyEndBs, setFyEndBs] = useState<string>("");
-    const [isLoading, setIsLoading] = useState(false);
     const canConfigureEmails = permissions?.includes('can_configure_request_emails');
     const canToggleMail = permissions?.includes('can_stop_and_start_mail_sending');
     const [mailSendingEnabled, setMailSendingEnabled] = useState(false);
@@ -50,6 +59,8 @@ export default function AppSettingsPage() {
         showErrorToastRef.current = showErrorToast;
     }, [showErrorToast]);
     useEffect(() => {
+        if (!hasAppSettingsAccess) return;
+
         const fetchFiscalYear = async () => {
             try {
                 const response = await API.get('/api/settings/fiscal-year');
@@ -68,8 +79,10 @@ export default function AppSettingsPage() {
             }
         };
         fetchFiscalYear();
-    }, [showErrorToast]);
+    }, [hasAppSettingsAccess, showErrorToast]);
     useEffect(() => {
+        if (!hasAppSettingsAccess) return;
+
         const fetchEmailConfig = async () => {
             try {
                 const res = await API.get('/api/settings/request/email-config');
@@ -101,7 +114,11 @@ export default function AppSettingsPage() {
             }
         };
         fetchEmailConfig();
-    }, [showErrorToast]);
+    }, [hasAppSettingsAccess, showErrorToast]);
+
+    if (!hasAppSettingsAccess) {
+        return <Unauthorized />;
+    }
     const handleSaveEmailSettings = async () => {
         if (!canConfigureEmails) {
             showErrorToast({

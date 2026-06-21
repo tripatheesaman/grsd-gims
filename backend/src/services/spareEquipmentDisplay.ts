@@ -1,6 +1,10 @@
 /** SQL helpers: spare ↔ asset equipment codes and display names. */
 
+import { sqlFamilyKeyExpression } from '../utils/nacCodeUtils';
+
 const COLLATE = 'utf8mb4_unicode_ci';
+
+export const STOCK_FAMILY_KEY_SQL = sqlFamilyKeyExpression('sd');
 
 export const SPARE_STOCK_JOIN = `
   LEFT JOIN spare_compatibility sc
@@ -15,7 +19,7 @@ export const SPARE_EQUIPMENT_CODES_SQL = `COALESCE(
     COLLATE ${COLLATE},
     ''
   ),
-  sd.applicable_equipments
+  MAX(sd.applicable_equipments)
 )`;
 
 /** Human-readable list: CODE — Asset name */
@@ -32,7 +36,40 @@ export const SPARE_EQUIPMENT_DISPLAY_SQL = `COALESCE(
     COLLATE ${COLLATE},
     ''
   ),
-  sd.applicable_equipments
+  MAX(sd.applicable_equipments)
+)`;
+
+/** Per-variant issue qty (approved issues only). */
+const VARIANT_ISSUE_QTY_SQL = `(
+  SELECT COALESCE(SUM(idt.issue_quantity), 0)
+  FROM issue_details idt
+  WHERE idt.nac_code COLLATE ${COLLATE} = sd.nac_code COLLATE ${COLLATE}
+    AND idt.approval_status = 'APPROVED'
+)`;
+
+/** Virtual balance: opening + all approved receives − approved issues (RRP may still be pending). */
+export const VARIANT_VIRTUAL_BALANCE_SQL = `(
+  COALESCE(sd.open_quantity, 0)
+  + (
+    SELECT COALESCE(SUM(rd.received_quantity), 0)
+    FROM receive_details rd
+    WHERE rd.nac_code COLLATE ${COLLATE} = sd.nac_code COLLATE ${COLLATE}
+      AND rd.approval_status = 'APPROVED'
+  )
+  - ${VARIANT_ISSUE_QTY_SQL}
+)`;
+
+/** True balance: opening + approved receives with RRP − approved issues. */
+export const VARIANT_TRUE_BALANCE_SQL = `(
+  COALESCE(sd.open_quantity, 0)
+  + (
+    SELECT COALESCE(SUM(rd.received_quantity), 0)
+    FROM receive_details rd
+    WHERE rd.nac_code COLLATE ${COLLATE} = sd.nac_code COLLATE ${COLLATE}
+      AND rd.approval_status = 'APPROVED'
+      AND rd.rrp_fk IS NOT NULL
+  )
+  - ${VARIANT_ISSUE_QTY_SQL}
 )`;
 
 /**
@@ -68,6 +105,9 @@ export const equipmentCodesEquivalent = (a: string, b: string): boolean => {
     const baseRight = getEquipmentNumericBase(right);
     return Boolean(baseLeft && baseRight && baseLeft === baseRight);
 };
+
+export const expandEquipmentTokensToSet = (input: string): Set<string> =>
+    new Set(expandEquipmentTokens(input));
 
 export const expandEquipmentTokens = (input: string): string[] => {
     const normalized = String(input || '')
@@ -148,10 +188,19 @@ const applicableAssetNameExistsSql = (stockAlias: string, param: string) => `
       AND ${stockAlias}.applicable_equipments COLLATE ${COLLATE} LIKE CONCAT('%', a_eq.equipment_code, '%')
   )`;
 
-/** Append AND clause for equipment filter (code, range, or asset name). */
-export const appendEquipmentFilter = (
-    stockAlias: string,
-    useJoin: boolean,
+const familyApplicableAssetNameExistsSql = (familyKeyOuter: string, param: string) => `
+  EXISTS (
+    SELECT 1
+    FROM stock_details sd_f
+    INNER JOIN assets a_f
+      ON a_f.name COLLATE ${COLLATE} LIKE ${param}
+    WHERE ${sqlFamilyKeyExpression('sd_f')} = ${familyKeyOuter}
+      AND sd_f.applicable_equipments COLLATE ${COLLATE} LIKE CONCAT('%', a_f.equipment_code, '%')
+  )`;
+
+/** Family-level equipment match: any variant in the family matches the filter. */
+export const appendFamilyEquipmentFilter = (
+    familyKeyOuterSql: string,
     equipmentNumber: string,
     query: string,
     params: unknown[]
@@ -164,21 +213,50 @@ export const appendEquipmentFilter = (
     const tokens = expandEquipmentTokens(term);
     const numericTokens = tokens.filter((t) => /^\d+$/.test(t));
 
-    if (useJoin) {
-        let clause = ` AND (
-      ${stockAlias}.applicable_equipments LIKE ?
-      OR a.name LIKE ?
-      OR sc.equipment_code LIKE ?
-      OR ${applicableAssetNameExistsSql(stockAlias, '?')}`;
-        params.push(likeTerm, likeTerm, likeTerm, likeTerm);
-        if (numericTokens.length > 0) {
-            clause += ` OR sc.equipment_code IN (?)`;
-            params.push(numericTokens);
-        }
-        clause += `)`;
-        return query + clause;
+    let clause = ` AND EXISTS (
+    SELECT 1
+    FROM stock_details sd_f
+    LEFT JOIN spare_compatibility sc_f
+      ON sc_f.nac_code = sd_f.nac_code COLLATE ${COLLATE}
+    LEFT JOIN assets a_f
+      ON a_f.equipment_code = sc_f.equipment_code COLLATE ${COLLATE}
+    WHERE ${sqlFamilyKeyExpression('sd_f')} = ${familyKeyOuterSql}
+      AND (
+        sd_f.applicable_equipments LIKE ?
+        OR a_f.name LIKE ?
+        OR sc_f.equipment_code LIKE ?
+        OR ${familyApplicableAssetNameExistsSql(familyKeyOuterSql, '?')}`;
+
+    params.push(likeTerm, likeTerm, likeTerm, likeTerm);
+
+    if (numericTokens.length > 0) {
+        clause += ` OR sc_f.equipment_code IN (?)`;
+        params.push(numericTokens);
     }
 
+    clause += `
+      )
+  )`;
+    return query + clause;
+};
+
+/** Append AND clause for equipment filter (code, range, or asset name). */
+export const appendEquipmentFilter = (
+    stockAlias: string,
+    useJoin: boolean,
+    equipmentNumber: string,
+    query: string,
+    params: unknown[]
+): string => {
+    if (useJoin) {
+        return appendFamilyEquipmentFilter(sqlFamilyKeyExpression(stockAlias), equipmentNumber, query, params);
+    }
+
+    const term = String(equipmentNumber).trim();
+    if (!term) {
+        return query;
+    }
+    const likeTerm = `%${term}%`;
     params.push(likeTerm);
     return `${query} AND ${stockAlias}.applicable_equipments LIKE ?`;
 };
@@ -196,27 +274,36 @@ export const appendUniversalAssetNameFilter = (
     return `${query} OR ${equipmentNameExistsSql(stockAlias, '?')}`;
 };
 
-/** Simple stock list without asset join (fallback when join query fails). */
-export const buildSimpleStockListSql = (
+/** Family-grouped stock list (fallback when join query fails). */
+export const buildFamilyGroupedStockListSql = (
     limit: number,
     offset: number
 ): string => `
   SELECT
-    sd.id as id,
-    sd.nac_code as nacCode,
-    sd.item_name as itemName,
-    sd.part_numbers as partNumber,
-    sd.applicable_equipments as equipmentNumber,
-    sd.applicable_equipments as equipmentDisplay,
-    sd.current_balance as currentBalance,
-    sd.location as location,
-    sd.unit as unit
+    MIN(sd.id) as id,
+    ${STOCK_FAMILY_KEY_SQL} as nacCode,
+    SUBSTRING_INDEX(MIN(sd.item_name), ',', 1) as itemName,
+    GROUP_CONCAT(DISTINCT sd.part_numbers ORDER BY sd.nac_code SEPARATOR ', ') as partNumber,
+    MAX(sd.applicable_equipments) as equipmentNumber,
+    MAX(sd.applicable_equipments) as equipmentDisplay,
+    MAX(sd.location) as location,
+    MAX(sd.unit) as unit,
+    COALESCE(SUM(sd.open_quantity), 0) as openQuantity,
+    COALESCE(SUM(sd.open_amount), 0) as openAmount,
+    COUNT(DISTINCT sd.id) as variantCount
   FROM stock_details sd
-  ORDER BY sd.id ASC
+  GROUP BY ${STOCK_FAMILY_KEY_SQL}
+  ORDER BY MIN(sd.id) ASC
   LIMIT ${limit} OFFSET ${offset}`;
 
-export const buildSimpleStockCountSql = (): string =>
-    `SELECT COUNT(*) as total FROM stock_details`;
+export const buildFamilyGroupedStockCountSql = (): string =>
+    `SELECT COUNT(DISTINCT ${STOCK_FAMILY_KEY_SQL}) as total FROM stock_details sd`;
+
+/** @deprecated Use buildFamilyGroupedStockListSql */
+export const buildSimpleStockListSql = buildFamilyGroupedStockListSql;
+
+/** @deprecated Use buildFamilyGroupedStockCountSql */
+export const buildSimpleStockCountSql = buildFamilyGroupedStockCountSql;
 
 /** Scalar subquery: equipment codes with asset names for one stock row. */
 export const equipmentDisplaySubquery = (

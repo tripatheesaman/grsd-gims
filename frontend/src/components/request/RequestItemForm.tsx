@@ -1,5 +1,7 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import Image from 'next/image';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,16 +10,26 @@ import { Textarea } from '@/components/ui/textarea';
 import { RequestCartItem } from '@/types/request';
 import { SearchResult } from '@/types/search';
 import { PartNumberSelect } from './PartNumberSelect';
-import { EquipmentMultiSelect } from './EquipmentMultiSelect';
-import { ConsumableIssueEquipmentSelect } from '@/components/issue/ConsumableIssueEquipmentSelect';
-import { isConsumableStock } from '@/utils/stockItem';
+import { RequestEquipmentSelect } from './RequestEquipmentSelect';
+import { collapseEquipmentSelectionValue } from '@/utils/equipmentNumbers';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2 } from 'lucide-react';
+import {
+    AlertCircle,
+    Hash,
+    Loader2,
+    Package,
+    Scale,
+    User,
+    FileText,
+    ImageIcon,
+} from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 import { processItemName } from '@/utils/utils';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
+import { resolveImageUrl } from '@/lib/urls';
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
+
 interface RequestItemFormProps {
     isOpen: boolean;
     onClose: () => void;
@@ -25,76 +37,81 @@ interface RequestItemFormProps {
     onSubmit: (item: RequestCartItem) => void;
     isManualEntry?: boolean;
 }
+
 export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry = false }: RequestItemFormProps) {
     const { permissions } = useAuthContext();
     const canEditUnit = permissions?.includes('can_edit_unit_during_request');
     const { data: authorityOptions, isLoading: isLoadingAuthorities, error: authoritiesError } = useRequestingAuthorities();
+
     const [requestQuantity, setRequestQuantity] = useState<number>(1);
     const [partNumber, setPartNumber] = useState<string>('');
     const [equipmentNumber, setEquipmentNumber] = useState<string>('');
     const [specifications, setSpecifications] = useState<string>('');
     const [image, setImage] = useState<File | null>(null);
     const [itemName, setItemName] = useState<string>('');
+    const [resolvedNacCode, setResolvedNacCode] = useState<string>('');
     const [unit, setUnit] = useState<string>('');
     const [availableUnits, setAvailableUnits] = useState<string[]>([]);
     const [isLoadingUnits, setIsLoadingUnits] = useState(false);
+    const [isResolvingPart, setIsResolvingPart] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [requestedById, setRequestedById] = useState<number | null>(null);
     const [requestedByEmail, setRequestedByEmail] = useState<string | null>(null);
-    const [sections, setSections] = useState<{ id: number; name: string; code: string }[]>([]);
-    const fetchSections = useCallback(async () => {
-        try {
-            const res = await API.get('/api/settings/issue/sections/active');
-            setSections(res.data || []);
-        } catch {
-            setSections([]);
+
+    const prevNacRef = useRef<string>('');
+
+    const partNumberList = useMemo(() => {
+        if (item?.variants?.length) {
+            return item.variants.map((v) => v.partNumber).filter(Boolean).join(',');
         }
-    }, []);
-    useEffect(() => {
-        if (isOpen) {
-            fetchSections();
-        }
-    }, [isOpen, fetchSections]);
-    const isConsumable = !isManualEntry && item ? isConsumableStock(item.equipmentNumber) : false;
-    const useAssetSectionPicker = isManualEntry || isConsumable;
+        return item?.partNumber || '';
+    }, [item]);
+
+    const nacCodeForUnits = resolvedNacCode || item?.nacCode || '';
+    const nacCodeForEquipment = isManualEntry ? 'N/A' : (resolvedNacCode || item?.nacCode || 'N/A');
+    const displayNacCode = isManualEntry ? 'N/A' : (resolvedNacCode || item?.nacCode || '');
+
     useEffect(() => {
         const fetchAvailableUnits = async () => {
-            if (!item?.nacCode || item.nacCode === 'N/A') {
+            if (!nacCodeForUnits || nacCodeForUnits === 'N/A') {
                 setAvailableUnits([]);
                 return;
             }
             setIsLoadingUnits(true);
             try {
-                const response = await API.get(`/api/nac-units/nac/${encodeURIComponent(item.nacCode)}`);
+                const response = await API.get(`/api/nac-units/nac/${encodeURIComponent(nacCodeForUnits)}`);
                 if (response.status === 200 && response.data.units) {
                     setAvailableUnits(response.data.units);
-                    if (!unit && response.data.defaultUnit) {
+                    if (response.data.defaultUnit) {
                         setUnit(response.data.defaultUnit);
                     }
-                }
-                else {
+                } else {
                     setAvailableUnits([]);
                 }
-            }
-            catch {
+            } catch {
                 setAvailableUnits([]);
-            }
-            finally {
+            } finally {
                 setIsLoadingUnits(false);
             }
         };
-        fetchAvailableUnits();
-    }, [item?.nacCode, unit]);
-    useEffect(() => {
-        if (item) {
-            setItemName(processItemName(item.itemName));
-            if (item.nacCode === 'N/A') {
-                setUnit('');
-            }
+        if (isOpen) {
+            void fetchAvailableUnits();
         }
-        else if (isManualEntry) {
+    }, [nacCodeForUnits, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) {
+            return;
+        }
+        if (item && !isManualEntry) {
+            setItemName(processItemName(item.itemName));
+            setResolvedNacCode(item.nacCode);
+            prevNacRef.current = item.nacCode;
+        } else if (isManualEntry) {
             setItemName('');
+            setResolvedNacCode('N/A');
+            prevNacRef.current = 'N/A';
             setRequestQuantity(1);
             setPartNumber('');
             setEquipmentNumber('');
@@ -105,14 +122,66 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
             setRequestedById(null);
             setRequestedByEmail(null);
         }
+    }, [item, isManualEntry, isOpen]);
+
+    useEffect(() => {
+        if (prevNacRef.current && prevNacRef.current !== nacCodeForEquipment) {
+            setEquipmentNumber('');
+        }
+        prevNacRef.current = nacCodeForEquipment;
+    }, [nacCodeForEquipment]);
+
+    const resolvePartSelection = useCallback(async (pn: string) => {
+        if (!item || isManualEntry || !pn.trim()) {
+            return;
+        }
+
+        const variant = item.variants?.find((v) => v.partNumber?.trim() === pn.trim());
+        if (variant) {
+            setResolvedNacCode(variant.nacCode);
+            setItemName(processItemName(item.itemName));
+            return;
+        }
+
+        setIsResolvingPart(true);
+        try {
+            const response = await API.get('/api/request/resolve-target', {
+                params: { nacCode: item.nacCode, partNumber: pn },
+            });
+            if (response.status === 200 && response.data) {
+                setResolvedNacCode(response.data.nacCode || item.nacCode);
+                if (response.data.itemName) {
+                    setItemName(processItemName(response.data.itemName));
+                }
+                if (response.data.defaultUnit) {
+                    setUnit(response.data.defaultUnit);
+                }
+                if (Array.isArray(response.data.units)) {
+                    setAvailableUnits(response.data.units);
+                }
+            }
+        } catch {
+            setResolvedNacCode(item.nacCode);
+        } finally {
+            setIsResolvingPart(false);
+        }
     }, [item, isManualEntry]);
+
+    const handlePartNumberChange = (value: string) => {
+        setPartNumber(value);
+        void resolvePartSelection(value);
+    };
+
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
-        if (!itemName.trim()) {
+        if (isManualEntry && !itemName.trim()) {
             newErrors.itemName = 'Item name is required';
         }
+        if (!isManualEntry && partNumberList && !partNumber.trim()) {
+            newErrors.partNumber = 'Part number is required';
+        }
         if (!equipmentNumber.trim()) {
-            newErrors.equipmentNumber = 'Equipment number is required';
+            newErrors.equipmentNumber = 'Select at least one asset or section';
         }
         if (!unit.trim()) {
             newErrors.unit = 'Unit is required';
@@ -123,36 +192,37 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!validateForm()) {
             return;
         }
-        if (!isManualEntry && !item)
+        if (!isManualEntry && !item) {
             return;
+        }
         setIsSubmitting(true);
         try {
-            const finalEquipmentNumber = equipmentNumber.trim();
             const cartItem: RequestCartItem = {
                 id: isManualEntry ? 'N/A' : (item?.id?.toString() || 'N/A'),
-                nacCode: isManualEntry ? 'N/A' : (item?.nacCode || 'N/A'),
-                itemName: itemName,
+                nacCode: isManualEntry ? 'N/A' : (resolvedNacCode || item?.nacCode || 'N/A'),
+                itemName: isManualEntry ? itemName : processItemName(itemName || item?.itemName || ''),
                 requestQuantity,
                 partNumber: partNumber || 'N/A',
-                equipmentNumber: finalEquipmentNumber,
+                equipmentNumber: collapseEquipmentSelectionValue(equipmentNumber.trim()),
                 specifications: specifications || '',
                 image: image || undefined,
-                unit: unit,
-                requestedById: requestedById,
-                requestedByEmail: requestedByEmail,
+                unit,
+                requestedById,
+                requestedByEmail,
             };
             await onSubmit(cartItem);
             resetForm();
-        }
-        finally {
+        } finally {
             setIsSubmitting(false);
         }
     };
+
     const resetForm = () => {
         setRequestQuantity(1);
         setPartNumber('');
@@ -164,164 +234,295 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
         setRequestedByEmail(null);
         if (item) {
             setItemName(processItemName(item.itemName));
-            setUnit(item.unit || '');
-        }
-        else if (isManualEntry) {
+            setResolvedNacCode(item.nacCode);
+        } else if (isManualEntry) {
             setItemName('');
+            setResolvedNacCode('N/A');
             setUnit('');
         }
     };
+
     const handleClose = () => {
         resetForm();
         onClose();
     };
+
     const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0] || null;
-        if (file) {
-            try {
-                const options = {
-                    maxWidthOrHeight: 1200,
-                    maxSizeMB: 1,
-                    useWebWorker: true,
-                    initialQuality: 0.7,
-                };
-                const compressedFile = await imageCompression(file, options);
-                setImage(compressedFile);
-            }
-            catch {
-                setImage(file);
-            }
-        }
-        else {
+        if (!file) {
             setImage(null);
+            return;
+        }
+        try {
+            const compressedFile = await imageCompression(file, {
+                maxWidthOrHeight: 1200,
+                maxSizeMB: 1,
+                useWebWorker: true,
+                initialQuality: 0.7,
+            });
+            setImage(compressedFile);
+        } catch {
+            setImage(file);
         }
     };
-    return (<Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="w-full max-w-[95vw] sm:max-w-lg md:max-w-xl lg:max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-4 sm:p-6">
-        <DialogHeader>
-          <DialogTitle className="text-xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-            {isManualEntry ? 'Add New Item' : 'Add Item to Request'}
-          </DialogTitle>
-          <DialogDescription className="text-gray-600">
-            {isManualEntry ? 'Enter the details for the new item' : 'Review and modify item details before adding to request'}
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-[#003594]">Item Name</Label>
-              <Input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="Enter item name" className={`mt-1 ${errors.itemName ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"}`}/>
-              {errors.itemName && <p className="text-sm text-red-500">{errors.itemName}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-[#003594]">NAC Code</Label>
-              <Input value={isManualEntry ? 'N/A' : item?.nacCode || ''} disabled className="mt-1 bg-gray-50 border-[#002a6e]/10"/>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="requestQuantity" className="text-sm font-medium text-[#003594]">Request Quantity</Label>
-              <Input id="requestQuantity" type="number" min="1" value={requestQuantity} onChange={(e) => setRequestQuantity(Number(e.target.value))} required className="mt-1 border-[#002a6e]/10 focus:border-[#003594]"/>
-            </div>
-              <div className="space-y-2">
-              <Label htmlFor="unit" className="text-sm font-medium text-[#003594]">
-                Unit *
-                {!canEditUnit && !isManualEntry && <span className="text-xs text-gray-500 ml-1">(read-only)</span>}
-              </Label>
-              
-              {isManualEntry || (item?.nacCode === 'N/A') ? (<Input id="unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Enter unit (e.g., pcs, kg, etc.)" className={`mt-1 ${errors.unit ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"}`} required/>) : canEditUnit ? (<Select value={unit || undefined} onValueChange={setUnit}>
-                  <SelectTrigger id="unit" className="mt-1 bg-white border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20">
-                    <SelectValue placeholder="Select unit"/>
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border-[#002a6e]/10 max-h-[200px] overflow-y-auto">
-                    {isLoadingUnits ? (<div className="p-2 text-sm text-gray-500">Loading units...</div>) : availableUnits.length > 0 ? (availableUnits.map((u) => (<SelectItem key={u} value={u} className="focus:bg-[#003594]/5">
-                          {u}
-                        </SelectItem>))) : (<div className="p-2 text-sm text-gray-500">No units available</div>)}
-                  </SelectContent>
-                </Select>) : (<Input id="unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="Unit" disabled className={`mt-1 ${errors.unit ? "border-red-500" : "border-[#002a6e]/10 focus:border-[#003594]"} bg-gray-50 cursor-not-allowed`} required/>)}
-                {errors.unit && <p className="text-sm text-red-500">{errors.unit}</p>}
-              </div>
-            <div className="space-y-2">
-              <Label htmlFor="partNumber" className="text-sm font-medium text-[#003594]">Part Number</Label>
-              {isManualEntry ? (<Input id="partNumber" value={partNumber} onChange={(e) => setPartNumber(e.target.value)} placeholder="Enter part number" className="mt-1 border-[#002a6e]/10 focus:border-[#003594]"/>) : (<PartNumberSelect partNumberList={item?.partNumber || ""} value={partNumber} onChange={(value) => setPartNumber(value)} error={errors.partNumber}/>)}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="equipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-              {useAssetSectionPicker ? (
-                <ConsumableIssueEquipmentSelect
-                  value={equipmentNumber}
-                  onChange={setEquipmentNumber}
-                  sections={sections}
-                  error={errors.equipmentNumber}
-                />
-              ) : (
-                <EquipmentMultiSelect
-                  equipmentList={[
-                    ...(item?.equipmentNumber ? item.equipmentNumber.split(',').map(s => s.trim()).filter(Boolean) : []),
-                    ...sections.map(s => s.code),
-                  ]}
-                  value={equipmentNumber}
-                  onChange={(value) => setEquipmentNumber(value)}
-                  error={errors.equipmentNumber}
-                />
-              )}
-              {errors.equipmentNumber && <p className="text-sm text-red-500">{errors.equipmentNumber}</p>}
-            </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="specifications" className="text-sm font-medium text-[#003594]">Specifications</Label>
-            <Textarea id="specifications" value={specifications} onChange={(e) => setSpecifications(e.target.value)} placeholder="Enter any specifications or additional details" className="mt-1 border-[#002a6e]/10 focus:border-[#003594] min-h-[100px]"/>
-          </div>
+    const stockImageUrl = item?.imageUrl ? resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png') : null;
+    const virtualBalance = item?.virtualBalance ?? item?.currentBalance;
+    const trueBalance = item?.trueBalance;
 
-          <div className="space-y-2">
-            <Label htmlFor="requestedBy" className="text-sm font-medium text-[#003594]">Requested By *</Label>
-            <Select value={requestedById?.toString() || ''} onValueChange={(value) => {
-            const selected = authorityOptions?.find(a => a.id.toString() === value);
-            if (selected) {
-                setRequestedById(selected.id);
-                setRequestedByEmail(selected.email || null);
-                if (errors.requestedBy) {
-                    setErrors(prev => {
-                        const newErrors = { ...prev };
-                        delete newErrors.requestedBy;
-                        return newErrors;
-                    });
-                }
-            }
-            else {
-                setRequestedById(null);
-                setRequestedByEmail(null);
-            }
-        }}>
-              <SelectTrigger id="requestedBy" className={`mt-1 bg-white focus:border-[#003594] focus:ring-[#003594]/20 ${errors.requestedBy ? "border-red-500" : "border-[#002a6e]/10"}`}>
-                <SelectValue placeholder="Select requesting authority"/>
-              </SelectTrigger>
-              <SelectContent className="bg-white border-[#002a6e]/10 max-h-[200px] overflow-y-auto">
-                {isLoadingAuthorities ? (<div className="p-2 text-sm text-gray-500">Loading authorities...</div>) : authoritiesError ? (<div className="p-2 text-sm text-red-500">Error loading authorities: {authoritiesError}</div>) : authorityOptions && authorityOptions.length > 0 ? (authorityOptions.map((authority) => (<SelectItem key={authority.id} value={authority.id.toString()} className="focus:bg-[#003594]/5">
-                      {authority.name} - {authority.designation}
-                      {authority.section_name && ` (${authority.section_name})`}
-                    </SelectItem>))) : (<div className="p-2 text-sm text-gray-500">No authorities available. Please add authorities in Settings.</div>)}
-              </SelectContent>
-            </Select>
-            {errors.requestedBy && <p className="text-sm text-red-500">{errors.requestedBy}</p>}
-          </div>
+    return (
+        <Dialog open={isOpen} onOpenChange={handleClose}>
+            <DialogContent className="w-full max-w-[95vw] sm:max-w-2xl lg:max-w-3xl max-h-[92vh] overflow-y-auto bg-white rounded-xl shadow-lg border border-[#002a6e]/10 p-0 gap-0">
+                <DialogHeader className="px-6 pt-6 pb-4 border-b border-[#002a6e]/10 bg-gradient-to-r from-[#003594]/5 to-transparent">
+                    <DialogTitle className="text-xl font-bold text-[#003594]">
+                        {isManualEntry ? 'Add New Item' : 'Add to Request Slip'}
+                    </DialogTitle>
+                    <DialogDescription className="text-gray-600 text-sm">
+                        {isManualEntry
+                            ? 'Enter details for a new item not yet in stock.'
+                            : 'Choose part number and compatible equipment. Name and NAC code come from stock records.'}
+                    </DialogDescription>
+                </DialogHeader>
 
-          <div className="space-y-2">
-            <Label htmlFor="image" className="text-sm font-medium text-[#003594]">Image (Optional)</Label>
-            <Input id="image" type="file" accept="image/*" onChange={handleImageChange} className="mt-1 border-[#002a6e]/10 focus:border-[#003594] file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-[#003594] file:text-white hover:file:bg-[#d2293b] file:transition-colors"/>
-          </div>
+                <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+                    {!isManualEntry && item && (
+                        <div className="flex gap-4 p-4 rounded-lg border border-[#002a6e]/10 bg-[#003594]/[0.03]">
+                            <div className="relative w-20 h-20 shrink-0 rounded-md overflow-hidden border border-[#002a6e]/10 bg-white">
+                                {stockImageUrl ? (
+                                    <Image src={stockImageUrl} alt={itemName} fill className="object-cover" unoptimized />
+                                ) : (
+                                    <div className="flex items-center justify-center h-full text-gray-400">
+                                        <Package className="h-8 w-8" />
+                                    </div>
+                                )}
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-1">
+                                <p className="font-semibold text-[#003594] truncate">{itemName || processItemName(item.itemName)}</p>
+                                <p className="text-sm text-gray-600">
+                                    NAC: <span className="font-mono font-medium">{displayNacCode}</span>
+                                    {isResolvingPart && (
+                                        <span className="ml-2 text-xs text-gray-400 inline-flex items-center gap-1">
+                                            <Loader2 className="h-3 w-3 animate-spin" /> updating…
+                                        </span>
+                                    )}
+                                </p>
+                                <div className="flex flex-wrap gap-3 text-xs text-gray-600 pt-1">
+                                    {virtualBalance != null && (
+                                        <span>Virtual balance: <strong>{virtualBalance}</strong></span>
+                                    )}
+                                    {trueBalance != null && (
+                                        <span>True balance: <strong>{trueBalance}</strong></span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
-          <DialogFooter className="flex justify-end gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={handleClose} className="border-[#002a6e]/10 hover:bg-gray-50">
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting} className="bg-[#003594] hover:bg-[#d2293b] text-white transition-colors">
-              {isSubmitting ? (<>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin"/>
-                  Adding...
-                </>) : ('Add to Request')}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>);
+                    {isManualEntry && (
+                        <div className="space-y-2">
+                            <Label className="text-sm font-medium text-[#003594] flex items-center gap-2">
+                                <Package className="h-4 w-4" /> Item Name *
+                            </Label>
+                            <Input
+                                value={itemName}
+                                onChange={(e) => setItemName(e.target.value)}
+                                placeholder="Enter item name"
+                                className={errors.itemName ? 'border-red-500' : 'border-[#002a6e]/15'}
+                            />
+                            {errors.itemName && (
+                                <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{errors.itemName}</p>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="rounded-lg border border-[#002a6e]/10 overflow-hidden">
+                        <div className="px-4 py-2 bg-gray-50 border-b border-[#002a6e]/10">
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Quantity & Part</h3>
+                        </div>
+                        <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            {!isManualEntry && (
+                                <div className="space-y-2 sm:col-span-1">
+                                    <Label className="text-sm font-medium text-[#003594]">Part Number *</Label>
+                                    <PartNumberSelect
+                                        partNumberList={partNumberList}
+                                        value={partNumber}
+                                        onChange={handlePartNumberChange}
+                                        error={errors.partNumber}
+                                        disabled={isResolvingPart}
+                                    />
+                                </div>
+                            )}
+                            {isManualEntry && (
+                                <div className="space-y-2">
+                                    <Label className="text-sm font-medium text-[#003594]">Part Number</Label>
+                                    <Input
+                                        value={partNumber}
+                                        onChange={(e) => setPartNumber(e.target.value)}
+                                        placeholder="Optional"
+                                        className="border-[#002a6e]/15"
+                                    />
+                                </div>
+                            )}
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-[#003594] flex items-center gap-1">
+                                    <Scale className="h-3.5 w-3.5" /> Quantity *
+                                </Label>
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    value={requestQuantity}
+                                    onChange={(e) => setRequestQuantity(Number(e.target.value))}
+                                    className="border-[#002a6e]/15"
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-[#003594]">
+                                    Unit *
+                                    {!canEditUnit && !isManualEntry && (
+                                        <span className="text-xs text-gray-400 font-normal ml-1">(from settings)</span>
+                                    )}
+                                </Label>
+                                {isManualEntry || nacCodeForUnits === 'N/A' ? (
+                                    <Input
+                                        value={unit}
+                                        onChange={(e) => setUnit(e.target.value)}
+                                        placeholder="e.g. pcs, kg"
+                                        className={errors.unit ? 'border-red-500' : 'border-[#002a6e]/15'}
+                                        required
+                                    />
+                                ) : canEditUnit ? (
+                                    <Select value={unit || undefined} onValueChange={setUnit}>
+                                        <SelectTrigger className="bg-white border-[#002a6e]/15">
+                                            <SelectValue placeholder={isLoadingUnits ? 'Loading…' : 'Select unit'} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {availableUnits.map((u) => (
+                                                <SelectItem key={u} value={u}>{u}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <Input value={unit} disabled className="bg-gray-50 border-[#002a6e]/15" required />
+                                )}
+                                {errors.unit && <p className="text-sm text-red-500">{errors.unit}</p>}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg border border-[#002a6e]/10 overflow-hidden">
+                        <div className="px-4 py-2 bg-gray-50 border-b border-[#002a6e]/10">
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 flex items-center gap-2">
+                                <Hash className="h-3.5 w-3.5" /> Equipment / Section *
+                            </h3>
+                        </div>
+                        <div className="p-4">
+                            <RequestEquipmentSelect
+                                nacCode={nacCodeForEquipment}
+                                value={equipmentNumber}
+                                onChange={setEquipmentNumber}
+                                error={errors.equipmentNumber}
+                                multiple
+                            />
+                        </div>
+                    </div>
+
+                    <div className="rounded-lg border border-[#002a6e]/10 overflow-hidden">
+                        <div className="px-4 py-2 bg-gray-50 border-b border-[#002a6e]/10">
+                            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Additional details</h3>
+                        </div>
+                        <div className="p-4 space-y-4">
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-[#003594] flex items-center gap-2">
+                                    <User className="h-4 w-4" /> Requested By *
+                                </Label>
+                                <Select
+                                    value={requestedById?.toString() || ''}
+                                    onValueChange={(value) => {
+                                        const selected = authorityOptions?.find((a) => a.id.toString() === value);
+                                        if (selected) {
+                                            setRequestedById(selected.id);
+                                            setRequestedByEmail(selected.email || null);
+                                            setErrors((prev) => {
+                                                const next = { ...prev };
+                                                delete next.requestedBy;
+                                                return next;
+                                            });
+                                        } else {
+                                            setRequestedById(null);
+                                            setRequestedByEmail(null);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className={`bg-white ${errors.requestedBy ? 'border-red-500' : 'border-[#002a6e]/15'}`}>
+                                        <SelectValue placeholder="Select requesting authority" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {isLoadingAuthorities ? (
+                                            <div className="p-2 text-sm text-gray-500">Loading…</div>
+                                        ) : authorityOptions?.length ? (
+                                            authorityOptions.map((authority) => (
+                                                <SelectItem key={authority.id} value={authority.id.toString()}>
+                                                    {authority.name} — {authority.designation}
+                                                    {authority.section_name ? ` (${authority.section_name})` : ''}
+                                                </SelectItem>
+                                            ))
+                                        ) : (
+                                            <div className="p-2 text-sm text-gray-500">No authorities configured</div>
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                                {errors.requestedBy && <p className="text-sm text-red-500">{errors.requestedBy}</p>}
+                                {authoritiesError && <p className="text-sm text-red-500">{authoritiesError}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-[#003594] flex items-center gap-2">
+                                    <FileText className="h-4 w-4" /> Specifications
+                                </Label>
+                                <Textarea
+                                    value={specifications}
+                                    onChange={(e) => setSpecifications(e.target.value)}
+                                    placeholder="Optional notes or specifications"
+                                    className="min-h-[80px] border-[#002a6e]/15 resize-none"
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium text-[#003594] flex items-center gap-2">
+                                    <ImageIcon className="h-4 w-4" /> Reference Photo (optional)
+                                </Label>
+                                <Input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleImageChange}
+                                    className="border-[#002a6e]/15 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-[#003594] file:text-white"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter className="flex justify-end gap-3 pt-2 border-t border-[#002a6e]/10">
+                        <Button type="button" variant="outline" onClick={handleClose} className="border-[#002a6e]/15">
+                            Cancel
+                        </Button>
+                        <Button
+                            type="submit"
+                            disabled={isSubmitting || isResolvingPart}
+                            className="bg-[#003594] hover:bg-[#d2293b] text-white min-w-[140px]"
+                        >
+                            {isSubmitting ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Adding…
+                                </>
+                            ) : (
+                                'Add to Slip'
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    );
 }

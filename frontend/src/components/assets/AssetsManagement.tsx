@@ -189,6 +189,13 @@ export function AssetsManagement() {
             showSuccessToast({ title: 'Success', message: 'Asset created successfully', duration: 3000 });
             setIsCreateOpen(false);
         },
+        onError: (error: unknown) => {
+            const message =
+                error && typeof error === 'object' && 'response' in error
+                    ? (error as { response?: { data?: { message?: string } } }).response?.data?.message
+                    : 'Failed to create asset';
+            showErrorToast({ title: 'Error', message: message || 'Failed to create asset', duration: 5000 });
+        },
     });
 
     const updateMutation = useMutation({
@@ -721,9 +728,9 @@ export function AssetsManagement() {
             </Card>
 
             <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto border border-slate-200 bg-white text-slate-900 shadow-xl">
+                <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto border border-slate-200 bg-white text-slate-900 shadow-xl">
                     <DialogHeader>
-                        <DialogTitle className="text-slate-900">Create asset</DialogTitle>
+                        <DialogTitle className="text-slate-900">New asset</DialogTitle>
                     </DialogHeader>
                     <AssetForm
                         key="create-asset"

@@ -5,6 +5,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Menu, Sparkle, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { NotificationBell } from './NotificationBell';
+import { CommunicationsAlertBadge } from '@/components/communications/CommunicationsAlertBadge';
 import { cn } from '@/utils/utils';
 interface TopBarProps {
     onToggleSidebar: () => void;
@@ -55,6 +56,7 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
             </span>
           </div>
 
+          <CommunicationsAlertBadge />
           <NotificationBell />
 
           <DropdownMenu>

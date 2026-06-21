@@ -6,8 +6,19 @@ import { logEvents } from '../middlewares/logger';
 import { refreshPredictionMetrics } from '../services/predictionService';
 import { sendMail, renderEmailTemplate } from '../services/mailer';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import {
+    ensureReceiveVariantStock,
+    mergeFamilyEquipments,
+    previewReceiveTarget,
+    resolveAndPersistReceiveApproval,
+    syncFamilyLocation,
+} from '../services/inventoryVariantService';
 import { validateReceiveTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
+import { normalizePartNumber, stripSuffixFromNac, getNacCodeValidationError } from '../utils/nacCodeUtils';
+import { processItemName } from '../utils/utils';
+import { PoolConnection } from 'mysql2/promise';
+import { resolveRequestRequester, resolveActorPerson } from '../services/personDetailsService';
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
     request_number: string;
@@ -25,6 +36,7 @@ export interface SearchRequestResult extends RowDataPacket {
     image_path: string;
     specifications: string;
     remarks: string;
+    remaining_quantity?: number;
 }
 export interface ReceiveItem {
     nacCode: string;
@@ -60,8 +72,13 @@ interface ReceiveDetailResult extends RowDataPacket {
     request_fk?: number;
     request_number: string;
     request_date: Date;
+    requested_by?: string | null;
+    requested_by_id?: number | null;
+    requested_by_email?: string | null;
+    received_by?: string | null;
     receive_date: Date;
     item_name: string;
+    part_number: string;
     requested_part_number: string;
     received_part_number: string;
     requested_quantity: number;
@@ -148,7 +165,15 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
                 rd.image_path,
                 rd.specifications,
                 rd.remarks,
-                COALESCE(sd.location, '') as location
+                COALESCE(sd.location, '') as location,
+                (
+                    rd.requested_quantity - (
+                        SELECT COALESCE(SUM(ri.received_quantity), 0)
+                        FROM receive_details ri
+                        WHERE ri.request_fk = rd.id
+                        AND ri.approval_status IN ('PENDING','APPROVED')
+                    )
+                ) as remaining_quantity
             FROM request_details rd
             LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
             WHERE rd.approval_status = 'APPROVED'
@@ -228,6 +253,7 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
                 itemName: result.item_name,
                 equipmentNumber: result.equipment_number,
                 requestedQuantity: result.requested_quantity,
+                remainingQuantity: Number(result.remaining_quantity ?? result.requested_quantity),
                 nacCode: result.nac_code,
                 unit: result.unit,
                 currentBalance: result.current_balance,
@@ -299,6 +325,48 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
                 }
             }
 
+            const nacFormatError = getNacCodeValidationError(finalNacCode, { allowSuffix: true });
+            if (nacFormatError) {
+                throw new Error(`${nacFormatError} (item: ${item.itemName})`);
+            }
+
+            const baseNacCode = stripSuffixFromNac(finalNacCode);
+            const partNumber = normalizePartNumber(item.partNumber || '');
+            if (!partNumber || partNumber === 'NA' || partNumber === 'N/A') {
+                throw new Error(`Part number is required for item: ${item.itemName}`);
+            }
+
+            const resolved = await previewReceiveTarget(connection, {
+                baseNacCode,
+                partNumber,
+            });
+            finalNacCode = resolved.nacCode;
+
+            if (resolved.requiresNewPhoto) {
+                if (!item.imagePath || !String(item.imagePath).trim()) {
+                    throw new Error(`A new photo is required when receiving a new part number for ${baseNacCode}`);
+                }
+                const [prevReceiveImg] = await connection.execute<RowDataPacket[]>(
+                    `SELECT image_path FROM receive_details
+                     WHERE nac_code IN (?, ?) AND approval_status = 'APPROVED'
+                       AND image_path IS NOT NULL AND TRIM(image_path) != ''
+                     ORDER BY id DESC LIMIT 1`,
+                    [baseNacCode, finalNacCode]
+                );
+                const [prevStockImg] = await connection.execute<RowDataPacket[]>(
+                    `SELECT image_url FROM stock_details
+                     WHERE base_nac_code = ? OR nac_code = ?
+                     AND image_url IS NOT NULL AND TRIM(image_url) != ''
+                     LIMIT 1`,
+                    [baseNacCode, baseNacCode]
+                );
+                const previousPath = (prevReceiveImg as RowDataPacket[])[0]?.image_path
+                    || (prevStockImg as RowDataPacket[])[0]?.image_url;
+                if (previousPath && String(previousPath).trim() === String(item.imagePath).trim()) {
+                    throw new Error(`A new photo upload is required for new part number ${partNumber}. Reusing the previous image is not allowed.`);
+                }
+            }
+
             const isNewNacAssignment =
                 (!requestNacCode || requestNacCode === 'N/A') &&
                 finalNacCode !== 'N/A' &&
@@ -309,7 +377,7 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
                     `SELECT id FROM stock_details WHERE nac_code = ? LIMIT 1`,
                     [finalNacCode]
                 );
-                if (existingStock.length > 0) {
+                if (existingStock.length > 0 && !resolved.isNewVariant) {
                     throw new Error(`NAC Code ${finalNacCode} already exists. Please choose a different NAC code for this new item.`);
                 }
             }
@@ -360,8 +428,8 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
                 formattedDate,
                 item.requestId,
                 finalNacCode,
-                item.partNumber,
-                item.itemName,
+                partNumber,
+                processItemName(item.itemName),
                 item.receiveQuantity,
                 item.receiveQuantity,
                 item.unit,
@@ -407,7 +475,9 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
             errorMessage.includes('has already been received') ||
             errorMessage.includes('Incompatible equipment selection') ||
             errorMessage.includes('NAC Code is required') ||
-            errorMessage.includes('NAC Code is missing')) {
+            errorMessage.includes('NAC Code is missing') ||
+            errorMessage.includes('new photo') ||
+            errorMessage.includes('Part number is required')) {
             res.status(400).json({
                 error: 'Bad Request',
                 message: errorMessage
@@ -430,7 +500,11 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
         const [results] = await pool.execute<ReceiveDetailResult[]>(`SELECT 
                 COALESCE(req.request_number, '') as request_number,
                 COALESCE(req.request_date, NULL) as request_date,
+                req.requested_by,
+                req.requested_by_id,
+                req.requested_by_email,
                 rd.receive_date,
+                rd.received_by,
                 rd.item_name,
                 COALESCE(req.part_number, '') as requested_part_number,
                 rd.part_number as received_part_number,
@@ -473,11 +547,20 @@ export const getReceiveDetails = async (req: Request, res: Response): Promise<vo
                 conversionBase = Number(convRows[0].conversion_base);
             }
         }
+        const requestedByDetails = await resolveRequestRequester(pool, {
+            requestedById: result.requested_by_id,
+            requestedByEmail: result.requested_by_email,
+            requestedBy: result.requested_by,
+        });
+        const receivedByDetails = await resolveActorPerson(pool, result.received_by);
+
         const formattedResponse: any = {
             receiveId: parseInt(receiveId),
             requestNumber: result.request_number || '',
             requestDate: result.request_date ? formatDate(result.request_date) : '',
             receiveDate: formatDate(result.receive_date),
+            requestedByDetails,
+            receivedByDetails,
             itemName: result.item_name,
             requestedPartNumber: result.requested_part_number || '',
             receivedPartNumber: result.received_part_number,
@@ -576,6 +659,16 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
         }
         const incomingNacCode = typeof nacCode === 'string' ? nacCode.trim() : '';
         const resolvedNacCode = incomingNacCode || requestNacCode || existingNacCode || '';
+        if (resolvedNacCode && resolvedNacCode !== 'N/A') {
+            const nacFormatError = getNacCodeValidationError(resolvedNacCode, { allowSuffix: true });
+            if (nacFormatError) {
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message: nacFormatError
+                });
+                return;
+            }
+        }
         
         updateFields.push('nac_code = COALESCE(NULLIF(?, \'\'), nac_code)');
         updateValues.push(resolvedNacCode);
@@ -851,116 +944,15 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
             sendAlreadyProcessed(res, 'This receive');
             return;
         }
-        const [stockDetails] = await connection.execute<StockDetailResult[]>(`SELECT * FROM stock_details 
-            WHERE nac_code = ?`, [receive.nac_code]);
-        let stockQty = typeof receive.received_quantity === 'string'
-            ? parseFloat(receive.received_quantity)
-            : receive.received_quantity;
-        let stockUnit = receive.unit;
-        if (receive.requested_unit && receive.unit && receive.requested_unit !== receive.unit) {
-            const [convRows] = await connection.execute<RowDataPacket[]>(`SELECT conversion_base 
-                 FROM unit_conversions 
-                 WHERE nac_code = ? AND requested_unit = ? AND received_unit = ?`, [receive.nac_code, receive.requested_unit, receive.unit]);
-            if (convRows.length > 0 && convRows[0].conversion_base != null) {
-                const conv = Number(convRows[0].conversion_base);
-                if (conv > 0) {
-                    stockQty = stockQty / conv;
-                    stockUnit = receive.requested_unit;
-                }
-            }
-        }
-        if (stockDetails.length > 0) {
-            const stock = stockDetails[0];
-            const currentBalance = typeof stock.current_balance === 'string'
-                ? parseFloat(stock.current_balance)
-                : stock.current_balance;
-            const newBalance = currentBalance + stockQty;
-            let partNumbers = stock.part_numbers.split(',').map(pn => pn.trim()).filter(pn => pn !== '');
-            if (!partNumbers.includes(receive.part_number)) {
-                partNumbers = [receive.part_number, ...partNumbers];
-            }
-            const updatedPartNumbers = partNumbers.join(',');
-            let itemNames = stock.item_name.split(',').map(name => name.trim()).filter(name => name !== '');
-            if (!itemNames.includes(receive.item_name)) {
-                itemNames = [receive.item_name, ...itemNames];
-            }
-            const updatedItemNames = itemNames.join(',');
-            const existingEquipmentNumbers = new Set(stock.applicable_equipments.split(',').map(num => num.trim()).filter(num => num !== ''));
-            const newEquipmentNumbers = expandEquipmentNumbers(receive.equipment_number);
-            const uniqueNewNumbers = Array.from(newEquipmentNumbers).filter(num => !existingEquipmentNumbers.has(num));
-            const updatedEquipmentNumbers = uniqueNewNumbers.length > 0
-                ? [...uniqueNewNumbers, ...Array.from(existingEquipmentNumbers)].join(',')
-                : stock.applicable_equipments;
-            const updateFields = [
-                'current_balance = ?',
-                'part_numbers = ?',
-                'item_name = ?',
-                'applicable_equipments = ?'
-            ];
-            const updateValues = [
-                newBalance,
-                updatedPartNumbers,
-                updatedItemNames,
-                updatedEquipmentNumbers
-            ];
-            if (receive.location && receive.location.trim() !== '') {
-                updateFields.push('location = ?');
-                updateValues.push(receive.location);
-            }
-            if (receive.image_path && receive.image_path.trim() !== '') {
-                updateFields.push('image_url = ?');
-                updateValues.push(receive.image_path);
-            }
-            if (stockUnit && stockUnit.trim() !== '') {
-                updateFields.push('unit = ?');
-                updateValues.push(stockUnit);
-            }
-            updateValues.push(stock.id);
-            await connection.execute(`UPDATE stock_details 
-                SET ${updateFields.join(', ')},
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?`, updateValues);
-            logEvents(`Successfully updated stock for NAC code: ${receive.nac_code} with new balance: ${newBalance}`, "receiveLog.log");
-        }
-        else {
-            if (!receive.nac_code || receive.nac_code.trim() === '') {
-                logEvents(`Cannot create stock record - Empty/null nacCode for receive ID ${receiveId}`, "receiveLog.log");
-                throw new Error(`Cannot create stock record - NAC Code is missing for item: ${receive.item_name}. Please ensure the receive record has a valid NAC Code.`);
-            }
-            logEvents(`Creating new stock record for NAC code: "${receive.nac_code}" with receive ID: ${receiveId}`, "receiveLog.log");
-            const insertFields = [
-                'nac_code',
-                'item_name',
-                'part_numbers',
-                'applicable_equipments',
-                'open_quantity',
-                'open_amount',
-                'current_balance',
-                'unit'
-            ];
-            const insertValues = [
-                receive.nac_code,
-                receive.item_name,
-                receive.part_number,
-                Array.from(expandEquipmentNumbers(receive.equipment_number)).join(','),
-                0,
-                0,
-                receive.received_quantity,
-                receive.unit
-            ];
-            if (receive.location && receive.location.trim() !== '') {
-                insertFields.push('location');
-                insertValues.push(receive.location);
-            }
-            if (receive.image_path && receive.image_path.trim() !== '') {
-                insertFields.push('image_url');
-                insertValues.push(receive.image_path);
-            }
-            const placeholders = insertFields.map(() => '?').join(', ');
-            await connection.execute(`INSERT INTO stock_details (${insertFields.join(', ')}) 
-                VALUES (${placeholders})`, insertValues);
-            logEvents(`Successfully created new stock record for NAC code: ${receive.nac_code}`, "receiveLog.log");
-        }
+        const resolved = await resolveAndPersistReceiveApproval(
+            connection,
+            Number(receiveId),
+            receive.nac_code || '',
+            receive.part_number
+        );
+        receive.nac_code = resolved.nacCode;
+        receive.part_number = resolved.partNumber;
+        await applyApprovedReceiveToStock(connection, receive);
         await connection.commit();
         logEvents(`Successfully approved receive ID: ${receiveId}`, "receiveLog.log");
         const [rqRows] = await connection.execute<RowDataPacket[]>(`SELECT request_fk, receive_source FROM receive_details WHERE id = ?`, [receiveId]);
@@ -986,17 +978,21 @@ export const approveReceive = async (req: Request, res: Response): Promise<void>
             logEvents(`Updated request ${requestFkForCompletion}: is_received=${isComplete}, receive_fk=${latestReceiveId}, approved_total=${approvedTotal}/${requestedQtyForCompletion}`, "receiveLog.log");
         }
         if (receive.nac_code) {
-            try {
-                await refreshPredictionMetrics({ nacCode: receive.nac_code });
-            }
-            catch (predictionError) {
-                const predictionMessage = predictionError instanceof Error ? predictionError.message : 'Unknown error';
-                logEvents(`Warning: Failed to refresh prediction metrics for NAC ${receive.nac_code} after approval ${receiveId}: ${predictionMessage}`, "predictionLog.log");
-            }
+            const nacForPrediction = receive.nac_code;
+            setImmediate(() => {
+                void refreshPredictionMetrics({ nacCode: nacForPrediction }).catch((predictionError) => {
+                    const predictionMessage = predictionError instanceof Error ? predictionError.message : 'Unknown error';
+                    logEvents(`Warning: Failed to refresh prediction metrics for NAC ${nacForPrediction} after approval ${receiveId}: ${predictionMessage}`, "predictionLog.log");
+                });
+            });
         }
         const requestFkForEmail = (rqRows as any[])[0]?.request_fk;
         if (requestFkForEmail && requestFkForEmail > 0) {
-            await sendReceiveApprovalEmail(Number(receiveId), Number(requestFkForEmail));
+            const receiveIdForEmail = Number(receiveId);
+            const requestFk = Number(requestFkForEmail);
+            setImmediate(() => {
+                void sendReceiveApprovalEmail(receiveIdForEmail, requestFk);
+            });
         }
         res.status(200).json({
             message: 'Receive approved and stock updated successfully'
@@ -1058,113 +1054,15 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
             sendAlreadyProcessed(res, 'This receive');
             return;
         }
-        const [stockDetails] = await connection.execute<StockDetailResult[]>(`SELECT * FROM stock_details 
-            WHERE nac_code = ?`, [receive.nac_code]);
-        let stockQty = typeof receive.received_quantity === 'string'
-            ? parseFloat(receive.received_quantity)
-            : receive.received_quantity;
-        let stockUnit = receive.unit;
-        if (receive.requested_unit && receive.unit && receive.requested_unit !== receive.unit) {
-            const [convRows] = await connection.execute<RowDataPacket[]>(`SELECT conversion_base 
-                 FROM unit_conversions 
-                 WHERE nac_code = ? AND requested_unit = ? AND received_unit = ?`, [receive.nac_code, receive.requested_unit, receive.unit]);
-            if (convRows.length > 0 && convRows[0].conversion_base != null) {
-                const conv = Number(convRows[0].conversion_base);
-                if (conv > 0) {
-                    stockQty = stockQty / conv;
-                    stockUnit = receive.requested_unit;
-                }
-            }
-        }
-        if (stockDetails.length > 0) {
-            const stock = stockDetails[0];
-            const currentBalance = typeof stock.current_balance === 'string'
-                ? parseFloat(stock.current_balance)
-                : stock.current_balance;
-            const newBalance = currentBalance + stockQty;
-            let partNumbers = stock.part_numbers.split(',').map(pn => pn.trim()).filter(pn => pn !== '');
-            if (!partNumbers.includes(receive.part_number)) {
-                partNumbers = [receive.part_number, ...partNumbers];
-            }
-            const updatedPartNumbers = partNumbers.join(',');
-            let itemNames = stock.item_name.split(',').map(name => name.trim()).filter(name => name !== '');
-            if (!itemNames.includes(receive.item_name)) {
-                itemNames = [receive.item_name, ...itemNames];
-            }
-            const updatedItemNames = itemNames.join(',');
-            const existingEquipmentNumbers = new Set(stock.applicable_equipments.split(',').map(num => num.trim()).filter(num => num !== ''));
-            const newEquipmentNumbers = expandEquipmentNumbers(receive.equipment_number);
-            const uniqueNewNumbers = Array.from(newEquipmentNumbers).filter(num => !existingEquipmentNumbers.has(num));
-            const updatedEquipmentNumbers = uniqueNewNumbers.length > 0
-                ? [...uniqueNewNumbers, ...Array.from(existingEquipmentNumbers)].join(',')
-                : stock.applicable_equipments;
-            const updateFields = [
-                'current_balance = ?',
-                'part_numbers = ?',
-                'item_name = ?',
-                'applicable_equipments = ?'
-            ];
-            const updateValues: any[] = [
-                newBalance,
-                updatedPartNumbers,
-                updatedItemNames,
-                updatedEquipmentNumbers
-            ];
-            if (receive.location && receive.location.trim() !== '') {
-                updateFields.push('location = ?');
-                updateValues.push(receive.location);
-            }
-            if (receive.image_path && receive.image_path.trim() !== '') {
-                updateFields.push('image_url = ?');
-                updateValues.push(receive.image_path);
-            }
-            if (stockUnit && stockUnit.trim() !== '') {
-                updateFields.push('unit = ?');
-                updateValues.push(stockUnit);
-            }
-            updateValues.push(stock.id);
-            await connection.execute(`UPDATE stock_details 
-                SET ${updateFields.join(', ')},
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?`, updateValues);
-        }
-        else {
-            if (!receive.nac_code || receive.nac_code.trim() === '') {
-                logEvents(`Cannot create stock record - Empty/null nacCode for receive ID ${receiveId}`, "receiveLog.log");
-                throw new Error(`Cannot create stock record - NAC Code is missing for item: ${receive.item_name}. Please ensure the receive record has a valid NAC Code.`);
-            }
-            const insertFields = [
-                'nac_code',
-                'item_name',
-                'part_numbers',
-                'applicable_equipments',
-                'open_quantity',
-                'open_amount',
-                'current_balance',
-                'unit'
-            ];
-            const insertValues: any[] = [
-                receive.nac_code,
-                receive.item_name,
-                receive.part_number,
-                Array.from(expandEquipmentNumbers(receive.equipment_number)).join(','),
-                0,
-                0,
-                receive.received_quantity,
-                receive.unit
-            ];
-            if (receive.location && receive.location.trim() !== '') {
-                insertFields.push('location');
-                insertValues.push(receive.location);
-            }
-            if (receive.image_path && receive.image_path.trim() !== '') {
-                insertFields.push('image_url');
-                insertValues.push(receive.image_path);
-            }
-            const placeholders = insertFields.map(() => '?').join(', ');
-            await connection.execute(`INSERT INTO stock_details (${insertFields.join(', ')}) 
-                VALUES (${placeholders})`, insertValues);
-        }
+        const resolved = await resolveAndPersistReceiveApproval(
+            connection,
+            Number(receiveId),
+            receive.nac_code || '',
+            receive.part_number
+        );
+        receive.nac_code = resolved.nacCode;
+        receive.part_number = resolved.partNumber;
+        await applyApprovedReceiveToStock(connection, receive);
         if (receive.request_fk && receive.request_fk > 0 && receive.receive_source !== 'tender') {
             await connection.execute(`UPDATE request_details 
                  SET is_received = 1,
@@ -1175,16 +1073,20 @@ export const approveReceiveAndClose = async (req: Request, res: Response): Promi
         await connection.commit();
         logEvents(`Successfully approved & force closed receive ID: ${receiveId}`, "receiveLog.log");
         if (receive.nac_code) {
-            try {
-                await refreshPredictionMetrics({ nacCode: receive.nac_code });
-            }
-            catch (predictionError) {
-                const predictionMessage = predictionError instanceof Error ? predictionError.message : 'Unknown error';
-                logEvents(`Warning: Failed to refresh prediction metrics for NAC ${receive.nac_code} after approve-and-close ${receiveId}: ${predictionMessage}`, "predictionLog.log");
-            }
+            const nacForPrediction = receive.nac_code;
+            setImmediate(() => {
+                void refreshPredictionMetrics({ nacCode: nacForPrediction }).catch((predictionError) => {
+                    const predictionMessage = predictionError instanceof Error ? predictionError.message : 'Unknown error';
+                    logEvents(`Warning: Failed to refresh prediction metrics for NAC ${nacForPrediction} after approve-and-close ${receiveId}: ${predictionMessage}`, "predictionLog.log");
+                });
+            });
         }
         if (receive.request_fk && receive.request_fk > 0) {
-            await sendReceiveApprovalEmail(Number(receiveId), Number(receive.request_fk));
+            const receiveIdForEmail = Number(receiveId);
+            const requestFk = Number(receive.request_fk);
+            setImmediate(() => {
+                void sendReceiveApprovalEmail(receiveIdForEmail, requestFk);
+            });
         }
         res.status(200).json({
             message: 'Receive approved, stock updated and request force-closed successfully'
@@ -1283,6 +1185,107 @@ export const rejectReceive = async (req: Request, res: Response): Promise<void> 
         connection.release();
     }
 };
+type ReceiveStockUpdateInput = {
+    nac_code?: string;
+    item_name: string;
+    part_number: string;
+    received_quantity: number | string;
+    equipment_number: string;
+    location?: string;
+    image_path?: string;
+    unit?: string;
+    requested_unit?: string;
+};
+
+async function applyApprovedReceiveToStock(
+    connection: PoolConnection,
+    receive: ReceiveStockUpdateInput
+): Promise<void> {
+    if (!receive.nac_code || receive.nac_code.trim() === '') {
+        throw new Error(`Cannot update stock - NAC Code is missing for item: ${receive.item_name}`);
+    }
+
+    let stockQty = typeof receive.received_quantity === 'string'
+        ? parseFloat(receive.received_quantity)
+        : receive.received_quantity;
+    let stockUnit = receive.unit || '';
+    if (receive.requested_unit && receive.unit && receive.requested_unit !== receive.unit) {
+        const [convRows] = await connection.execute<RowDataPacket[]>(
+            `SELECT conversion_base FROM unit_conversions
+             WHERE nac_code = ? AND requested_unit = ? AND received_unit = ?`,
+            [receive.nac_code, receive.requested_unit, receive.unit]
+        );
+        if (convRows.length > 0 && convRows[0].conversion_base != null) {
+            const conv = Number(convRows[0].conversion_base);
+            if (conv > 0) {
+                stockQty = stockQty / conv;
+                stockUnit = receive.requested_unit;
+            }
+        }
+    }
+
+    const baseNacCode = stripSuffixFromNac(receive.nac_code);
+    const partNumber = normalizePartNumber(receive.part_number);
+    const itemName = processItemName(receive.item_name);
+    const equipmentCsv = Array.from(expandEquipmentNumbers(receive.equipment_number)).join(',');
+
+    let [stockDetails] = await connection.execute<StockDetailResult[]>(
+        `SELECT * FROM stock_details WHERE nac_code = ?`,
+        [receive.nac_code]
+    );
+
+    if (!stockDetails.length) {
+        await ensureReceiveVariantStock(connection, {
+            targetNacCode: receive.nac_code,
+            baseNacCode,
+            partNumber,
+            itemName,
+            applicableEquipments: equipmentCsv,
+            location: receive.location || null,
+            unit: stockUnit,
+            imageUrl: receive.image_path || null,
+        });
+        [stockDetails] = await connection.execute<StockDetailResult[]>(
+            `SELECT * FROM stock_details WHERE nac_code = ?`,
+            [receive.nac_code]
+        );
+    }
+
+    if (!stockDetails.length) {
+        throw new Error(`Failed to ensure stock variant for NAC ${receive.nac_code}`);
+    }
+
+    const stock = stockDetails[0];
+    const currentBalance = typeof stock.current_balance === 'string'
+        ? parseFloat(stock.current_balance)
+        : stock.current_balance;
+    const newBalance = currentBalance + stockQty;
+
+    await mergeFamilyEquipments(connection, baseNacCode, receive.equipment_number, expandEquipmentNumbers);
+
+    const updateFields = ['current_balance = ?'];
+    const updateValues: Array<string | number> = [newBalance];
+
+    if (receive.location && receive.location.trim() !== '') {
+        await syncFamilyLocation(connection, baseNacCode, receive.location);
+    }
+    if (receive.image_path && receive.image_path.trim() !== '') {
+        updateFields.push('image_url = ?');
+        updateValues.push(receive.image_path);
+    }
+    if (stockUnit && stockUnit.trim() !== '') {
+        updateFields.push('unit = ?');
+        updateValues.push(stockUnit);
+    }
+    updateValues.push(stock.id);
+
+    await connection.execute(
+        `UPDATE stock_details SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        updateValues
+    );
+    logEvents(`Updated stock variant ${receive.nac_code} balance to ${newBalance}`, 'receiveLog.log');
+}
+
 function expandEquipmentNumbers(equipmentNumber: string): Set<string> {
     const numbers = new Set<string>();
     const parts = equipmentNumber.split(',');
@@ -1364,7 +1367,8 @@ export const saveUnitConversion = async (req: Request, res: Response): Promise<v
 };
 export const getPreviousImage = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { nacCode } = req.query;
+        const nacCode = String(req.query.nacCode || '').trim();
+        const partNumber = normalizePartNumber(String(req.query.partNumber || ''));
         if (!nacCode) {
             res.status(400).json({
                 error: 'Bad Request',
@@ -1372,36 +1376,65 @@ export const getPreviousImage = async (req: Request, res: Response): Promise<voi
             });
             return;
         }
-        const [results] = await pool.execute<RowDataPacket[]>(`SELECT image_path 
-            FROM receive_details 
-            WHERE nac_code = ? 
-            AND image_path IS NOT NULL 
-            AND image_path != ''
-            AND approval_status = 'APPROVED'
-            ORDER BY receive_date DESC, id DESC
-            LIMIT 1`, [nacCode]);
-        if (results.length > 0 && results[0].image_path) {
-            res.status(200).json({
-                imagePath: results[0].image_path
-            });
-        }
-        else {
-            const [stockResults] = await pool.execute<RowDataPacket[]>(`SELECT image_url 
-                FROM stock_details 
-                WHERE nac_code = ? 
-                AND image_url IS NOT NULL 
-                AND image_url != ''
-                LIMIT 1`, [nacCode]);
+        const baseNac = stripSuffixFromNac(nacCode);
+        const connection = await pool.getConnection();
+        try {
+            if (partNumber) {
+                const resolved = await previewReceiveTarget(connection, { baseNacCode: baseNac, partNumber });
+                if (resolved.requiresNewPhoto) {
+                    res.status(200).json({ imagePath: null, requiresNewPhoto: true });
+                    return;
+                }
+                const targetNac = resolved.nacCode;
+                const [results] = await pool.execute<RowDataPacket[]>(
+                    `SELECT image_path FROM receive_details
+                     WHERE nac_code = ? AND UPPER(TRIM(part_number)) = ?
+                     AND image_path IS NOT NULL AND image_path != ''
+                     AND approval_status = 'APPROVED'
+                     ORDER BY receive_date DESC, id DESC LIMIT 1`,
+                    [targetNac, partNumber]
+                );
+                if (results.length > 0 && results[0].image_path) {
+                    res.status(200).json({ imagePath: results[0].image_path, requiresNewPhoto: false });
+                    return;
+                }
+                const [stockResults] = await pool.execute<RowDataPacket[]>(
+                    `SELECT image_url FROM stock_details
+                     WHERE nac_code = ? AND image_url IS NOT NULL AND image_url != '' LIMIT 1`,
+                    [targetNac]
+                );
+                if (stockResults.length > 0 && stockResults[0].image_url) {
+                    res.status(200).json({ imagePath: stockResults[0].image_url, requiresNewPhoto: false });
+                    return;
+                }
+                res.status(200).json({ imagePath: null, requiresNewPhoto: false });
+                return;
+            }
+            const [results] = await pool.execute<RowDataPacket[]>(
+                `SELECT image_path FROM receive_details
+                 WHERE nac_code = ? AND image_path IS NOT NULL AND image_path != ''
+                 AND approval_status = 'APPROVED'
+                 ORDER BY receive_date DESC, id DESC LIMIT 1`,
+                [nacCode]
+            );
+            if (results.length > 0 && results[0].image_path) {
+                res.status(200).json({ imagePath: results[0].image_path });
+                return;
+            }
+            const [stockResults] = await pool.execute<RowDataPacket[]>(
+                `SELECT image_url FROM stock_details
+                 WHERE (base_nac_code = ? OR nac_code = ?) AND image_url IS NOT NULL AND image_url != ''
+                 LIMIT 1`,
+                [baseNac, baseNac]
+            );
             if (stockResults.length > 0 && stockResults[0].image_url) {
-                res.status(200).json({
-                    imagePath: stockResults[0].image_url
-                });
+                res.status(200).json({ imagePath: stockResults[0].image_url });
+                return;
             }
-            else {
-                res.status(200).json({
-                    imagePath: null
-                });
-            }
+            res.status(200).json({ imagePath: null });
+        }
+        finally {
+            connection.release();
         }
     }
     catch (error) {

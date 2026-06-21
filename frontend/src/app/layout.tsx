@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { NotificationProvider } from '@/context/NotificationContext';
 import { withBasePath } from '@/lib/urls';
 import { QueryProvider } from '@/components/providers/QueryProvider';
+import { CommunicationsShell } from '@/components/communications/CommunicationsShell';
 export const metadata: Metadata = {
     title: 'GIMS',
     description: 'Inventory Management System',
@@ -21,11 +22,13 @@ export default function RootLayout({ children }: LayoutProps) {
       <body className="font-sans" suppressHydrationWarning>
         <QueryProvider>
         <AuthContextProvider>
+          <CommunicationsShell>
           <NotificationProvider>
             <DashboardLayoutContent>
               {children}
             </DashboardLayoutContent>
           </NotificationProvider>
+          </CommunicationsShell>
         </AuthContextProvider>
         </QueryProvider>
         <Toaster />

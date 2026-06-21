@@ -3,8 +3,10 @@
 import { useAuthContext } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Wrench } from 'lucide-react';
+import { useCustomToast } from '@/components/ui/custom-toast';
 import { API } from '@/lib/api';
+import { getNacCodeValidationError } from '@/utils/nacCodeUtils';
 import { InventoryFilterPanel } from '@/components/inventory/InventoryFilterPanel';
 import { InventoryPageHeader } from '@/components/inventory/InventoryPageHeader';
 import { StockRecordsTable, type StockRecordRow } from '@/components/stock/StockRecordsTable';
@@ -31,7 +33,9 @@ interface StockFormData {
 }
 export default function StockRecordsPage() {
     const { user, permissions } = useAuthContext();
+    const { showSuccessToast, showErrorToast } = useCustomToast();
     const router = useRouter();
+    const isSuperAdmin = user?.UserInfo?.role?.toLowerCase() === 'superadmin';
     useEffect(() => {
         if (!user) {
             router.push('/login');
@@ -73,6 +77,9 @@ export default function StockRecordsPage() {
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
+    const [migrating, setMigrating] = useState<boolean>(false);
+    const [showMigrateModal, setShowMigrateModal] = useState<boolean>(false);
+    const [migrateDryRun, setMigrateDryRun] = useState<boolean>(true);
     const fetchData = useCallback(async () => {
         if (!canAccess)
             return;
@@ -118,12 +125,23 @@ export default function StockRecordsPage() {
         const errors: Record<string, string> = {};
         if (!formData.nacCode.trim()) {
             errors.nacCode = 'NAC Code is required';
+        } else {
+            const nacFormatError = getNacCodeValidationError(formData.nacCode, { allowSuffix: true });
+            if (nacFormatError) {
+                errors.nacCode = nacFormatError;
+            }
         }
         if (!formData.itemName.trim()) {
             errors.itemName = 'Item Name is required';
         }
         if (!formData.partNumber.trim()) {
             errors.partNumber = 'Part Number is required';
+        }
+        else if (formData.partNumber.includes(',')) {
+            errors.partNumber = 'Part number must be a single value (no commas)';
+        }
+        if (formData.itemName.includes(',')) {
+            errors.itemName = 'Item name must be a single value (no commas)';
         }
         if (!formData.equipmentNumber.trim()) {
             errors.equipmentNumber = 'Equipment Number is required';
@@ -236,6 +254,40 @@ export default function StockRecordsPage() {
         setShowCreateModal(true);
     };
 
+    const handleMigratePartVariants = async () => {
+        setMigrating(true);
+        try {
+            const res = await API.post('/api/stock/migrate-part-variants', { dryRun: migrateDryRun });
+            const data = res.data;
+            const reconcile = data.reconcile;
+            const errorHint = data.errors?.length
+                ? ` Split errors: ${data.errors.slice(0, 2).join('; ')}${data.errors.length > 2 ? '…' : ''}`
+                : '';
+            const reconcileHint = reconcile
+                ? ` Reconcile: ${reconcile.reconciledVariants} variants, ${reconcile.balanceFixes} balance fix(es), ${reconcile.compatRowsAdded} compat row(s).`
+                : '';
+            const reconcileErrors = reconcile?.errors?.length
+                ? ` Reconcile errors: ${reconcile.errors.slice(0, 2).join('; ')}`
+                : '';
+            showSuccessToast({
+                title: migrateDryRun ? 'Dry run complete' : 'Reconciliation complete',
+                message: `Split: processed ${data.processed}, split ${data.splitFamilies}, fixed ${data.singlePartFixed}.${reconcileHint}${errorHint}${reconcileErrors}`,
+                duration: 14000,
+            });
+            if (!migrateDryRun) {
+                fetchData();
+            }
+            setShowMigrateModal(false);
+        } catch (error: unknown) {
+            const msg = error && typeof error === 'object' && 'response' in error
+                ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Migration failed')
+                : 'Migration failed';
+            showErrorToast({ title: 'Migration failed', message: msg, duration: 6000 });
+        } finally {
+            setMigrating(false);
+        }
+    };
+
     const hasActiveFilters = Boolean(universal.trim() || equipmentNumber.trim() || partNumber.trim());
 
     const handleFilterChange = (field: 'universal' | 'equipment' | 'part', value: string) => {
@@ -262,16 +314,29 @@ export default function StockRecordsPage() {
                     description="Manage spare inventory: browse all items, filter by NAC, equipment, or part number, and add or edit records."
                     badge="Administration"
                     actions={
-                        canAdd ? (
-                            <Button
-                                type="button"
-                                onClick={openCreateModal}
-                                className="bg-white text-[#003594] hover:bg-white/90 shadow-md"
-                            >
-                                <Plus className="mr-2 h-4 w-4" />
-                                Add item
-                            </Button>
-                        ) : undefined
+                        <div className="flex flex-wrap gap-2">
+                            {isSuperAdmin && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setShowMigrateModal(true)}
+                                    className="border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                                >
+                                    <Wrench className="mr-2 h-4 w-4" />
+                                    Reconcile inventory families
+                                </Button>
+                            )}
+                            {canAdd && (
+                                <Button
+                                    type="button"
+                                    onClick={openCreateModal}
+                                    className="bg-white text-[#003594] hover:bg-white/90 shadow-md"
+                                >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Add item
+                                </Button>
+                            )}
+                        </div>
                     }
                 />
 
@@ -476,6 +541,45 @@ export default function StockRecordsPage() {
             </div>
           </div>
         </div>)}
+
+      {showMigrateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Reconcile inventory families</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Phase 1 splits multi-part stock rows into sub-codes and trims names.
+              Phase 2 propagates equipment compatibility, remaps transactions, and
+              reconciles balances and FIFO state. Run a dry run first to preview changes.
+            </p>
+            <label className="flex items-center gap-2 text-sm mb-6">
+              <input
+                type="checkbox"
+                checked={migrateDryRun}
+                onChange={(e) => setMigrateDryRun(e.target.checked)}
+              />
+              Dry run only (no database changes)
+            </label>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowMigrateModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-md"
+                disabled={migrating}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleMigratePartVariants}
+                disabled={migrating}
+                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50"
+              >
+                {migrating ? 'Running…' : migrateDryRun ? 'Run dry run' : 'Run reconciliation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
         </div>
     );
 }

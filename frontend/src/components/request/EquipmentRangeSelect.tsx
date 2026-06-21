@@ -3,6 +3,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { Button } from '@/components/ui/button';
+import { collapseEquipmentSelectionValue } from '@/utils/equipmentNumbers';
 interface EquipmentRangeSelectProps {
     equipmentList: string;
     value: string;
@@ -134,7 +135,7 @@ export function EquipmentRangeSelect({ equipmentList, value, onChange, error, se
     }, [suggestions, inputValue]);
     const selectedItem = suggestions.find(item => item.value === value);
     const handleSelect = (currentValue: string) => {
-        onChange(currentValue);
+        onChange(collapseEquipmentSelectionValue(currentValue));
         setOpen(false);
         setInputValue("");
     };

@@ -7,6 +7,7 @@ import { RequestCartItem } from '@/types/request';
 import { format } from 'date-fns';
 import { Pencil, Check, X, Trash2, Loader2 } from 'lucide-react';
 import { EquipmentSelect } from '../issue/EquipmentSelect';
+import { RequestEquipmentSelect } from './RequestEquipmentSelect';
 import { useAuthContext } from '@/context/AuthContext';
 import Image from 'next/image';
 interface RequestPreviewModalProps {
@@ -45,14 +46,19 @@ function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
         <td className="px-4 py-2">{item.nacCode}</td>
         <td className="px-4 py-2">
           <div className="flex items-center gap-2">
-          <Input value={editedItem.itemName} onChange={(e) => setEditedItem({ ...editedItem, itemName: e.target.value })} className="w-full"/>
+          <Input value={editedItem.itemName} readOnly disabled className="w-full bg-gray-50"/>
             {editedItem.image && (<div className="relative w-12 h-12 flex-shrink-0">
                 <Image src={URL.createObjectURL(editedItem.image)} alt={editedItem.itemName} fill className="object-cover rounded border border-gray-300" unoptimized/>
               </div>)}
           </div>
         </td>
         <td className="px-4 py-2">
-          <EquipmentSelect equipmentList={item.equipmentNumber} value={editedItem.equipmentNumber} onChange={(value) => setEditedItem({ ...editedItem, equipmentNumber: value })}/>
+          <RequestEquipmentSelect
+            nacCode={item.nacCode || 'N/A'}
+            value={editedItem.equipmentNumber || ''}
+            onChange={(value) => setEditedItem({ ...editedItem, equipmentNumber: value })}
+            multiple
+          />
         </td>
         <td className="px-4 py-2">
           <Input type="number" value={editedItem.requestQuantity.toString()} onChange={(e) => setEditedItem({ ...editedItem, requestQuantity: parseFloat(e.target.value) })} className="w-24" min={1} step="0.01"/>
