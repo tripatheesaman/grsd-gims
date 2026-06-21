@@ -100,8 +100,6 @@ export const ensureCapitalRrpColumns = async (): Promise<void> => {
 };
 
 export const ensureAssetSpareSchema = async (): Promise<void> => {
-    await ensureCapitalRrpColumns();
-
     if (ensured) {
         return;
     }
@@ -119,6 +117,8 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
 };
 
 async function runEnsureAssetSpareSchemaWork(): Promise<void> {
+    await ensureCapitalRrpColumns();
+
     const equipmentCodeCol = await hasColumn('assets', 'equipment_code');
     if (!equipmentCodeCol) {
         await pool.query(

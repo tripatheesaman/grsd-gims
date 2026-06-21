@@ -1,75 +1,103 @@
-import { buildFuzzyLikePatterns } from './searchRelevanceService';
+import {
+    buildSqlLikePatterns,
+    classifySearchTerm,
+    type SearchIntent,
+} from './searchRelevanceService';
 
 const COLLATE = 'utf8mb4_unicode_ci';
 
 export type FuzzyColumn = {
     expr: string;
-    /** When set, also match SOUNDEX(expr) = SOUNDEX(?) for typo-tolerant names. */
-    soundex?: boolean;
 };
 
-/**
- * Append AND (col1 LIKE ? OR col2 LIKE ? OR …) with fuzzy widened patterns.
- * Returns the updated query string; pushes bind params onto `params`.
- */
-export function appendFuzzyOrClause(
+function appendLikeBranches(
     query: string,
     columns: FuzzyColumn[],
-    term: string,
+    patterns: string[],
     params: unknown[]
 ): string {
-    const patterns = buildFuzzyLikePatterns(term);
     if (!patterns.length || !columns.length) {
         return query;
     }
-
     const branches: string[] = [];
     for (const column of columns) {
         for (const pattern of patterns) {
             branches.push(`${column.expr} LIKE ?`);
             params.push(pattern);
         }
-        if (column.soundex && term.trim().length >= 4) {
-            branches.push(`SOUNDEX(${column.expr}) = SOUNDEX(?)`);
-            params.push(term.trim());
-        }
     }
-
     if (!branches.length) {
         return query;
     }
     return `${query} AND (${branches.join(' OR ')})`;
 }
 
-/** Stock universal search columns (family-grouped query on alias sd). */
+/**
+ * Append AND (col1 LIKE ? OR col2 LIKE ? OR …) with a small set of LIKE patterns.
+ * Typo tolerance is done in rankStockSearchResults() after the query.
+ */
+export function appendFuzzyOrClause(
+    query: string,
+    columns: FuzzyColumn[],
+    term: string,
+    params: unknown[],
+    intent?: SearchIntent
+): string {
+    const patterns = buildSqlLikePatterns(term, 4, intent);
+    return appendLikeBranches(query, columns, patterns, params);
+}
+
+/** Stock universal search — NAC-focused or text-focused columns based on query type. */
 export function appendStockUniversalFilter(
     query: string,
     familyKeySql: string,
     term: string,
     params: unknown[],
-    options: { includeSearchKey?: boolean; assetNameExistsSql?: string } = {}
+    options: { includeSearchKey?: boolean } = {}
 ): string {
-    const columns: FuzzyColumn[] = [
-        { expr: `sd.nac_code COLLATE ${COLLATE}` },
-        { expr: `${familyKeySql} COLLATE ${COLLATE}` },
-        { expr: `sd.item_name COLLATE ${COLLATE}`, soundex: true },
-        { expr: `SUBSTRING_INDEX(sd.item_name, ',', 1) COLLATE ${COLLATE}`, soundex: true },
-        { expr: `sd.part_numbers COLLATE ${COLLATE}` },
-        { expr: `sd.applicable_equipments COLLATE ${COLLATE}` },
-    ];
-    if (options.includeSearchKey) {
-        columns.push({ expr: `sd.search_key COLLATE ${COLLATE}` });
+    const intent = classifySearchTerm(term);
+    const patterns = buildSqlLikePatterns(term, 4, intent);
+    const raw = String(term || '').trim();
+    const fallbackPattern = raw ? `%${raw}%` : '';
+
+    if (intent === 'nac') {
+        const nacColumns: FuzzyColumn[] = [
+            { expr: `sd.nac_code COLLATE ${COLLATE}` },
+            { expr: `sd.base_nac_code COLLATE ${COLLATE}` },
+            { expr: `${familyKeySql} COLLATE ${COLLATE}` },
+        ];
+        if (options.includeSearchKey) {
+            nacColumns.push({ expr: `sd.search_key COLLATE ${COLLATE}` });
+        }
+
+        const nacBranches: string[] = [];
+        for (const column of nacColumns) {
+            for (const pattern of patterns) {
+                nacBranches.push(`${column.expr} LIKE ?`);
+                params.push(pattern);
+            }
+        }
+        if (fallbackPattern) {
+            nacBranches.push(`sd.item_name COLLATE ${COLLATE} LIKE ?`);
+            nacBranches.push(`sd.part_numbers COLLATE ${COLLATE} LIKE ?`);
+            params.push(fallbackPattern, fallbackPattern);
+        }
+        if (!nacBranches.length) {
+            return query;
+        }
+        return `${query} AND (${nacBranches.join(' OR ')})`;
     }
 
-    let next = appendFuzzyOrClause(query, columns, term, params);
-    if (options.assetNameExistsSql) {
-        const assetPatterns = buildFuzzyLikePatterns(term).slice(0, 6);
-        for (const pattern of assetPatterns) {
-            next = `${next} OR ${options.assetNameExistsSql}`;
-            params.push(pattern);
-        }
+    const textColumns: FuzzyColumn[] = [];
+    if (options.includeSearchKey) {
+        textColumns.push({ expr: `sd.search_key COLLATE ${COLLATE}` });
     }
-    return next;
+    textColumns.push(
+        { expr: `sd.item_name COLLATE ${COLLATE}` },
+        { expr: `sd.part_numbers COLLATE ${COLLATE}` },
+        { expr: `sd.applicable_equipments COLLATE ${COLLATE}` }
+    );
+    return appendLikeBranches(query, textColumns, patterns, params);
 }
 
 /** Request / receive universal columns. */
@@ -82,11 +110,11 @@ export function appendRequestUniversalFilter(
     return appendFuzzyOrClause(
         query,
         [
-            { expr: 'rd.request_number' },
-            { expr: itemNameSql, soundex: true },
-            { expr: 'rd.part_number' },
-            { expr: 'rd.equipment_number' },
-            { expr: 'rd.nac_code' },
+            { expr: `rd.request_number COLLATE ${COLLATE}` },
+            { expr: itemNameSql },
+            { expr: `rd.part_number COLLATE ${COLLATE}` },
+            { expr: `rd.equipment_number COLLATE ${COLLATE}` },
+            { expr: `rd.nac_code COLLATE ${COLLATE}` },
         ],
         term,
         params
@@ -108,11 +136,11 @@ export function buildRequestSearchWhereClause(
         clause = appendRequestUniversalFilter(clause, itemNameSql, filters.universal.trim(), params);
     }
     if (filters.equipmentNumber?.trim()) {
-        clause += ' AND rd.equipment_number LIKE ?';
+        clause += ` AND rd.equipment_number COLLATE ${COLLATE} LIKE ?`;
         params.push(`%${filters.equipmentNumber.trim()}%`);
     }
     if (filters.partNumber?.trim()) {
-        clause = appendPartNumberFilter(clause, 'rd.part_number', filters.partNumber.trim(), params);
+        clause = appendPartNumberFilter(clause, `rd.part_number COLLATE ${COLLATE}`, filters.partNumber.trim(), params);
     }
     if (filters.referenceStatus === 'uploaded') {
         clause += ' AND rd.reference_doc IS NOT NULL';
@@ -130,12 +158,12 @@ export function appendRecordsRequestUniversalFilter(
     return appendFuzzyOrClause(
         query,
         [
-            { expr: 'rd.request_number' },
-            { expr: 'rd.nac_code' },
-            { expr: 'rd.item_name', soundex: true },
-            { expr: 'rd.part_number' },
-            { expr: 'rd.equipment_number' },
-            { expr: 'a.name', soundex: true },
+            { expr: `rd.request_number COLLATE ${COLLATE}` },
+            { expr: `rd.nac_code COLLATE ${COLLATE}` },
+            { expr: `rd.item_name COLLATE ${COLLATE}` },
+            { expr: `rd.part_number COLLATE ${COLLATE}` },
+            { expr: `rd.equipment_number COLLATE ${COLLATE}` },
+            { expr: `a.name COLLATE ${COLLATE}` },
         ],
         term,
         params
@@ -148,7 +176,12 @@ export function appendPartNumberFilter(
     term: string,
     params: unknown[]
 ): string {
-    return appendFuzzyOrClause(query, [{ expr: columnExpr }], term, params);
+    const trimmed = String(term || '').trim();
+    if (!trimmed) {
+        return query;
+    }
+    params.push(`%${trimmed}%`);
+    return `${query} AND (${columnExpr} LIKE ?)`;
 }
 
 export function sqlInListPlaceholders(values: string[]): { clause: string; params: string[] } {
@@ -169,14 +202,15 @@ export function appendReceivableSearchFilters(
 ): string {
     let next = query;
     if (filters.universal?.trim()) {
-        const branch = appendRequestUniversalFilter('WHERE 1=1', 'rd.item_name', filters.universal.trim(), params);
+        const branch = appendRequestUniversalFilter('WHERE 1=1', `rd.item_name COLLATE ${COLLATE}`, filters.universal.trim(), params);
         next += branch.replace(/^WHERE 1=1/, '');
     }
     if (filters.equipmentNumber?.trim()) {
-        next = appendFuzzyOrClause(next, [{ expr: 'rd.equipment_number' }], filters.equipmentNumber.trim(), params);
+        next += ` AND rd.equipment_number COLLATE ${COLLATE} LIKE ?`;
+        params.push(`%${filters.equipmentNumber.trim()}%`);
     }
     if (filters.partNumber?.trim()) {
-        next = appendPartNumberFilter(next, 'rd.part_number', filters.partNumber.trim(), params);
+        next = appendPartNumberFilter(next, `rd.part_number COLLATE ${COLLATE}`, filters.partNumber.trim(), params);
     }
     return next;
 }
@@ -189,12 +223,12 @@ export function appendRecordsReceiveUniversalFilter(
     return appendFuzzyOrClause(
         query,
         [
-            { expr: 'rd.nac_code' },
-            { expr: 'rd.item_name', soundex: true },
-            { expr: 'rd.part_number' },
-            { expr: 'req.request_number' },
-            { expr: 'rd.tender_reference_number' },
-            { expr: 'a.name', soundex: true },
+            { expr: `rd.nac_code COLLATE ${COLLATE}` },
+            { expr: `rd.item_name COLLATE ${COLLATE}` },
+            { expr: `rd.part_number COLLATE ${COLLATE}` },
+            { expr: `req.request_number COLLATE ${COLLATE}` },
+            { expr: `rd.tender_reference_number COLLATE ${COLLATE}` },
+            { expr: `a.name COLLATE ${COLLATE}` },
         ],
         term,
         params
@@ -209,12 +243,12 @@ export function appendRecordsRrpUniversalFilter(
     return appendFuzzyOrClause(
         query,
         [
-            { expr: 'rd.rrp_number' },
-            { expr: 'red.item_name', soundex: true },
-            { expr: 'red.part_number' },
-            { expr: 'red.nac_code' },
-            { expr: 'rqd.request_number' },
-            { expr: 'a.name', soundex: true },
+            { expr: `rd.rrp_number COLLATE ${COLLATE}` },
+            { expr: `red.item_name COLLATE ${COLLATE}` },
+            { expr: `red.part_number COLLATE ${COLLATE}` },
+            { expr: `red.nac_code COLLATE ${COLLATE}` },
+            { expr: `rqd.request_number COLLATE ${COLLATE}` },
+            { expr: `a.name COLLATE ${COLLATE}` },
         ],
         term,
         params
@@ -226,11 +260,11 @@ export function buildRrpSpareSearchFilter(term: string, params: unknown[]): stri
     const branch = appendFuzzyOrClause(
         'WHERE 1=1',
         [
-            { expr: 'rrp.rrp_number' },
-            { expr: 'rd.item_name', soundex: true },
-            { expr: 'rd.part_number' },
-            { expr: "COALESCE(rqd.equipment_number, '')" },
-            { expr: 'rd.tender_reference_number' },
+            { expr: `rrp.rrp_number COLLATE ${COLLATE}` },
+            { expr: `rd.item_name COLLATE ${COLLATE}` },
+            { expr: `rd.part_number COLLATE ${COLLATE}` },
+            { expr: `COALESCE(rqd.equipment_number, '') COLLATE ${COLLATE}` },
+            { expr: `rd.tender_reference_number COLLATE ${COLLATE}` },
         ],
         term,
         params
@@ -240,18 +274,24 @@ export function buildRrpSpareSearchFilter(term: string, params: unknown[]): stri
 
 /** Capital RRP print search — returns leading AND (…) fragment. */
 export function buildRrpCapitalSearchFilter(term: string, params: unknown[]): string {
+    const trimmed = String(term || '').trim();
+    if (!trimmed) {
+        return '';
+    }
+    const like = `%${trimmed}%`;
     const branch = appendFuzzyOrClause(
         'WHERE 1=1',
         [
-            { expr: 'rrp.rrp_number' },
-            { expr: 'ar.model_name', soundex: true },
-            { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_name'))", soundex: true },
-            { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code'))" },
-            { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number'))" },
-            { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number'))" },
+            { expr: `rrp.rrp_number COLLATE ${COLLATE}` },
+            { expr: `ar.model_name COLLATE ${COLLATE}` },
         ],
         term,
         params
     );
-    return branch.replace(/^WHERE 1=1/, '');
+    params.push(like, like, like);
+    return `${branch.replace(/^WHERE 1=1/, '')} OR (
+        JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_name')) COLLATE ${COLLATE} LIKE ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) COLLATE ${COLLATE} LIKE ?
+        OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) COLLATE ${COLLATE} LIKE ?
+    )`;
 }

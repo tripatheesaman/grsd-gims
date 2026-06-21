@@ -6,13 +6,17 @@ import { loginRequest } from "@/lib/loginrequest";
 import { useRouter } from "next/navigation";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { API } from "@/lib/api";
+import axios from "axios";
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
 export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ children }) => {
     const [user, setUser] = useState<User | null>(null);
     const [permissions, setPermissions] = useState<string[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [shouldRedirect, setShouldRedirect] = useState<string | null>(null);
     const router = useRouter();
+
     const setAuthHeader = useCallback((token: string | null) => {
         if (token) {
             API.defaults.headers.common.Authorization = `Bearer ${token}`;
@@ -21,19 +25,16 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             delete API.defaults.headers.common.Authorization;
         }
     }, []);
+
     const validateToken = (token: string): boolean => {
         try {
             const decoded = jwtDecode<unknown>(token);
             if (typeof decoded === 'object' &&
                 decoded !== null &&
                 'exp' in decoded &&
-                typeof (decoded as {
-                    exp?: unknown;
-                }).exp === 'number') {
+                typeof (decoded as { exp?: unknown }).exp === 'number') {
                 const currentTime = Date.now() / 1000;
-                return (decoded as {
-                    exp: number;
-                }).exp > currentTime;
+                return (decoded as { exp: number }).exp > currentTime;
             }
             return false;
         }
@@ -41,6 +42,7 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             return false;
         }
     };
+
     const syncPermissionsFromApi = useCallback(async () => {
         try {
             const response = await API.get<string[]>("/api/auth/permissions");
@@ -55,15 +57,14 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
         return null;
     }, []);
 
-    const applySession = useCallback(async (accessToken: string) => {
+    const applySession = useCallback((accessToken: string) => {
         localStorage.setItem("token", accessToken);
         setAuthHeader(accessToken);
         const decoded = jwtDecode<User>(accessToken);
         setUser(decoded);
-        const jwtPermissions = decoded.UserInfo?.permissions ?? [];
-        setPermissions(jwtPermissions);
-        await syncPermissionsFromApi();
-    }, [setAuthHeader, syncPermissionsFromApi]);
+        setPermissions(decoded.UserInfo?.permissions ?? []);
+    }, [setAuthHeader]);
+
     const refreshSession = useCallback(async (): Promise<boolean> => {
         const token = localStorage.getItem("token");
         if (!token || !validateToken(token)) {
@@ -73,7 +74,7 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             setAuthHeader(token);
             const response = await API.post("/api/auth/refresh");
             if (response.data?.accessToken) {
-                await applySession(response.data.accessToken);
+                applySession(response.data.accessToken);
                 return true;
             }
             return false;
@@ -82,15 +83,13 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             return false;
         }
     }, [applySession, setAuthHeader]);
+
     const initializeAuth = useCallback(async () => {
         const token = localStorage.getItem("token");
         if (token && validateToken(token)) {
             try {
-                setAuthHeader(token);
-                const refreshed = await refreshSession();
-                if (!refreshed) {
-                    await applySession(token);
-                }
+                applySession(token);
+                void syncPermissionsFromApi();
             }
             catch {
                 localStorage.removeItem("token");
@@ -104,29 +103,36 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             setShouldRedirect("/login");
         }
         setIsLoading(false);
-    }, [applySession, refreshSession, setAuthHeader]);
+    }, [applySession, setAuthHeader, syncPermissionsFromApi]);
+
     useEffect(() => {
         initializeAuth();
     }, [initializeAuth]);
+
     useEffect(() => {
         if (shouldRedirect) {
             router.push(shouldRedirect);
             setShouldRedirect(null);
         }
     }, [shouldRedirect, router]);
+
     const login = async (username: string, password: string) => {
         try {
             const data = await loginRequest(username, password);
-            await applySession(data.accessToken);
+            applySession(data.accessToken);
             router.push("/dashboard");
         }
         catch (error: unknown) {
+            if (axios.isAxiosError(error)) {
+                throw error;
+            }
             if (error instanceof Error) {
                 throw error;
             }
             throw new Error("An unknown error occurred");
         }
     };
+
     const logout = () => {
         localStorage.removeItem("token");
         setAuthHeader(null);
@@ -134,13 +140,18 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
         setPermissions([]);
         router.push("/login");
     };
+
     if (isLoading) {
         return <FullPageSpinner />;
     }
-    return (<AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, refreshSession }}>
+
+    return (
+        <AuthContext.Provider value={{ user, isAuthenticated: !!user, permissions, login, logout, refreshSession }}>
             {children}
-        </AuthContext.Provider>);
+        </AuthContext.Provider>
+    );
 };
+
 export const useAuthContext = () => {
     const authContext = useContext(AuthContext);
     if (authContext === undefined) {

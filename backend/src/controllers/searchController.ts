@@ -10,11 +10,11 @@ import {
     VARIANT_VIRTUAL_BALANCE_SQL,
     VARIANT_TRUE_BALANCE_SQL,
     appendEquipmentFilter,
-    equipmentNameExistsSql,
     equipmentDisplaySubquery,
+    resolveEquipmentCodesForFilter,
 } from '../services/spareEquipmentDisplay';
 import { enrichEquipmentDisplays } from '../services/spareEquipmentEnrichment';
-import { rankByRelevance } from '../services/searchRelevanceService';
+import { classifySearchTerm, rankByRelevance, rankStockSearchResults } from '../services/searchRelevanceService';
 import {
     appendPartNumberFilter,
     appendStockUniversalFilter,
@@ -44,7 +44,7 @@ const resolvePartSearchHint = (
         return part;
     }
     const uni = String(universal || '').trim();
-    if (!uni || /^(GT|TW|GS)\s*\d/i.test(uni)) {
+    if (!uni || classifySearchTerm(uni) === 'nac') {
         return '';
     }
     return uni;
@@ -525,6 +525,11 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         const params: unknown[] = [];
         let hasSearchConditions = false;
         const universalTerm = universal?.toString().trim() || '';
+        const equipmentTerm = equipmentNumber?.toString().trim() || '';
+        let resolvedEquipCodes: string[] = [];
+        if (equipmentTerm) {
+            resolvedEquipCodes = await resolveEquipmentCodesForFilter(equipmentTerm);
+        }
         if (universalTerm) {
             hasSearchConditions = true;
             query = appendStockUniversalFilter(
@@ -532,15 +537,12 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
                 STOCK_FAMILY_KEY_SQL,
                 universalTerm,
                 params,
-                {
-                    includeSearchKey: true,
-                    assetNameExistsSql: equipmentNameExistsSql('sd', '?'),
-                }
+                { includeSearchKey: true }
             );
         }
-        if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
+        if (equipmentTerm) {
             hasSearchConditions = true;
-            query = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), query, params);
+            query = appendEquipmentFilter('sd', useSpareCompatibility, equipmentTerm, query, params, resolvedEquipCodes);
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             hasSearchConditions = true;
@@ -567,14 +569,11 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
                 STOCK_FAMILY_KEY_SQL,
                 universalTerm,
                 countParams,
-                {
-                    includeSearchKey: true,
-                    assetNameExistsSql: equipmentNameExistsSql('sd', '?'),
-                }
+                { includeSearchKey: true }
             );
         }
-        if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-            countQuery = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), countQuery, countParams);
+        if (equipmentTerm) {
+            countQuery = appendEquipmentFilter('sd', useSpareCompatibility, equipmentTerm, countQuery, countParams, resolvedEquipCodes);
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             countQuery = appendPartNumberFilter(countQuery, 'sd.part_numbers', String(partNumber), countParams);
@@ -586,14 +585,24 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
             await enrichEquipmentDisplays(results);
             await attachFamilyDetails(results);
             if (hasSearchConditions) {
-                const rankQuery = universalTerm || String(partNumber || '').trim() || String(equipmentNumber || '').trim();
-                results = rankByRelevance(results, rankQuery, (row) => [
-                    row.nacCode,
-                    row.itemName,
-                    row.partNumber,
-                    row.equipmentNumber,
-                    row.equipmentDisplay,
-                ]);
+                const rankQuery = universalTerm || String(partNumber || '').trim() || equipmentTerm;
+                if (universalTerm) {
+                    results = rankStockSearchResults(results, rankQuery, (row) => ({
+                        nacCode: row.nacCode,
+                        itemName: row.itemName,
+                        partNumber: row.partNumber,
+                        equipmentNumber: row.equipmentNumber,
+                        equipmentDisplay: row.equipmentDisplay,
+                    }));
+                } else {
+                    results = rankByRelevance(results, rankQuery, (row) => [
+                        row.nacCode,
+                        row.itemName,
+                        row.partNumber,
+                        row.equipmentNumber,
+                        row.equipmentDisplay,
+                    ]);
+                }
             }
         }
 

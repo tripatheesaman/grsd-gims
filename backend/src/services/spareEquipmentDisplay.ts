@@ -1,5 +1,7 @@
 /** SQL helpers: spare ↔ asset equipment codes and display names. */
 
+import { RowDataPacket } from 'mysql2';
+import pool from '../config/db';
 import { sqlFamilyKeyExpression } from '../utils/nacCodeUtils';
 
 const COLLATE = 'utf8mb4_unicode_ci';
@@ -178,53 +180,84 @@ export const equipmentNameExistsSql = (stockAlias: string, param: string) => `
       AND a_n.name LIKE ${param}
   )`;
 
+/** Resolve asset equipment codes for a name/number filter (fast pre-lookup). */
+export const resolveEquipmentCodesForFilter = async (equipmentNumber: string): Promise<string[]> => {
+    const term = String(equipmentNumber).trim();
+    if (!term) {
+        return [];
+    }
+    const likeTerm = `%${term}%`;
+    const tokens = expandEquipmentTokens(term);
+    const codes = new Set<string>();
+    const params: unknown[] = [likeTerm, likeTerm];
+    let sql = `SELECT DISTINCT equipment_code
+               FROM assets
+               WHERE name LIKE ?
+                  OR equipment_code LIKE ?`;
+
+    for (const token of tokens) {
+        if (/^\d+$/.test(token)) {
+            sql += ' OR equipment_code = ? OR equipment_code LIKE ?';
+            params.push(token, `${token}T%`);
+        } else if (token.length >= 2) {
+            sql += ' OR equipment_code = ?';
+            params.push(token);
+        }
+    }
+    sql += ' LIMIT 60';
+
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+    for (const row of rows) {
+        const code = String(row.equipment_code || '').trim();
+        if (code) {
+            codes.add(code);
+        }
+    }
+    for (const token of tokens) {
+        if (token.length >= 2) {
+            codes.add(token);
+        }
+    }
+    return [...codes];
+};
+
 /** Family-level equipment match: any variant in the family matches the filter. */
 export const appendFamilyEquipmentFilter = (
     familyKeyOuterSql: string,
     equipmentNumber: string,
     query: string,
-    params: unknown[]
+    params: unknown[],
+    resolvedCodes: string[] = []
 ): string => {
     const term = String(equipmentNumber).trim();
     if (!term) {
         return query;
     }
     const likeTerm = `%${term}%`;
-    const tokens = expandEquipmentTokens(term);
-    const numericTokens = tokens.filter((t) => /^\d+$/.test(t));
+    const codes = resolvedCodes.length > 0 ? resolvedCodes : expandEquipmentTokens(term);
 
-    let familyMatchSql = `
+    const branches: string[] = ['sd_ef.applicable_equipments LIKE ?'];
+    params.push(likeTerm);
+
+    if (codes.length > 0) {
+        branches.push(`sc_ef.equipment_code IN (${codes.map(() => '?').join(', ')})`);
+        params.push(...codes);
+    } else {
+        branches.push(`sc_ef.equipment_code LIKE ?`);
+        params.push(likeTerm);
+        branches.push(`sc_ef.equipment_code IN (
+            SELECT equipment_code FROM assets WHERE name LIKE ? LIMIT 40
+        )`);
+        params.push(likeTerm);
+    }
+
+    return `${query} AND ${familyKeyOuterSql} IN (
     SELECT DISTINCT ${sqlFamilyKeyExpression('sd_ef')}
     FROM stock_details sd_ef
     LEFT JOIN spare_compatibility sc_ef
       ON sc_ef.nac_code = sd_ef.nac_code COLLATE ${COLLATE}
-    LEFT JOIN assets a_ef
-      ON a_ef.equipment_code = sc_ef.equipment_code COLLATE ${COLLATE}
-    WHERE (
-      sd_ef.applicable_equipments LIKE ?
-      OR a_ef.name LIKE ?
-      OR sc_ef.equipment_code LIKE ?`;
-
-    params.push(likeTerm, likeTerm, likeTerm);
-
-    if (numericTokens.length > 0) {
-        familyMatchSql += ` OR sc_ef.equipment_code IN (${numericTokens.map(() => '?').join(', ')})`;
-        params.push(...numericTokens);
-    }
-
-    familyMatchSql += `
-      OR EXISTS (
-        SELECT 1
-        FROM assets a_name
-        WHERE a_name.name COLLATE ${COLLATE} LIKE ?
-          AND sd_ef.applicable_equipments COLLATE ${COLLATE}
-            LIKE CONCAT('%', a_name.equipment_code, '%')
-      )
-    )`;
-
-    params.push(likeTerm);
-
-    return `${query} AND ${familyKeyOuterSql} IN (${familyMatchSql})`;
+    WHERE (${branches.join(' OR ')})
+  )`;
 };
 
 /** Append AND clause for equipment filter (code, range, or asset name). */
@@ -233,10 +266,17 @@ export const appendEquipmentFilter = (
     useJoin: boolean,
     equipmentNumber: string,
     query: string,
-    params: unknown[]
+    params: unknown[],
+    resolvedCodes: string[] = []
 ): string => {
     if (useJoin) {
-        return appendFamilyEquipmentFilter(sqlFamilyKeyExpression(stockAlias), equipmentNumber, query, params);
+        return appendFamilyEquipmentFilter(
+            sqlFamilyKeyExpression(stockAlias),
+            equipmentNumber,
+            query,
+            params,
+            resolvedCodes
+        );
     }
 
     const term = String(equipmentNumber).trim();

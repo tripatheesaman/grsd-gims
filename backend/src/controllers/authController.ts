@@ -36,6 +36,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             });
             return;
         }
+        if (user.can_reset_password === 1) {
+            res.status(403).json({
+                error: 'PasswordResetRequired',
+                message: 'Password reset is required before you can sign in',
+                canReset: true,
+            });
+            return;
+        }
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             logEvents(`Login attempt failed - Invalid credentials for user: ${email}`, "authLog.log");

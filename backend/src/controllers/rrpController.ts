@@ -13,9 +13,6 @@ import {
     sqlRrpBaseMatchClause,
 } from '../utils/rrpNumberUtils';
 import {
-    appendFuzzyOrClause,
-    appendPartNumberFilter,
-    appendRecordsReceiveUniversalFilter,
     buildRrpCapitalSearchFilter,
     buildRrpSpareSearchFilter,
 } from '../services/searchSqlBuilder';
@@ -1102,35 +1099,24 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
             capitalFilter += buildRrpCapitalSearchFilter(String(universal), capitalParams);
         }
         if (equipmentNumber && equipmentNumber !== '') {
-            const eqTerm = String(equipmentNumber);
-            spareFilter += appendFuzzyOrClause(
-                'WHERE 1=1',
-                [{ expr: "COALESCE(rqd.equipment_number, '')" }],
-                eqTerm,
-                spareParams
-            ).replace(/^WHERE 1=1/, '');
-            capitalFilter += appendFuzzyOrClause(
-                'WHERE 1=1',
-                [
-                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code'))" },
-                    { expr: 'ar.model_name', soundex: true },
-                ],
-                eqTerm,
-                capitalParams
-            ).replace(/^WHERE 1=1/, '');
+            const eqLike = `%${String(equipmentNumber).trim()}%`;
+            spareFilter += " AND COALESCE(rqd.equipment_number, '') LIKE ?";
+            spareParams.push(eqLike);
+            capitalFilter += ` AND (
+                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) LIKE ?
+                OR ar.model_name LIKE ?
+            )`;
+            capitalParams.push(eqLike, eqLike);
         }
         if (partNumber && partNumber !== '') {
-            const partTerm = String(partNumber);
-            spareFilter += appendPartNumberFilter('WHERE 1=1', 'rd.part_number', partTerm, spareParams).replace(/^WHERE 1=1/, '');
-            capitalFilter += appendFuzzyOrClause(
-                'WHERE 1=1',
-                [
-                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number'))" },
-                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number'))" },
-                ],
-                partTerm,
-                capitalParams
-            ).replace(/^WHERE 1=1/, '');
+            const partLike = `%${String(partNumber).trim()}%`;
+            spareFilter += ' AND rd.part_number LIKE ?';
+            spareParams.push(partLike);
+            capitalFilter += ` AND (
+                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) LIKE ?
+                OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number')) LIKE ?
+            )`;
+            capitalParams.push(partLike, partLike);
         }
         if (referenceStatus === 'uploaded') {
             spareFilter += ' AND rrp.reference_doc IS NOT NULL AND rrp.reference_doc <> \'\'';

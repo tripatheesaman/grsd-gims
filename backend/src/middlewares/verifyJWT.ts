@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from 'express';
 import jwt, { JwtPayload, TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken';
 import { logEvents } from './logger';
 import { User } from '../models/User';
-import { getPermissionsByUserId } from '../models/Permissions';
 interface DecodedUser extends JwtPayload {
     UserInfo: {
         username: string;
@@ -98,14 +97,8 @@ const verifyJWT = async (req: Request, res: Response, next: NextFunction): Promi
         req.role = decodedUser.UserInfo.role;
         req.userId = decodedUser.UserInfo.id;
         req.tokenExpiry = decodedUser.exp;
+        req.permissions = decodedUser.UserInfo.permissions ?? [];
 
-        try {
-            req.permissions = await getPermissionsByUserId(decodedUser.UserInfo.id);
-        } catch {
-            req.permissions = decodedUser.UserInfo.permissions ?? [];
-        }
-
-        logEvents(`JWT verification successful for user: ${decodedUser.UserInfo.username}`, "authLog.log");
         next();
     }
     catch (error) {
