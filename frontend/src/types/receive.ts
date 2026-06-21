@@ -12,7 +12,11 @@ export interface ReceiveCartItem {
     requestedUnit?: string;
     conversionBase?: number;
     requestedQuantity: number;
+    remainingQuantity?: number;
     isLocationChanged: boolean;
+    resolvedNacCode?: string;
+    requestNumber?: string;
+    requiresNewPhoto?: boolean;
 }
 export interface ReceiveData {
     receiveDate: string;

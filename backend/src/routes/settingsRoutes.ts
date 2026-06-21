@@ -17,14 +17,23 @@ import { checkPermissions, checkAnyPermissions } from '../middlewares/auth';
 const router = express.Router();
 router.use(verifyJWT);
 
-// General / fiscal year — anyone with settings access
-const requireSettings = checkPermissions(['can_access_settings']);
+// General / fiscal year — dashboard read; app settings write
+const requireAppSettings = checkAnyPermissions(['can_access_app_settings', 'can_access_settings']);
+const requireFiscalYearRead = checkAnyPermissions([
+    'can_access_app_settings',
+    'can_access_settings',
+    'can_view_dashboard',
+]);
 
-router.get('/fiscal-year', requireSettings, getFiscalYear);
-router.put('/fiscal-year', requireSettings, updateFiscalYear);
+router.get('/fiscal-year', requireFiscalYearRead, getFiscalYear);
+router.put('/fiscal-year', requireAppSettings, updateFiscalYear);
 
-// Request settings
-const requireRequestSettings = checkAnyPermissions(['can_access_request_settings', 'can_access_settings']);
+// Request settings (email config also appears on App Settings)
+const requireRequestSettings = checkAnyPermissions([
+    'can_access_request_settings',
+    'can_access_app_settings',
+    'can_access_settings',
+]);
 router.get('/request/authority-details', requireRequestSettings, getRequestAuthorityDetails);
 router.put('/request/authority-details', requireRequestSettings, updateRequestAuthorityDetails);
 router.get('/request/email-config', requireRequestSettings, getRequestEmailConfig);

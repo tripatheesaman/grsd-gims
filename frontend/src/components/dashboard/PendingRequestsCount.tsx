@@ -8,9 +8,9 @@ import { queryKeys } from '@/lib/queryKeys';
 import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 import { isAxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { FileText, Eye, X, Pencil, Check } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTrigger, } from '@/components/ui/modal';
+import { Modal, ModalTrigger, ModalTitle } from '@/components/ui/modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,12 +20,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
 import Image from 'next/image';
 import { resolveImageUrl, withBasePath } from '@/lib/urls';
+import {
+    ApprovalListModal,
+    ApprovalListCard,
+    ApprovalDetailModal,
+    ApprovalActionBar,
+    ApprovalMetaGrid,
+    ApprovalRejectModal,
+    ApprovalModalShell,
+    ApprovalModalBody,
+    ApprovalModalHeaderSection,
+    ApprovalResponsiveTable,
+    ApprovalImagePreviewModal,
+    ApprovalAlertBanner,
+    formatApprovalDate,
+    type ApprovalTableColumn,
+    personDetailsMetaBlock,
+} from '@/components/approvals';
+import type { PersonDetails } from '@/types/personDetails';
+
 interface PendingRequest {
     requestId: number;
     nacCode: string;
     requestNumber: string;
     requestDate: string;
     requestedBy: string;
+    requestedByDetails?: PersonDetails;
 }
 interface RequestItem {
     id: number;
@@ -42,6 +62,7 @@ interface RequestItem {
     requestedById?: number | null;
     requestedByEmail?: string | null;
     requestedBy?: string | null;
+    requestedByDetails?: PersonDetails;
 }
 interface EditItemData {
     id: number;
@@ -108,7 +129,16 @@ export function PendingRequestsCount() {
             requestNumber: selectedRequestNumber,
             requestDate: selectedRequestDate,
             remarks: requestItems[0]?.remarks || '',
-            requestedBy: pendingRequest?.requestedBy || requestItems[0]?.requestedBy || ''
+            requestedBy:
+                pendingRequest?.requestedByDetails?.name ||
+                requestItems[0]?.requestedByDetails?.name ||
+                pendingRequest?.requestedBy ||
+                requestItems[0]?.requestedBy ||
+                '',
+            requestedByDetails:
+                pendingRequest?.requestedByDetails ||
+                requestItems[0]?.requestedByDetails ||
+                null,
         };
     }, [requestItems, selectedRequestNumber, selectedRequestDate, pendingRequests]);
     
@@ -136,8 +166,8 @@ export function PendingRequestsCount() {
     });
     
     const approveRequestMutation = useApiPut({
-        onSuccess: async () => {
-            await invalidatePendingApprovals(queryClient);
+        onSuccess: () => {
+            void invalidatePendingApprovals(queryClient, ['request']);
             showSuccessToast({
                 title: 'Success',
                 message: "Request approved successfully",
@@ -147,7 +177,7 @@ export function PendingRequestsCount() {
         },
         onError: async (error: unknown) => {
             if (isAxiosError(error) && error.response?.status === 409) {
-                await invalidatePendingApprovals(queryClient);
+                void invalidatePendingApprovals(queryClient, ['request']);
                 setIsDetailsOpen(false);
                 showSuccessToast({
                     title: 'Already processed',
@@ -166,7 +196,7 @@ export function PendingRequestsCount() {
     
     const rejectRequestMutation = useApiPut({
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: queryKeys.request.pending() });
+            void invalidatePendingApprovals(queryClient, ['request']);
             showSuccessToast({
                 title: 'Success',
                 message: "Request rejected successfully",
@@ -275,6 +305,39 @@ export function PendingRequestsCount() {
             }
         });
     }, [selectedRequestNumber, rejectionReason, user?.UserInfo?.username, rejectRequestMutation, showErrorToast]);
+    const isApprovingRequest = approveRequestMutation.isPending;
+    const isRejectingRequest = rejectRequestMutation.isPending;
+    const isProcessingRequest = isApprovingRequest || isRejectingRequest;
+
+    const requestItemColumns = useMemo<ApprovalTableColumn<RequestItem>[]>(() => [
+        { id: 'nacCode', header: 'NAC Code', cell: (item) => item.nacCode },
+        { id: 'itemName', header: 'Item Name', cell: (item) => item.itemName },
+        { id: 'partNumber', header: 'Part Number', cell: (item) => item.partNumber },
+        { id: 'equipmentNumber', header: 'Equipment Number', cell: (item) => item.equipmentNumber },
+        { id: 'quantity', header: 'Quantity', cell: (item) => item.requestedQuantity },
+        { id: 'unit', header: 'Unit', cell: (item) => item.unit || '—' },
+        { id: 'specifications', header: 'Specifications', cell: (item) => item.specifications || '—' },
+        {
+            id: 'image',
+            header: 'Image',
+            cell: (item) => (
+                <Image
+                    src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')}
+                    alt={item.itemName}
+                    width={64}
+                    height={64}
+                    className="h-16 w-16 cursor-pointer rounded-lg border border-slate-200 object-cover transition-opacity hover:opacity-80"
+                    onClick={() => item.imageUrl && handleImageClick(item.imageUrl)}
+                    onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.src = withBasePath('/images/nepal_airlines_logo.png');
+                    }}
+                    unoptimized
+                />
+            ),
+        },
+    ], []);
+
     if (!permissions?.includes('can_approve_request')) {
         return null;
     }
@@ -297,126 +360,95 @@ export function PendingRequestsCount() {
             </CardContent>
           </Card>
         </ModalTrigger>
-        <ModalContent className="max-w-3xl bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-              Pending Requests
-            </ModalTitle>
-            <ModalDescription className="text-gray-600 mt-2">
-              You have {pendingCount ?? 0} pending request{pendingCount !== 1 ? 's' : ''} that need your attention.
-            </ModalDescription>
-          </ModalHeader>
-                        <div className="mt-6 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-                {pendingRequests.map((request) => (<div key={request.requestId} className="rounded-lg border border-[#002a6e]/10 p-6 hover:bg-[#003594]/5 transition-all duration-200 hover:shadow-md">
-                    <div className="grid grid-cols-5 gap-4 items-center">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Request #</p>
-                        <p className="text-lg font-semibold text-gray-900">{request.requestNumber}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">NAC Code</p>
-                        <p className="text-lg font-semibold text-gray-900">{request.nacCode}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Date</p>
-                        <p className="text-lg font-semibold text-gray-900">{new Date(request.requestDate).toLocaleDateString()}</p>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-[#003594]">Requested By</p>
-                        <p className="text-lg font-semibold text-gray-900">{request.requestedBy}</p>
-                      </div>
-                      <div className="flex justify-end">
-                        <Button onClick={() => handleViewDetails(request.requestNumber, request.requestDate)} className="flex items-center gap-2 bg-[#003594] hover:bg-[#003594]/90 text-white transition-colors">
-                          <Eye className="h-4 w-4"/>
-                          View Details
-                        </Button>
-                      </div>
-                    </div>
-                  </div>))}
-              </div>
-        </ModalContent>
       </Modal>
 
-      <Modal open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <ModalContent className="max-w-5xl bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-                  Request Details #{selectedRequest?.requestNumber}
-                </ModalTitle>
-                <div className="mt-2 text-gray-600 space-y-2">
-                  <div className="flex items-center gap-4">
-                    <span>Request Date: {selectedRequest?.requestDate && new Date(selectedRequest.requestDate).toLocaleDateString()}</span>
-                    <span className="h-1 w-1 rounded-full bg-gray-400"></span>
-                    <span>Requested By: {selectedRequest?.requestedBy}</span>
-                  </div>
-                  {selectedRequest?.remarks && (<div className="mt-2 p-3 bg-gray-50 rounded-lg border border-[#002a6e]/10">
-                      <span className="font-medium text-[#003594]">Remarks: </span>
-                      {selectedRequest.remarks}
-                    </div>)}
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" size="sm" className="flex items-center gap-2 border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594] transition-colors" onClick={handleEditClick}>
-                  <Pencil className="h-4 w-4"/>
-                  Edit Details
-                </Button>
-                <Button variant="default" size="sm" className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white transition-colors" onClick={handleApproveRequest}>
-                  <Check className="h-4 w-4"/>
-                  Approve
-                </Button>
-                <Button variant="destructive" size="sm" className="flex items-center gap-2 bg-[#d2293b] hover:bg-[#d2293b]/90 transition-colors" onClick={handleRejectClick}>
-                  <X className="h-4 w-4"/>
-                  Reject
-                </Button>
-              </div>
-            </div>
-          </ModalHeader>
-          <div className="mt-6">
-            <div className="overflow-x-auto rounded-lg border border-[#002a6e]/10">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-[#003594]/5">
-                    <th className="text-left p-4 font-semibold text-[#003594]">NAC Code</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Item Name</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Part Number</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Equipment Number</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Quantity</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Unit</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Specifications</th>
-                    <th className="text-left p-4 font-semibold text-[#003594]">Image</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedRequest?.items.map((item) => (<tr key={item.id} className="border-t border-[#002a6e]/10 hover:bg-[#003594]/5 transition-colors">
-                      <td className="p-4 text-gray-900">{item.nacCode}</td>
-                      <td className="p-4 text-gray-900">{item.itemName}</td>
-                      <td className="p-4 text-gray-900">{item.partNumber}</td>
-                      <td className="p-4 text-gray-900">{item.equipmentNumber}</td>
-                      <td className="p-4 text-gray-900">{item.requestedQuantity}</td>
-                      <td className="p-4 text-gray-900">{item.unit || '-'}</td>
-                      <td className="p-4 text-gray-900">{item.specifications || '-'}</td>
-                      <td className="p-4">
-                        <Image src={resolveImageUrl(item.imageUrl, '/images/nepal_airlines_logo.png')} alt={item.itemName} width={64} height={64} className="w-16 h-16 object-cover rounded-lg border border-[#002a6e]/10 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => item.imageUrl && handleImageClick(item.imageUrl)} onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = withBasePath('/images/nepal_airlines_logo.png');
-            }} unoptimized/>
-                      </td>
-                    </tr>))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
+      <ApprovalListModal
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        title="Pending Requests"
+        description={`You have ${pendingCount ?? 0} pending request${pendingCount !== 1 ? 's' : ''} that need your attention.`}
+        count={pendingCount}
+        isEmpty={!isLoading && pendingRequests.length === 0}
+        emptyMessage="No pending requests"
+        size="xl"
+      >
+        {pendingRequests.map((request) => (
+          <ApprovalListCard
+            key={request.requestId}
+            onView={() => handleViewDetails(request.requestNumber, request.requestDate)}
+            onClick={() => handleViewDetails(request.requestNumber, request.requestDate)}
+            viewLabel="View Details"
+            hint="Tap to review request details"
+          >
+            <ApprovalMetaGrid
+              columns={4}
+              items={[
+                { label: 'Request #', value: request.requestNumber },
+                { label: 'NAC Code', value: request.nacCode },
+                { label: 'Date', value: formatApprovalDate(request.requestDate) },
+                personDetailsMetaBlock('Requested By', request.requestedByDetails),
+              ]}
+            />
+          </ApprovalListCard>
+        ))}
+      </ApprovalListModal>
 
-      <Modal open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <ModalContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Edit Request Details</ModalTitle>
-          </ModalHeader>
-          <div className="p-6 space-y-6">
+      <ApprovalDetailModal
+        open={isDetailsOpen}
+        onOpenChange={setIsDetailsOpen}
+        title={`Request Details #${selectedRequest?.requestNumber ?? ''}`}
+        description={
+          selectedRequest ? (
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>Request date: {formatApprovalDate(selectedRequest.requestDate)}</span>
+            </span>
+          ) : undefined
+        }
+        meta={
+          selectedRequest?.requestedByDetails ? (
+            <ApprovalMetaGrid
+              columns={4}
+              items={[personDetailsMetaBlock('Requested By', selectedRequest.requestedByDetails)]}
+              className="mt-1"
+            />
+          ) : undefined
+        }
+        alert={
+          selectedRequest?.remarks ? (
+            <ApprovalAlertBanner variant="info">
+              <span className="font-medium">Remarks: </span>
+              {selectedRequest.remarks}
+            </ApprovalAlertBanner>
+          ) : undefined
+        }
+        processing={isProcessingRequest}
+        processingLabel={isApprovingRequest ? 'Approving request…' : 'Rejecting request…'}
+        size="full"
+        actions={
+          <ApprovalActionBar
+            onEdit={handleEditClick}
+            onApprove={handleApproveRequest}
+            onReject={handleRejectClick}
+            isApproving={isApprovingRequest}
+            isRejecting={isRejectingRequest}
+            editLabel="Edit Details"
+          />
+        }
+      >
+        <ApprovalResponsiveTable
+          columns={requestItemColumns}
+          rows={selectedRequest?.items ?? []}
+          getRowKey={(item) => item.id}
+          emptyMessage="No items in this request"
+        />
+      </ApprovalDetailModal>
+
+      <ApprovalModalShell open={isEditOpen} onOpenChange={setIsEditOpen} size="xl" layout="flex">
+        <ApprovalModalHeaderSection>
+          <ModalTitle className="text-xl font-semibold text-[#003594]">Edit Request Details</ModalTitle>
+        </ApprovalModalHeaderSection>
+        <ApprovalModalBody>
+          <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label htmlFor="requestNumber" className="text-[#003594] font-medium">Request Number</Label>
@@ -549,59 +581,37 @@ export function PendingRequestsCount() {
                   </div>))}
               </div>
             </div>
-
-            <div className="flex justify-end gap-3 pt-6 border-t border-[#002a6e]/10">
-              <Button variant="outline" onClick={() => setIsEditOpen(false)} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594] transition-colors">
-                Cancel
-              </Button>
-              <Button onClick={handleSaveEdit} className="bg-[#003594] hover:bg-[#003594]/90 text-white transition-colors">
-                Save Changes
-              </Button>
-            </div>
           </div>
-        </ModalContent>
-      </Modal>
+        </ApprovalModalBody>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
+          <Button variant="outline" onClick={() => setIsEditOpen(false)} className="w-full border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594] sm:w-auto">
+            Cancel
+          </Button>
+          <Button onClick={handleSaveEdit} className="w-full bg-[#003594] hover:bg-[#003594]/90 text-white sm:w-auto">
+            Save Changes
+          </Button>
+        </div>
+      </ApprovalModalShell>
 
-      <Modal open={isImagePreviewOpen} onOpenChange={setIsImagePreviewOpen}>
-        <ModalContent className="max-w-4xl bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Image Preview</ModalTitle>
-          </ModalHeader>
-          <div className="p-6 relative">
-            <Button variant="ghost" size="icon" className="absolute right-2 top-2 z-10 hover:bg-[#003594]/5 transition-colors" onClick={() => setIsImagePreviewOpen(false)}>
-              <X className="h-4 w-4 text-[#003594]"/>
-            </Button>
-            <Image src={selectedImage || withBasePath('/images/nepal_airlines_logo.png')} alt="Preview" width={800} height={600} className="w-full h-auto max-h-[80vh] object-contain rounded-lg border border-[#002a6e]/10" unoptimized/>
-          </div>
-        </ModalContent>
-      </Modal>
+      <ApprovalImagePreviewModal
+        open={isImagePreviewOpen}
+        onOpenChange={setIsImagePreviewOpen}
+        src={selectedImage || withBasePath('/images/nepal_airlines_logo.png')}
+        alt="Preview"
+        title="Image Preview"
+      />
 
-      <Modal open={isRejectOpen} onOpenChange={setIsRejectOpen}>
-        <ModalContent className="max-w-md bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-semibold text-[#003594]">Reject Request</ModalTitle>
-            <ModalDescription className="text-gray-600 mt-2">
-              Please provide a reason for rejecting this request.
-            </ModalDescription>
-          </ModalHeader>
-          <div className="p-6 space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="rejectionReason" className="text-[#003594] font-medium">Reason for Rejection</Label>
-              <Textarea id="rejectionReason" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="Enter the reason for rejection" className="min-h-[100px] border-[#002a6e]/20 focus:border-[#003594] focus:ring-[#003594]/20 transition-colors" required/>
-            </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => {
-            setIsRejectOpen(false);
-            setRejectionReason('');
-        }} className="border-[#002a6e]/20 hover:bg-[#003594]/5 hover:text-[#003594] transition-colors">
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleRejectRequest} disabled={!rejectionReason.trim()} className="bg-[#d2293b] hover:bg-[#d2293b]/90 disabled:opacity-50 transition-colors">
-                Confirm Rejection
-              </Button>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
+      <ApprovalRejectModal
+        open={isRejectOpen}
+        onOpenChange={setIsRejectOpen}
+        title="Reject Request"
+        description="Please provide a reason for rejecting this request."
+        reason={rejectionReason}
+        onReasonChange={setRejectionReason}
+        onConfirm={handleRejectRequest}
+        onCancel={() => setRejectionReason('')}
+        isRejecting={isRejectingRequest}
+        confirmLabel="Confirm Rejection"
+      />
     </>);
 }

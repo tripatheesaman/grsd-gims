@@ -2,13 +2,14 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useEffectivePermissions } from "@/hooks/useEffectivePermissions";
 import { cn } from "@/utils/utils";
 import { ChevronDown } from "lucide-react";
 import { sidebarLinks } from "./sidebarConfig";
 import { SidebarIcon } from "./SidebarIcon";
 import { useApprovalCountsContext } from "@/context/ApprovalCountsContext";
+import { useCommunicationsContextOptional } from "@/context/CommunicationsContext";
 import { withBasePath } from "@/lib/urls";
 interface SidebarProps {
     collapsed: boolean;
@@ -19,9 +20,10 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
     const pathname = usePathname();
     const { permissions } = useEffectivePermissions();
     const { counts } = useApprovalCountsContext();
+    const communicationsContext = useCommunicationsContextOptional();
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const isExpanded = useMemo(() => !collapsed || mobileOpen, [collapsed, mobileOpen]);
-    const hasPermission = (permission?: string, permissionsAny?: string[]) => {
+    const hasPermission = useCallback((permission?: string, permissionsAny?: string[]) => {
         if (!permissions)
             return false;
         if (permissionsAny && permissionsAny.length > 0) {
@@ -30,7 +32,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
         if (!permission)
             return true;
         return permissions.includes(permission);
-    };
+    }, [permissions]);
     const toggleSubmenu = (label: string) => {
         setActiveMenu(activeMenu === label ? null : label);
     };
@@ -48,10 +50,10 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
         }
     };
 
-    const visibleSubmenuItems = (submenu?: typeof sidebarLinks[0]['submenu']) => {
+    const visibleSubmenuItems = useCallback((submenu?: typeof sidebarLinks[0]['submenu']) => {
         if (!submenu) return [];
         return submenu.filter((item) => hasPermission(item.permission, item.permissionsAny));
-    };
+    }, [hasPermission]);
 
     const isSubmenuOpen = (label: string, submenu?: typeof sidebarLinks[0]['submenu']) => {
         if (!submenu?.length) return false;
@@ -83,7 +85,7 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
                 setActiveMenu(link.label);
             }
         }
-    }, [permissions]);
+    }, [permissions, visibleSubmenuItems]);
 
     return (<Fragment>
       {mobileOpen && (<div className="fixed inset-0 z-30 bg-slate-900/50 backdrop-blur-sm md:hidden" onClick={onCloseMobile}/>)}
@@ -106,13 +108,20 @@ export default function Sidebar({ collapsed, mobileOpen, onCloseMobile }: Sideba
             if (!hasPermission(permission, permissionsAny)) {
                 return null;
             }
+            if (submenu && visibleSubmenuItems(submenu).length === 0) {
+                return null;
+            }
             const showApprovalsBadge = badgeKey === 'approvals' && (counts.total ?? 0) > 0;
-            const badgeValue = counts.total ?? 0;
+            const showCommunicationsBadge = badgeKey === 'communications' && (communicationsContext?.activeOpenCount ?? 0) > 0;
+            const badgeValue = badgeKey === 'communications'
+                ? (communicationsContext?.activeOpenCount ?? 0)
+                : (counts.total ?? 0);
+            const showBadge = showApprovalsBadge || showCommunicationsBadge;
             return (<div key={label}>
               <Link href={href} className={cn("relative flex items-center px-4 py-2.5 text-gray-100 hover:bg-white/10 rounded-md transition-colors", "hover:text-white", pathname === href && "bg-white/20 text-white font-medium", "group")} onClick={() => handlePrimaryClick(label, Boolean(submenu))}>
                 <SidebarIcon name={icon} className="text-gray-300 group-hover:text-white transition-colors"/>
                 {isExpanded && <span className="ml-3">{label}</span>}
-                {showApprovalsBadge && (<span className={cn("absolute flex min-w-[28px] items-center justify-center rounded-full bg-[#d2293b] px-2 text-[11px] font-semibold text-white shadow-lg", isExpanded ? "right-4 top-1/2 -translate-y-1/2" : "right-2 top-2")}>
+                {showBadge && (<span className={cn("absolute flex min-w-[28px] items-center justify-center rounded-full bg-[#d2293b] px-2 text-[11px] font-semibold text-white shadow-lg", isExpanded ? "right-4 top-1/2 -translate-y-1/2" : "right-2 top-2")}>
                     {badgeValue}
                   </span>)}
                 {submenu && isExpanded && (<ChevronDown className={cn("ml-auto transition-transform text-gray-300 group-hover:text-white", activeMenu === label && "rotate-180")} size={16}/>)}

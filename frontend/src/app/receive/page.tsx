@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import { SearchControls } from '@/components/search';
 import { useReceiveSearch } from '@/hooks/useReceiveSearch';
@@ -27,10 +27,25 @@ export default function ReceivePage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [remarks, setRemarks] = useState<string>('');
     const { results, isLoading, error, currentPage, totalCount, totalPages, handleSearch, handlePageChange, setResults, } = useReceiveSearch();
+    const cartRequestIds = useMemo(
+        () => new Set(cart.map((item) => Number(item.id.split('-')[0]))),
+        [cart]
+    );
+    const handleOpenReceive = (item: ReceiveSearchResult) => {
+        if (cartRequestIds.has(item.id)) {
+            showErrorToast({
+                title: 'Already in cart',
+                message: 'This request item is already in your receive cart.',
+                duration: 3000,
+            });
+            return;
+        }
+        setSelectedItem(item);
+        setIsItemFormOpen(true);
+    };
     const handleRowDoubleClick = (item: SearchResult | ReceiveSearchResult) => {
         if ('requestedQuantity' in item) {
-            setSelectedItem(item);
-            setIsItemFormOpen(true);
+            handleOpenReceive(item);
         }
     };
     const handleAddToCart = (item: ReceiveCartItem) => {
@@ -57,7 +72,7 @@ export default function ReceivePage() {
             id: `${item.id}-${Date.now()}`
         };
         setResults((prevResults: ReceiveSearchResult[] | null) => prevResults?.map(result => result.id === Number(item.id)
-            ? { ...result, currentBalance: String(Number(result.currentBalance) + item.receiveQuantity) }
+            ? { ...result, virtualBalance: Number(result.virtualBalance ?? 0) + item.receiveQuantity }
             : result) ?? null);
         setCart(prev => [...prev, cartItem]);
         setIsItemFormOpen(false);
@@ -73,7 +88,7 @@ export default function ReceivePage() {
         const deletedItem = cart.find(item => item.id === itemId);
         if (deletedItem) {
             setResults((prevResults: ReceiveSearchResult[] | null) => prevResults?.map(result => result.id === Number(deletedItem.id)
-                ? { ...result, currentBalance: String(Number(result.currentBalance) - deletedItem.receiveQuantity) }
+                ? { ...result, virtualBalance: Number(result.virtualBalance ?? 0) - deletedItem.receiveQuantity }
                 : result) ?? null);
         }
         setCart(prev => prev.filter(item => item.id !== itemId));
@@ -212,9 +227,15 @@ export default function ReceivePage() {
               </div>
 
               <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-semibold text-[#003594] uppercase tracking-wide">Pending Requests</h2>
+                  {totalCount > 0 && (
+                    <span className="text-xs text-gray-500">{totalCount} receivable</span>
+                  )}
+                </div>
                 {isLoading ? (<div className="flex items-center justify-center h-24">
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#003594] border-t-transparent"></div>
-                  </div>) : (<ReceiveSearchResults results={results} isLoading={isLoading} error={error} onRowDoubleClick={handleRowDoubleClick} canViewFullDetails={canViewFullDetails} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={handlePageChange}/>)}
+                  </div>) : (<ReceiveSearchResults results={results} isLoading={isLoading} error={error} onRowDoubleClick={handleRowDoubleClick} onReceiveClick={handleOpenReceive} canViewFullDetails={canViewFullDetails} cartRequestIds={cartRequestIds} currentPage={currentPage} totalCount={totalCount} totalPages={totalPages} onPageChange={handlePageChange}/>)}
               </div>
             </div>
 

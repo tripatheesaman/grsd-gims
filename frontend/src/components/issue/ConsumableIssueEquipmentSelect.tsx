@@ -13,9 +13,10 @@ interface IssueSection {
     code: string;
 }
 
-interface AssetRow {
-    equipment_code?: string | null;
-    name?: string | null;
+interface EquipmentOptionRow {
+    equipmentCode: string;
+    name?: string;
+    label: string;
 }
 
 interface ConsumableIssueEquipmentSelectProps {
@@ -53,20 +54,24 @@ export function ConsumableIssueEquipmentSelect({
     );
 
     const fetchAssets = useCallback(async (query: string) => {
+        const trimmed = query.trim();
+        if (!trimmed) {
+            setAssetOptions([]);
+            setIsLoading(false);
+            return;
+        }
         setIsLoading(true);
         try {
-            const res = await API.get('/api/assets', {
-                params: { page: 1, pageSize: 50, search: query || undefined },
+            const res = await API.get('/api/issue/equipment-options', {
+                params: { search: trimmed, limit: 50 },
             });
-            const rows: AssetRow[] = Array.isArray(res.data?.data) ? res.data.data : [];
+            const rows: EquipmentOptionRow[] = Array.isArray(res.data?.options) ? res.data.options : [];
             setAssetOptions(
-                rows
-                    .filter((r) => r.equipment_code)
-                    .map((r) => ({
-                        value: String(r.equipment_code),
-                        label: r.name ? `${r.equipment_code} — ${r.name}` : String(r.equipment_code),
-                        kind: 'equipment' as const,
-                    }))
+                rows.map((row) => ({
+                    value: row.equipmentCode,
+                    label: row.label || row.equipmentCode,
+                    kind: 'equipment' as const,
+                }))
             );
         } catch {
             setAssetOptions([]);
@@ -77,8 +82,15 @@ export function ConsumableIssueEquipmentSelect({
 
     useEffect(() => {
         if (!open) return;
-        fetchAssets(debouncedQuery.trim());
+        void fetchAssets(debouncedQuery);
     }, [open, debouncedQuery, fetchAssets]);
+
+    useEffect(() => {
+        if (!open) {
+            setInputValue('');
+            setAssetOptions([]);
+        }
+    }, [open]);
 
     const filteredSections = useMemo(() => {
         const q = inputValue.toLowerCase();
@@ -89,16 +101,17 @@ export function ConsumableIssueEquipmentSelect({
     const selectedLabel = useMemo(() => {
         const section = sectionOptions.find((o) => o.value === value);
         if (section) return section.label;
-        const asset = assetOptions.find((o) => o.value === value);
-        if (asset) return asset.label;
-        return value || '';
-    }, [value, sectionOptions, assetOptions]);
+        if (value) return value;
+        return '';
+    }, [value, sectionOptions]);
 
     const handleSelect = (optionValue: string) => {
         onChange(optionValue);
         setOpen(false);
         setInputValue('');
     };
+
+    const showTypeToSearch = !inputValue.trim() && assetOptions.length === 0 && !isLoading;
 
     return (
         <div className="flex flex-col gap-1.5">
@@ -119,7 +132,7 @@ export function ConsumableIssueEquipmentSelect({
                         <div className="flex w-full items-center border-b px-3">
                             <input
                                 className="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
-                                placeholder="Search assets or sections..."
+                                placeholder="Type equipment number (e.g. 312)..."
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 autoFocus
@@ -149,9 +162,13 @@ export function ConsumableIssueEquipmentSelect({
                             <div>
                                 <p className="px-3 py-1.5 text-xs font-semibold text-gray-500 uppercase">Assets</p>
                                 {isLoading ? (
-                                    <p className="p-3 text-sm text-muted-foreground">Loading assets...</p>
+                                    <p className="p-3 text-sm text-muted-foreground">Searching assets...</p>
+                                ) : showTypeToSearch ? (
+                                    <p className="p-3 text-sm text-muted-foreground">
+                                        Enter an equipment number to search registered assets.
+                                    </p>
                                 ) : assetOptions.length === 0 ? (
-                                    <p className="p-3 text-sm text-muted-foreground">No assets found</p>
+                                    <p className="p-3 text-sm text-muted-foreground">No matching assets found</p>
                                 ) : (
                                     assetOptions.map((option) => (
                                         <div

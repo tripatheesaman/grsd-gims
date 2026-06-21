@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardHeader, CardTitle, } from '@/components/Card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
 import { Loader2, ArrowLeft } from 'lucide-react';
+import { userStatusLabel } from '@/lib/userStatus';
 interface Role {
     role_id: number;
     role_name: string;
@@ -215,7 +216,7 @@ export default function CreateUserPage() {
                     <span className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-1"/>
                   </Switch>
                   <span className="text-sm font-medium text-gray-700">
-                    {formData.status === 1 ? 'Active' : 'Inactive'}
+                    {userStatusLabel(formData.status)}
                   </span>
                 </div>
               </div>

@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { Button } from '@/components/ui/button';
-import { normalizeEquipmentNumbers } from '@/utils/equipmentNumbers';
+import { collapseEquipmentSelectionValue } from '@/utils/equipmentNumbers';
 interface EquipmentSelectProps {
     equipmentList: string;
     value: string;
@@ -19,10 +19,13 @@ export function EquipmentSelect({ equipmentList, value, onChange, error }: Equip
         return equipmentList.split(',')
             .map(equipment => equipment.trim())
             .filter(equipment => equipment)
-            .map(equipment => ({
-            value: equipment,
-            label: normalizeEquipmentNumbers(equipment)
-        }));
+            .map(equipment => {
+            const collapsed = collapseEquipmentSelectionValue(equipment);
+            return {
+            value: collapsed,
+            label: collapsed
+        };
+        });
     }, [equipmentList]);
     const filteredSuggestions = useMemo(() => {
         const query = inputValue.toLowerCase();
@@ -30,7 +33,7 @@ export function EquipmentSelect({ equipmentList, value, onChange, error }: Equip
     }, [suggestions, inputValue]);
     const selectedItem = suggestions.find(item => item.value === value);
     const handleSelect = (currentValue: string) => {
-        onChange(currentValue);
+        onChange(collapseEquipmentSelectionValue(currentValue));
         setOpen(false);
         setInputValue("");
     };

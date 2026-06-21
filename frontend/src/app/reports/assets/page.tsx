@@ -55,7 +55,7 @@ const formatNpr = (value: number) =>
 
 export default function AssetsReportPage() {
     const { permissions } = useAuthContext();
-    const canAccessReport = permissions?.includes('can_access_report');
+    const canAccessReport = permissions?.includes('can_access_assets_report') || permissions?.includes('can_access_report');
     const { fiscalYear, loading: fyLoading } = useFiscalYear();
     const { showErrorToast, showSuccessToast } = useCustomToast();
 

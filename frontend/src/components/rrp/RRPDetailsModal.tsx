@@ -5,7 +5,10 @@ import { useCustomToast } from '@/components/ui/custom-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription, } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, } from '@/components/ui/dialog';
+import { ApprovalProcessingOverlay } from '@/components/dashboard/ApprovalProcessingOverlay';
+import { ApprovalActionBar, ApprovalRejectModal, ApprovalConfirmModal } from '@/components/approvals';
+import { approvalTheme } from '@/components/approvals/approvalTheme';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, } from '@/components/ui/select';
 import { Trash2 } from 'lucide-react';
@@ -99,6 +102,9 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
     const { markAsRead } = useNotification();
     const [isEditMode, setIsEditMode] = useState(false);
     const [isRejectDialogOpen, setIsRejectDialogOpen] = useState(false);
+    const [isApproving, setIsApproving] = useState(false);
+    const [isRejecting, setIsRejecting] = useState(false);
+    const isProcessing = isApproving || isRejecting;
     const [rejectionReason, setRejectionReason] = useState('');
     const [itemToDelete, setItemToDelete] = useState<number | null>(null);
     const [editData, setEditData] = useState<{
@@ -211,8 +217,9 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
         setEditData(null);
     };
     const handleApprove = async () => {
-        if (!onApprove)
+        if (!onApprove || isProcessing)
             return;
+        setIsApproving(true);
         try {
             await onApprove();
             const searchParams = new URLSearchParams(window.location.search);
@@ -228,9 +235,12 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
                 duration: 3000,
             });
         }
+        finally {
+            setIsApproving(false);
+        }
     };
     const handleReject = async () => {
-        if (!onReject)
+        if (!onReject || isProcessing)
             return;
         if (!rejectionReason.trim()) {
             showErrorToast({
@@ -241,6 +251,7 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
             return;
         }
         try {
+            setIsRejecting(true);
             await onReject(rejectionReason);
             const searchParams = new URLSearchParams(window.location.search);
             const notificationId = searchParams.get('notificationId');
@@ -256,6 +267,9 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
                 message: "Failed to reject RRP",
                 duration: 3000,
             });
+        }
+        finally {
+            setIsRejecting(false);
         }
     };
     const calculateItemTotal = (item: EditItemData) => {
@@ -371,14 +385,21 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
     };
     return (<>
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-[90vw] max-h-[90vh] overflow-y-auto bg-white">
-          <DialogHeader className="border-b pb-4">
-            <DialogTitle className="text-2xl font-bold text-[#002a6e]">
-              RRP Details - {rrpData.rrpNumber}
+        <DialogContent className="relative flex w-full max-w-[min(96vw,72rem)] flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <ApprovalProcessingOverlay
+            active={isProcessing}
+            label={isApproving ? 'Approving RRP…' : 'Rejecting RRP…'}
+          />
+          <DialogHeader className="shrink-0 border-b border-slate-100 px-4 py-4 sm:px-6">
+            <DialogTitle className={`text-lg font-bold sm:text-2xl ${approvalTheme.titleGradient}`}>
+              RRP Details — {rrpData.rrpNumber}
             </DialogTitle>
+            <DialogDescription className="text-sm text-slate-600">
+              {rrpData.type === 'foreign' ? 'Foreign supplier RRP' : 'Local supplier RRP'} · Request #{rrpData.requestNumber}
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className={`${approvalTheme.modalScrollBody} space-y-4`}>
             
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
               <div className="flex items-center gap-3 mb-4">
@@ -735,73 +756,55 @@ export function RRPDetailsModal({ isOpen, onClose, rrpData, onApprove, onReject,
               </div>
 
             
-            <DialogFooter className="flex justify-end space-x-4 pt-4 border-t">
-              {!isEditMode ? (<>
-                  {!isEditOnly && (<>
-                      <Button variant="outline" onClick={() => setIsRejectDialogOpen(true)} className="border-[#002a6e]/20 text-[#002a6e] hover:bg-[#002a6e]/10">
-                        Reject
-                      </Button>
-                      <Button onClick={handleApprove} className="bg-[#002a6e] text-white hover:bg-[#002a6e]/90">
-                        Approve
-                      </Button>
-                    </>)}
-                  <Button onClick={handleEditClick} className="bg-[#002a6e] text-white hover:bg-[#002a6e]/90">
-                    Edit
-                  </Button>
-                </>) : (<>
-                  <Button variant="outline" onClick={handleCancelEdit} className="border-[#002a6e]/20 text-[#002a6e] hover:bg-[#002a6e]/10">
+            <div className="sticky bottom-0 z-10 -mx-4 border-t border-slate-100 bg-white/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+              {!isEditMode ? (
+                <ApprovalActionBar
+                  onApprove={!isEditOnly ? handleApprove : undefined}
+                  onReject={!isEditOnly ? () => setIsRejectDialogOpen(true) : undefined}
+                  onEdit={handleEditClick}
+                  isApproving={isApproving}
+                  isRejecting={isRejecting}
+                  disabled={isProcessing}
+                  approveLabel="Approve RRP"
+                  editLabel="Edit RRP"
+                />
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="outline" onClick={handleCancelEdit} className="w-full sm:w-auto">
                     Cancel
                   </Button>
-                  <Button onClick={handleSaveEdit} className="bg-[#002a6e] text-white hover:bg-[#002a6e]/90">
-                    Save Changes
+                  <Button onClick={handleSaveEdit} className="w-full bg-[#003594] hover:bg-[#003594]/90 sm:w-auto">
+                    Save changes
                   </Button>
-                </>)}
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      
-      <Dialog open={isRejectDialogOpen} onOpenChange={setIsRejectDialogOpen}>
-        <DialogContent className="bg-white">
-          <DialogHeader className="border-b pb-4">
-            <DialogTitle className="text-xl font-semibold text-[#002a6e]">Reject RRP</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-gray-700">Reason for Rejection</Label>
-              <Input value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="Enter reason for rejection" className="h-10 bg-white border-[#002a6e]/10 focus:border-[#002a6e] focus:ring-1 focus:ring-[#002a6e]"/>
+                </div>
+              )}
             </div>
-            <DialogFooter className="pt-4 border-t">
-              <Button variant="outline" onClick={() => setIsRejectDialogOpen(false)} className="border-[#002a6e]/20 text-[#002a6e] hover:bg-[#002a6e]/10">
-                Cancel
-              </Button>
-              <Button onClick={handleReject} className="bg-[#002a6e] text-white hover:bg-[#002a6e]/90">
-                Confirm Rejection
-              </Button>
-            </DialogFooter>
           </div>
         </DialogContent>
       </Dialog>
 
       
-      <Dialog open={itemToDelete !== null} onOpenChange={() => setItemToDelete(null)}>
-        <DialogContent className="bg-white">
-          <DialogHeader className="border-b pb-4">
-            <DialogTitle className="text-xl font-semibold text-[#002a6e]">Delete Item</DialogTitle>
-            <DialogDescription className="text-gray-600">
-              Are you sure you want to delete this item? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="pt-4 border-t">
-            <Button variant="outline" onClick={() => setItemToDelete(null)} className="border-[#002a6e]/20 text-[#002a6e] hover:bg-[#002a6e]/10">
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={confirmDeleteItem} className="bg-red-600 text-white hover:bg-red-700">
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ApprovalRejectModal
+        open={isRejectDialogOpen}
+        onOpenChange={setIsRejectDialogOpen}
+        title="Reject RRP"
+        description="Please provide a reason for rejecting this RRP."
+        reason={rejectionReason}
+        onReasonChange={setRejectionReason}
+        onConfirm={handleReject}
+        onCancel={() => setRejectionReason('')}
+        isRejecting={isRejecting}
+        confirmLabel="Confirm rejection"
+      />
+
+      
+      <ApprovalConfirmModal
+        open={itemToDelete !== null}
+        onOpenChange={(open) => !open && setItemToDelete(null)}
+        title="Delete item"
+        description="Are you sure you want to delete this line item? This action cannot be undone."
+        onConfirm={confirmDeleteItem}
+        confirmLabel="Delete item"
+      />
     </>);
 }

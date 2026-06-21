@@ -4,10 +4,30 @@ import { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import {
+    getVariantBalances,
+    resolveAndPersistTransactionVariant,
+    resolveTransactionVariantTarget,
+} from '../services/inventoryVariantService';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { enrichIssuedByPerson } from '../services/personDetailsService';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
-import { validateIssuedFor, type IssueValidationCaches } from '../services/issueValidationService';
+import { validateIssuedFor, assessIssuedForApplicableExtension, type IssueValidationCaches } from '../services/issueValidationService';
+import {
+    mergeFamilyEquipments,
+    syncFamilySpareCompatibilityFromEquipment,
+} from '../services/inventoryVariantService';
+import { expandEquipmentTokensToSet } from '../services/spareEquipmentDisplay';
+import { stripSuffixFromNac } from '../utils/nacCodeUtils';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
+import { searchIssueEquipmentAssets } from '../services/requestEquipmentService';
+import {
+    buildConsumptionAnalysis,
+    computeConsumptionStats,
+    consumptionStatsKey,
+    fuelTypeToNacCode,
+    loadConsumptionStatsMap,
+} from '../services/fuelConsumptionService';
 import { ResultSetHeader } from 'mysql2';
 interface IssueItem {
     nacCode: string;
@@ -48,12 +68,22 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
         }[] = [];
 
         const validationCaches: IssueValidationCaches = {};
+        const resolvedItems: Array<
+            IssueItem & { resolvedNac: string; resolvedPart: string; extendsApplicableEquipment: boolean }
+        > = [];
 
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
+            const resolved = await resolveTransactionVariantTarget(connection, {
+                nacCode: item.nacCode,
+                partNumber: item.partNumber,
+                preferLatestReceived: true,
+            });
+            const nacCode = resolved.nacCode;
+
             const issuedForCheck = await validateIssuedFor(
                 connection,
-                item.nacCode,
+                nacCode,
                 item.equipmentNumber,
                 validationCaches
             );
@@ -66,8 +96,15 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 continue;
             }
 
-            const [stockResults] = await connection.query<RowDataPacket[]>('SELECT current_balance FROM stock_details WHERE nac_code = ?', [item.nacCode]);
-            if (stockResults.length === 0) {
+            const extendsApplicableEquipment = await assessIssuedForApplicableExtension(
+                connection,
+                nacCode,
+                item.equipmentNumber,
+                validationCaches
+            );
+
+            const balances = await getVariantBalances(connection, nacCode);
+            if (!balances) {
                 validationErrors.push({
                     nacCode: item.nacCode,
                     message: `Item with NAC code ${item.nacCode} not found`,
@@ -75,14 +112,20 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 });
                 continue;
             }
-            const stockDetails = stockResults[0];
-            if (item.quantity > stockDetails.current_balance) {
+            if (item.quantity > balances.trueBalance) {
                 validationErrors.push({
                     nacCode: item.nacCode,
-                    message: `Insufficient stock. Requested: ${item.quantity}, Available: ${stockDetails.current_balance}`,
+                    message: `Insufficient stock. Requested: ${item.quantity}, Available: ${balances.trueBalance}`,
                     originalIndex: i
                 });
+                continue;
             }
+            resolvedItems.push({
+                ...item,
+                resolvedNac: nacCode,
+                resolvedPart: resolved.partNumber || item.partNumber,
+                extendsApplicableEquipment,
+            });
         }
         if (validationErrors.length > 0) {
             logEvents(`Issue creation failed - Validation errors: ${JSON.stringify(validationErrors)} by user: ${issuedByName}`, "issueLog.log");
@@ -107,8 +150,8 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
             originalIndex: number;
         }[] = [];
         const affectedNacCodes = new Set<string>();
-        for (const item of items) {
-            affectedNacCodes.add(item.nacCode);
+        for (const item of resolvedItems) {
+            affectedNacCodes.add(item.resolvedNac);
             const [result] = await connection.execute(`INSERT INTO issue_details (
           issue_date,
           nac_code,
@@ -121,11 +164,12 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
           updated_by,
           issue_slip_number,
           current_fy,
-          approval_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`, [
+          approval_status,
+          extends_applicable_equipment
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)`, [
                 formattedIssueDate,
-                item.nacCode,
-                item.partNumber,
+                item.resolvedNac,
+                item.resolvedPart,
                 item.quantity,
                 item.equipmentNumber,
                 0,
@@ -133,15 +177,16 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 JSON.stringify(issuedBy),
                 JSON.stringify(issuedBy),
                 issueSlipNumber,
-                currentFY
+                currentFY,
+                item.extendsApplicableEquipment ? 1 : 0,
             ]);
             const issueId = (result as any).insertId;
             issueIds.push({
                 id: issueId,
                 originalIndex: item.originalIndex || 0
             });
-            await connection.execute('UPDATE stock_details SET current_balance = current_balance - ? WHERE nac_code = ?', [item.quantity, item.nacCode]);
-            logEvents(`Item issued successfully - NAC: ${item.nacCode}, Quantity: ${item.quantity} by user: ${issuedByName}`, "issueLog.log");
+            await connection.execute('UPDATE stock_details SET current_balance = current_balance - ? WHERE nac_code = ?', [item.quantity, item.resolvedNac]);
+            logEvents(`Item issued successfully - NAC: ${item.resolvedNac}, Quantity: ${item.quantity} by user: ${issuedByName}`, "issueLog.log");
         }
         for (const nacCode of affectedNacCodes) {
             await rebuildNacInventoryState(connection, nacCode);
@@ -175,6 +220,7 @@ export const approveIssue = async (req: Request, res: Response): Promise<void> =
     const issueIds = Array.isArray(itemIds) ? itemIds : [itemIds];
     try {
         await connection.beginTransaction();
+        await ensureAssetSpareSchema();
         if (!issueIds.length) {
             throw new Error('No issue IDs provided');
         }
@@ -196,9 +242,12 @@ export const approveIssue = async (req: Request, res: Response): Promise<void> =
         const [issueDetails] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.id,
         i.nac_code,
+        i.part_number,
         i.issue_quantity,
         i.issue_date,
-        i.issue_slip_number
+        i.issue_slip_number,
+        i.issued_for,
+        i.extends_applicable_equipment
       FROM issue_details i
       WHERE id IN (${issueIds.map(() => '?').join(',')}) AND approval_status = 'PENDING'`, issueIds);
         if (issueDetails.length !== issueIds.length) {
@@ -216,7 +265,54 @@ export const approveIssue = async (req: Request, res: Response): Promise<void> =
             sendAlreadyProcessed(res, 'One or more issues');
             return;
         }
-        const uniqueNacCodes = [...new Set(issueDetails.map(issue => issue.nac_code))];
+        const validationCaches: IssueValidationCaches = {};
+        const uniqueNacCodes = new Set<string>();
+        const extendedEquipmentKeys = new Set<string>();
+        const needsEquipmentExtension = issueDetails.some(
+            (issue) => Number(issue.extends_applicable_equipment) === 1 && issue.issued_for
+        );
+        if (needsEquipmentExtension) {
+            const [sectionRows] = await connection.query<RowDataPacket[]>(
+                `SELECT code FROM issue_sections WHERE is_active = 1`
+            );
+            validationCaches.sectionCodes = new Set(
+                sectionRows.map((row) => String(row.code).toUpperCase())
+            );
+        }
+        for (const issue of issueDetails) {
+            if (Number(issue.extends_applicable_equipment) === 1 && issue.issued_for) {
+                const baseNac = stripSuffixFromNac(String(issue.nac_code));
+                const extensionKey = `${baseNac}|${String(issue.issued_for).trim().toLowerCase()}`;
+                if (!extendedEquipmentKeys.has(extensionKey)) {
+                    await mergeFamilyEquipments(
+                        connection,
+                        baseNac,
+                        String(issue.issued_for),
+                        expandEquipmentTokensToSet
+                    );
+                    await syncFamilySpareCompatibilityFromEquipment(
+                        connection,
+                        baseNac,
+                        String(issue.issued_for),
+                        validationCaches.sectionCodes!
+                    );
+                    extendedEquipmentKeys.add(extensionKey);
+                    logEvents(
+                        `Extended applicable equipment for ${baseNac} with ${issue.issued_for} on issue approval`,
+                        'issueLog.log'
+                    );
+                }
+            }
+            const resolved = await resolveAndPersistTransactionVariant(
+                connection,
+                'issue_details',
+                issue.id,
+                issue.nac_code,
+                issue.part_number,
+                { preferLatestReceived: true }
+            );
+            uniqueNacCodes.add(resolved.nacCode);
+        }
         for (const nacCode of uniqueNacCodes) {
             await rebuildNacInventoryState(connection, nacCode);
             logEvents(`Rebuilt inventory state for NAC code: ${nacCode} after approving issues`, "issueLog.log");
@@ -252,6 +348,7 @@ export const rejectIssue = async (req: Request, res: Response): Promise<void> =>
         i.issued_by, 
         i.issue_date,
         i.nac_code,
+        i.part_number,
         i.issue_quantity
       FROM issue_details i
       WHERE i.id IN (${Array.isArray(itemIds) ? itemIds.map(() => '?').join(',') : '?'})`, Array.isArray(itemIds) ? itemIds : [itemIds]);
@@ -274,9 +371,24 @@ export const rejectIssue = async (req: Request, res: Response): Promise<void> =>
             ]);
         }
         const affectedNacCodes = new Set<string>();
+        const stockAdjustments = new Map<string, number>();
         for (const issue of issueDetails) {
-            affectedNacCodes.add(issue.nac_code);
-            await connection.execute('UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?', [issue.issue_quantity, issue.nac_code]);
+            const resolved = await resolveTransactionVariantTarget(connection, {
+                nacCode: issue.nac_code,
+                partNumber: issue.part_number,
+                preferLatestReceived: true,
+            });
+            affectedNacCodes.add(resolved.nacCode);
+            stockAdjustments.set(
+                resolved.nacCode,
+                (stockAdjustments.get(resolved.nacCode) || 0) + Number(issue.issue_quantity)
+            );
+        }
+        for (const [nacCode, quantity] of stockAdjustments) {
+            await connection.execute(
+                'UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?',
+                [quantity, nacCode]
+            );
         }
         await connection.execute(`DELETE FROM issue_details WHERE id IN (${Array.isArray(itemIds) ? itemIds.map(() => '?').join(',') : '?'})`, Array.isArray(itemIds) ? itemIds : [itemIds]);
         for (const nacCode of affectedNacCodes) {
@@ -305,6 +417,7 @@ export const rejectIssue = async (req: Request, res: Response): Promise<void> =>
 export const getPendingIssues = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
+        await ensureAssetSpareSchema();
         setNoCacheHeaders(res);
         const [issues] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.id,
@@ -317,15 +430,19 @@ export const getPendingIssues = async (req: Request, res: Response): Promise<voi
         i.issue_slip_number,
         i.issued_by,
         i.issued_for,
+        i.extends_applicable_equipment,
         SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.approval_status = 'PENDING'
       ORDER BY i.issue_date DESC`);
-        const formattedIssues = issues.map((issue) => ({
-            ...issue,
-            issued_by: JSON.parse(issue.issued_by),
-        }));
+        const formattedIssues = await Promise.all(
+            issues.map(async (issue) => ({
+                ...issue,
+                issued_by: await enrichIssuedByPerson(connection, issue.issued_by),
+                extends_applicable_equipment: Number(issue.extends_applicable_equipment) === 1,
+            }))
+        );
         logEvents(`Successfully retrieved ${formattedIssues.length} pending issues`, "issueLog.log");
         res.status(200).json({
             message: 'Pending issues retrieved successfully',
@@ -386,15 +503,56 @@ export const getPendingFuelIssues = async (req: Request, res: Response): Promise
       WHERE i.approval_status = 'PENDING'
       AND (i.nac_code = 'GT 07986' OR i.nac_code = 'GT 00000')
       ORDER BY i.issue_date ASC`);
-        const formattedIssues = issues.map((issue: any) => ({
-            ...issue,
-            issued_by: JSON.parse(issue.issued_by),
-            fuel_type: issue.fuel_type || (issue.nac_code === 'GT 07986' ? 'Diesel' : 'Petrol'),
-            fuel_rate: issue.fuel_rate ? Number(issue.fuel_rate) : 0,
-            kilometers: issue.kilometers ? Number(issue.kilometers) : 0,
-            previous_kilometers: issue.previous_kilometers ? Number(issue.previous_kilometers) : 0,
-            previous_issue_date: issue.previous_issue_date || null
-        }));
+        const consumptionStatsMap = await loadConsumptionStatsMap(
+            connection,
+            issues.map((issue) => ({
+                nacCode: String(issue.nac_code),
+                equipment: String(issue.issued_for || ''),
+            }))
+        );
+        const formattedIssues = await Promise.all(
+            issues.map(async (issue: RowDataPacket) => {
+                const fuelType =
+                    issue.fuel_type || (issue.nac_code === 'GT 07986' ? 'diesel' : 'petrol');
+                const kilometers = issue.kilometers ? Number(issue.kilometers) : 0;
+                const previousKilometers = issue.previous_kilometers
+                    ? Number(issue.previous_kilometers)
+                    : 0;
+                const issueQuantity = Number(issue.issue_quantity);
+                const equipment = String(issue.issued_for || '').trim();
+                const nacCode = fuelTypeToNacCode(fuelType);
+
+                let consumption = null;
+                if (equipment && kilometers > 0 && issueQuantity > 0) {
+                    try {
+                        const stats =
+                            consumptionStatsMap.get(consumptionStatsKey(nacCode, equipment)) ||
+                            consumptionStatsMap.get(consumptionStatsKey(String(issue.nac_code), equipment)) ||
+                            computeConsumptionStats([]);
+                        consumption = buildConsumptionAnalysis(stats, {
+                                equipment,
+                                nacCode,
+                                previousKilometers,
+                                currentKilometers: kilometers,
+                                quantityLiters: issueQuantity,
+                            });
+                    } catch {
+                        consumption = null;
+                    }
+                }
+
+                return {
+                    ...issue,
+                    issued_by: await enrichIssuedByPerson(connection, issue.issued_by),
+                    fuel_type: fuelType,
+                    fuel_rate: issue.fuel_rate ? Number(issue.fuel_rate) : 0,
+                    kilometers,
+                    previous_kilometers: previousKilometers,
+                    previous_issue_date: issue.previous_issue_date || null,
+                    consumption,
+                };
+            })
+        );
         logEvents(`Successfully retrieved ${formattedIssues.length} pending fuel issues`, "issueLog.log");
         res.status(200).json({
             message: 'Pending fuel issues retrieved successfully',
@@ -420,7 +578,9 @@ export const updateIssueItem = async (req: Request, res: Response): Promise<void
     try {
         await connection.beginTransaction();
         const [issueDetails] = await connection.query<RowDataPacket[]>(`SELECT 
+        i.id,
         i.nac_code,
+        i.part_number,
         i.issue_quantity,
         i.issue_slip_number,
         s.current_balance
@@ -430,7 +590,18 @@ export const updateIssueItem = async (req: Request, res: Response): Promise<void
         if (issueDetails.length === 0) {
             throw new Error('Issue item not found');
         }
-        const issue = issueDetails[0];
+        let issue = issueDetails[0];
+        if (issue.current_balance == null) {
+            const resolved = await resolveAndPersistTransactionVariant(
+                connection,
+                'issue_details',
+                Number(id),
+                issue.nac_code,
+                issue.part_number,
+                { preferLatestReceived: true }
+            );
+            issue = { ...issue, nac_code: resolved.nacCode };
+        }
         const quantityDifference = quantity !== undefined ? quantity - issue.issue_quantity : 0;
         const updateFields = [];
         const updateValues = [];
@@ -499,6 +670,7 @@ export const deleteIssueItem = async (req: Request, res: Response): Promise<void
         await connection.beginTransaction();
         const [issueDetails] = await connection.execute<RowDataPacket[]>(`SELECT 
         i.nac_code,
+        i.part_number,
         i.issue_quantity,
         i.issue_slip_number,
         s.current_balance
@@ -508,7 +680,15 @@ export const deleteIssueItem = async (req: Request, res: Response): Promise<void
         if (issueDetails.length === 0) {
             throw new Error('Issue item not found');
         }
-        const issue = issueDetails[0];
+        let issue = issueDetails[0];
+        if (issue.current_balance == null) {
+            const resolved = await resolveTransactionVariantTarget(connection, {
+                nacCode: issue.nac_code,
+                partNumber: issue.part_number,
+                preferLatestReceived: true,
+            });
+            issue = { ...issue, nac_code: resolved.nacCode };
+        }
         await connection.execute('DELETE FROM fuel_records WHERE issue_fk = ?', [id]);
         await connection.execute('DELETE FROM issue_details WHERE id = ?', [id]);
         await connection.execute('UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?', [issue.issue_quantity, issue.nac_code]);
@@ -575,6 +755,38 @@ export const getDailyIssueReport = async (req: Request, res: Response): Promise<
         res.status(500).json({
             error: 'Internal Server Error',
             message: error instanceof Error ? error.message : 'An error occurred while generating the report'
+        });
+    }
+    finally {
+        connection.release();
+    }
+};
+
+export const getIssueEquipmentOptions = async (req: Request, res: Response): Promise<void> => {
+    const search = String(req.query.search || '').trim();
+    const limit = Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 100);
+    const connection = await pool.getConnection();
+    try {
+        await ensureAssetSpareSchema();
+        if (!search) {
+            res.status(200).json({ options: [] });
+            return;
+        }
+        const entries = await searchIssueEquipmentAssets(connection, search, limit);
+        res.status(200).json({
+            options: entries.map((entry) => ({
+                equipmentCode: entry.code,
+                name: entry.name || '',
+                label: entry.name ? `${entry.code} — ${entry.name}` : entry.code,
+            })),
+        });
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error fetching issue equipment options: ${errorMessage}`, 'issueLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
         });
     }
     finally {

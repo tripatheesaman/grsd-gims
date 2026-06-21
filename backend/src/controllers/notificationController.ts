@@ -26,21 +26,7 @@ export const getUserNotifications = async (req: Request, res: Response): Promise
             });
             return;
         }
-        const userId = users[0].id;
-        const [rows] = await connection.query<Notification[]>(`SELECT id, reference_id, reference_type, message, created_at, is_read
-             FROM notifications
-             WHERE user_id = ?
-             ORDER BY created_at DESC`, [userId]);
-        const notifications = rows.map(row => ({
-            id: row.id,
-            referenceNumber: row.reference_id,
-            referenceType: row.reference_type,
-            message: row.message,
-            createdAt: row.created_at,
-            isRead: row.is_read
-        }));
-        logEvents(`Successfully fetched ${notifications.length} notifications for user: ${username}`, "notificationLog.log");
-        res.status(200).json(notifications);
+        await fetchNotificationsForUser(connection, res, users[0].id, username);
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -54,6 +40,51 @@ export const getUserNotifications = async (req: Request, res: Response): Promise
         connection.release();
     }
 };
+
+export const getMyNotifications = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const userId = req.userId;
+        if (!userId) {
+            res.status(401).json({ error: 'Unauthorized', message: 'User not authenticated' });
+            return;
+        }
+        await fetchNotificationsForUser(connection, res, userId, `user:${userId}`);
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error fetching my notifications: ${errorMessage}`, "notificationLog.log");
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error instanceof Error ? error.message : 'An error occurred while fetching notifications'
+        });
+    }
+    finally {
+        connection.release();
+    }
+};
+
+async function fetchNotificationsForUser(
+    connection: Awaited<ReturnType<typeof pool.getConnection>>,
+    res: Response,
+    userId: number,
+    logLabel: string
+): Promise<void> {
+    const [rows] = await connection.query<Notification[]>(`SELECT id, reference_id, reference_type, message, created_at, is_read
+         FROM notifications
+         WHERE user_id = ?
+         ORDER BY created_at DESC`, [userId]);
+    const notifications = rows.map(row => ({
+        id: row.id,
+        referenceNumber: row.reference_id != null ? String(row.reference_id) : '',
+        referenceType: row.reference_type,
+        message: row.message,
+        createdAt: row.created_at,
+        isRead: row.is_read ? 1 : 0,
+    }));
+    logEvents(`Successfully fetched ${notifications.length} notifications for ${logLabel}`, "notificationLog.log");
+    res.status(200).json(notifications);
+}
 export const markNotificationAsRead = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {

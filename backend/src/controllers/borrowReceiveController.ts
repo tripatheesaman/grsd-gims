@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
+import { getNacCodeValidationError } from '../utils/nacCodeUtils';
 export interface BorrowReceiveRequest {
     receiveDate: string;
     borrowSourceId: number;
@@ -43,6 +44,10 @@ export const createBorrowReceive = async (req: Request, res: Response): Promise<
             if (!item.nacCode || item.nacCode.trim() === '') {
                 logEvents(`Failed to create borrow receive - Empty/null nacCode for source ${receiveData.borrowSourceId} by user: ${receiveData.receivedBy}`, "receiveLog.log");
                 throw new Error(`NAC Code is required for item: ${item.itemName}. Please ensure the item has a valid NAC Code.`);
+            }
+            const nacFormatError = getNacCodeValidationError(item.nacCode, { allowSuffix: true });
+            if (nacFormatError) {
+                throw new Error(`${nacFormatError} (item: ${item.itemName})`);
             }
             if (item.isNewItem === true) {
                 const [existingStock] = await connection.execute<RowDataPacket[]>('SELECT id FROM stock_details WHERE nac_code = ? LIMIT 1', [item.nacCode]);

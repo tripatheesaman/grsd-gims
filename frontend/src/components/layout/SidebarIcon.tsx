@@ -1,4 +1,4 @@
-import { Home, LogIn, LogOut, FileText, Search, ClipboardList, Printer, Receipt, Calendar, Printer as PrintIcon, Users, Settings, Fuel, Droplet, Package, Database, TrendingUp, CheckCircle, Briefcase } from "lucide-react";
+import { Home, LogIn, LogOut, FileText, Search, ClipboardList, Printer, Receipt, Calendar, Printer as PrintIcon, Users, Settings, Fuel, Droplet, Package, Database, TrendingUp, CheckCircle, Briefcase, MessageSquare } from "lucide-react";
 import { IconName } from "./sidebarConfig";
 interface SidebarIconProps {
     name: IconName;
@@ -26,6 +26,7 @@ export const SidebarIcon = ({ name, size = 20, className }: SidebarIconProps) =>
         'trending-up': <TrendingUp size={size} className={className}/>,
         'check-circle': <CheckCircle size={size} className={className}/>,
         'briefcase': <Briefcase size={size} className={className}/>,
+        'message-square': <MessageSquare size={size} className={className}/>,
     };
     return icons[name];
 };

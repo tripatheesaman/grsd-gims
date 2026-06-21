@@ -14,6 +14,8 @@ import ExcelJS from 'exceljs';
 import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpReport';
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { appendFamilyEquipmentFilter } from '../services/spareEquipmentDisplay';
+import { sqlFamilyKeyExpression } from '../utils/nacCodeUtils';
 import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
@@ -2743,8 +2745,8 @@ export const getDashboardTotals = async (req: Request, res: Response): Promise<v
         const purchaseReceiveClause = appendCondition(receiveWhereClause, `${notRejectedCondition} AND ${nonTenderCondition}`);
         const tenderReceiveClause = appendCondition(receiveWhereClause, `${notRejectedCondition} AND ${tenderCondition}`);
         const notBalanceTransferCondition = "LOWER(COALESCE(rrp_number, '')) <> 'code transfer'";
-        const processedRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status <> 'REJECTED'`);
-        const voidRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status = 'REJECTED'`);
+        const processedRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status NOT IN ('REJECTED', 'VOID')`);
+        const voidRRPClause = appendCondition(rrpWhereClause, `${notBalanceTransferCondition} AND approval_status IN ('REJECTED', 'VOID')`);
         const issueClauseWithAlias = applyAliasToIssueClause('i');
         const [uniqueRequestsResult, totalItemsRequestedResult, totalItemsReceivedResult, issuesProcessedResult, uniqueRRPsResult, totalItemsPaidForResult, purchaseReceivesResult, tenderReceivesResult, processedRRPsResult, voidRRPsResult, processedLocalRRPsResult, processedForeignRRPsResult, totalItemsIssuedResult, petrolIssuedQuantityResult, dieselIssuedQuantityResult, spareIssuedQuantityResult, valuationTotals] = await Promise.all([
             pool.query<RowDataPacket[]>(`SELECT COUNT(DISTINCT request_number) as count FROM request_details ${requestWhereClause}`, requestParams.length > 0 ? requestParams : undefined),
@@ -3140,6 +3142,8 @@ interface StockReportItem {
 export const getCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
+    const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
+    const FAMILY_KEY_SD2 = sqlFamilyKeyExpression('sd2');
     try {
         await ensureAssetSpareSchema();
         const defaultFromDate = '2025-07-17';
@@ -3149,8 +3153,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
         let whereConditions: string[] = [];
         const params: (string | number)[] = [];
         if (nacCode && String(nacCode).trim() !== '') {
-            whereConditions.push('s.nac_code LIKE ?');
-            params.push(`%${String(nacCode)}%`);
+            whereConditions.push(`(${FAMILY_KEY_S} LIKE ? OR s.nac_code LIKE ?)`);
+            params.push(`%${String(nacCode)}%`, `%${String(nacCode)}%`);
         }
         if (itemName && String(itemName).trim() !== '') {
             whereConditions.push('s.item_name LIKE ?');
@@ -3160,9 +3164,9 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             whereConditions.push('s.part_numbers LIKE ?');
             params.push(`%${String(partNumber)}%`);
         }
+        let countQueryExtra = '';
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
-            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
+            countQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', params);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3173,51 +3177,56 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             params.push(String(createdDateTo));
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        const filtersClause = whereConditions.length > 0 ? ` AND ${whereConditions.join(' AND ')}` : '';
-        const countQuery = `SELECT COUNT(DISTINCT s.nac_code) as total FROM stock_details s ${whereClause}`;
+        const countQuery = `SELECT COUNT(DISTINCT ${FAMILY_KEY_S}) as total FROM stock_details s ${whereClause}${countQueryExtra}`;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, params);
         const totalCount = countResult[0]?.total || 0;
         const currentPage = parseInt(String(page)) || 1;
         const limitNum = parseInt(String(pageSize)) || 20;
         const offsetNum = (currentPage - 1) * limitNum;
+        let listQueryExtra = '';
+        const listParams = [...params];
+        if (equipmentNumber && String(equipmentNumber).trim() !== '') {
+            listQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', listParams);
+        }
         const query = `
             SELECT 
-                s.nac_code,
-                s.item_name,
-                s.part_numbers,
-                s.applicable_equipments,
-                s.location,
-                s.open_quantity,
-                s.open_amount,
-                -- Calculate opening balance (open + receives before fromDate - issues before fromDate)
+                ${FAMILY_KEY_S} as nac_code,
+                SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
+                GROUP_CONCAT(DISTINCT s.part_numbers ORDER BY s.nac_code SEPARATOR ', ') as part_numbers,
+                MAX(s.applicable_equipments) as applicable_equipments,
+                MAX(s.location) as location,
+                SUM(s.open_quantity) as open_quantity,
+                SUM(s.open_amount) as open_amount,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date < ?
                 ) as pre_date_receive_qty,
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date < ?
                 ) as pre_date_issue_qty,
-                -- Received quantity within date range
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date BETWEEN ? AND ?
                 ) as received_quantity,
-                -- RRP quantity and amount within date range
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3225,30 +3234,33 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 (
                     SELECT COALESCE(SUM(rrp.total_amount), 0)
                     FROM receive_details rd
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
                 ) as rrp_amount,
-                -- Issue quantity and amount within date range
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_quantity,
                 (
                     SELECT COALESCE(SUM(id.issue_cost), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_amount
             FROM stock_details s
-            ${whereClause}
-            ORDER BY s.nac_code ASC
+            ${whereClause}${listQueryExtra}
+            GROUP BY ${FAMILY_KEY_S}
+            ORDER BY nac_code ASC
             LIMIT ${limitNum} OFFSET ${offsetNum}
         `;
         const queryParams: (string | number)[] = [
@@ -3259,7 +3271,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             reportFromDate, reportToDate,
             reportFromDate, reportToDate,
             reportFromDate, reportToDate,
-            ...params
+            ...listParams
         ];
         logEvents(`Executing stock report query with ${queryParams.length} parameters: ${JSON.stringify(queryParams.slice(0, 10))}...`, 'reportLog.log');
         const [results] = await connection.execute<RowDataPacket[]>(query, queryParams);
@@ -3341,6 +3353,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
 export const exportCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
+    const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
+    const FAMILY_KEY_SD2 = sqlFamilyKeyExpression('sd2');
     try {
         await ensureAssetSpareSchema();
         const ExcelJS = require('exceljs');
@@ -3363,8 +3377,8 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
         let whereConditions: string[] = [];
         const params: (string | number)[] = [];
         if (nacCode && String(nacCode).trim() !== '') {
-            whereConditions.push('s.nac_code LIKE ?');
-            params.push(`%${String(nacCode)}%`);
+            whereConditions.push(`(${FAMILY_KEY_S} LIKE ? OR s.nac_code LIKE ?)`);
+            params.push(`%${String(nacCode)}%`, `%${String(nacCode)}%`);
         }
         if (itemName && String(itemName).trim() !== '') {
             whereConditions.push('s.item_name LIKE ?');
@@ -3374,9 +3388,9 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             whereConditions.push('s.part_numbers LIKE ?');
             params.push(`%${String(partNumber)}%`);
         }
+        let listQueryExtra = '';
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            whereConditions.push('EXISTS (SELECT 1 FROM spare_compatibility sc JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = sc.equipment_code COLLATE utf8mb4_unicode_ci WHERE sc.nac_code = s.nac_code AND (sc.equipment_code LIKE ? OR a.name LIKE ?))');
-            params.push(`%${String(equipmentNumber)}%`, `%${String(equipmentNumber)}%`);
+            listQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', params);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3389,39 +3403,43 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const query = `
             SELECT 
-                s.nac_code,
-                s.item_name,
-                s.part_numbers,
-                s.applicable_equipments,
-                s.location,
-                s.open_quantity,
-                s.open_amount,
+                ${FAMILY_KEY_S} as nac_code,
+                SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
+                GROUP_CONCAT(DISTINCT s.part_numbers ORDER BY s.nac_code SEPARATOR ', ') as part_numbers,
+                MAX(s.applicable_equipments) as applicable_equipments,
+                MAX(s.location) as location,
+                SUM(s.open_quantity) as open_quantity,
+                SUM(s.open_amount) as open_amount,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date < ?
                 ) as pre_date_receive_qty,
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date < ?
                 ) as pre_date_issue_qty,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date BETWEEN ? AND ?
                 ) as received_quantity,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3429,8 +3447,9 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 (
                     SELECT COALESCE(SUM(rrp.total_amount), 0)
                     FROM receive_details rd
+                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3438,20 +3457,23 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_quantity,
                 (
                     SELECT COALESCE(SUM(id.issue_cost), 0)
                     FROM issue_details id
-                    WHERE id.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
+                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
+                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_amount
             FROM stock_details s
-            ${whereClause}
-            ORDER BY s.nac_code ASC
+            ${whereClause}${listQueryExtra}
+            GROUP BY ${FAMILY_KEY_S}
+            ORDER BY nac_code ASC
             LIMIT ${exportLimit} OFFSET ${exportOffset}
         `;
         const queryParams: (string | number)[] = [

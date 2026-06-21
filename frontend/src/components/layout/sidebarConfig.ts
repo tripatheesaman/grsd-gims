@@ -1,4 +1,14 @@
-export type IconName = 'home' | 'search' | 'request' | 'log-in' | 'log-out' | 'file-text' | 'printer' | 'receipt' | 'calendar' | 'print' | 'users' | 'settings' | 'fuel' | 'droplet' | 'package' | 'database' | 'trending-up' | 'check-circle' | 'briefcase';
+import {
+    FUEL_MENU_PERMISSIONS,
+    PRINT_PERMISSIONS,
+    RECEIVE_PERMISSIONS,
+    RECORDS_PERMISSIONS,
+    REPORT_PERMISSIONS,
+    SETTINGS_PERMISSIONS,
+} from '@/config/permissionGroups';
+
+export type IconName = 'home' | 'search' | 'request' | 'log-in' | 'log-out' | 'file-text' | 'printer' | 'receipt' | 'calendar' | 'print' | 'users' | 'settings' | 'fuel' | 'droplet' | 'package' | 'database' | 'trending-up' | 'check-circle' | 'briefcase' | 'message-square';
+
 interface SubmenuItem {
     label: string;
     href: string;
@@ -13,7 +23,7 @@ interface SidebarLink {
     icon: IconName;
     permission?: string;
     permissionsAny?: string[];
-    badgeKey?: 'approvals';
+    badgeKey?: 'approvals' | 'communications';
     submenu?: SubmenuItem[];
 }
 export const sidebarLinks: SidebarLink[] = [
@@ -37,6 +47,12 @@ export const sidebarLinks: SidebarLink[] = [
         badgeKey: 'approvals'
     },
     {
+        label: "Communications",
+        href: "/communications",
+        icon: 'message-square',
+        badgeKey: 'communications'
+    },
+    {
         label: "Search",
         href: "/search",
         icon: 'search',
@@ -52,13 +68,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Receive",
         href: "#",
         icon: 'log-in',
-        permissionsAny: [
-            'can_receive_items',
-            'can_receive_items_from_purchase',
-            'can_receive_items_from_tender',
-            'can_borrow_stocks',
-            'can_receive_assets',
-        ],
+        permissionsAny: [...RECEIVE_PERMISSIONS],
         submenu: [
             {
                 label: "Purchase Receive",
@@ -118,7 +128,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Full Records",
         href: "#",
         icon: 'database',
-        permission: 'can_access_database_records',
+        permissionsAny: [...RECORDS_PERMISSIONS],
         submenu: [
             {
                 label: "Stock Records",
@@ -180,7 +190,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Reports",
         href: "#",
         icon: 'file-text',
-        permission: 'can_access_report',
+        permissionsAny: [...REPORT_PERMISSIONS],
         submenu: [
             {
                 label: "Daily Issue Report",
@@ -221,13 +231,13 @@ export const sidebarLinks: SidebarLink[] = [
             {
                 label: "Assets Report",
                 href: "/reports/assets",
-                permission: 'can_access_report',
+                permission: 'can_access_assets_report',
                 icon: 'briefcase'
             },
             {
                 label: "Insurance Report",
                 href: "/reports/insurance",
-                permission: 'can_access_report',
+                permission: 'can_access_insurance_report',
                 icon: 'briefcase'
             },
             {
@@ -263,31 +273,37 @@ export const sidebarLinks: SidebarLink[] = [
             {
                 label: "Fuel Reports",
                 href: "/reports/fuel",
-                permission: 'can_access_fuel_menu',
+                permissionsAny: [
+                    'can_access_fuel_menu',
+                    'can_generate_fuel_diesel_weekly_report',
+                    'can_generate_fuel_petrol_weekly_report',
+                    'can_generate_fuel_petrol_consumption_report',
+                    'can_generate_fuel_oil_consumption_report',
+                ],
                 icon: 'fuel',
                 submenu: [
                     {
                         label: "Weekly Diesel",
                         href: "/reports/fuel/diesel/weekly",
-                        permission: 'can_access_fuel_menu',
+                        permission: 'can_generate_fuel_diesel_weekly_report',
                         icon: 'droplet'
                     },
                     {
                         label: "Weekly Petrol",
                         href: "/reports/fuel/petrol/weekly",
-                        permission: 'can_access_fuel_menu',
+                        permission: 'can_generate_fuel_petrol_weekly_report',
                         icon: 'droplet'
                     },
                     {
                         label: "Petrol Consumption",
                         href: "/reports/fuel/petrol/consumption",
-                        permission: 'can_access_fuel_menu',
+                        permission: 'can_generate_fuel_petrol_consumption_report',
                         icon: 'droplet'
                     },
                     {
                         label: "Oil Consumption",
                         href: "/reports/fuel/oil/consumption",
-                        permission: 'can_access_fuel_menu',
+                        permission: 'can_generate_fuel_oil_consumption_report',
                         icon: 'droplet'
                     }
                 ]
@@ -298,7 +314,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Print",
         href: "#",
         icon: 'printer',
-        permission: 'can_print',
+        permissionsAny: [...PRINT_PERMISSIONS],
         submenu: [
             {
                 label: "Request",
@@ -324,7 +340,7 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Fuels & Lubes",
         href: "#",
         icon: 'fuel',
-        permission: 'can_access_fuel_menu',
+        permissionsAny: [...FUEL_MENU_PERMISSIONS],
         submenu: [
             {
                 label: "Fuel Issue",
@@ -344,12 +360,12 @@ export const sidebarLinks: SidebarLink[] = [
         label: "Settings",
         href: "#",
         icon: 'settings',
-        permission: 'can_access_settings',
+        permissionsAny: [...SETTINGS_PERMISSIONS],
         submenu: [
             {
                 label: "App Settings",
                 href: "/settings/app",
-                permission: 'can_access_settings',
+                permissionsAny: ['can_access_app_settings', 'can_access_settings'],
                 icon: 'settings'
             },
             {

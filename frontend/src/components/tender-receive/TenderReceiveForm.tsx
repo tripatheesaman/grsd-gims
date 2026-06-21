@@ -13,6 +13,7 @@ import { useCustomToast } from '@/components/ui/custom-toast';
 import { processItemName } from '@/utils/utils';
 import { EquipmentMultiSelect } from '@/components/request/EquipmentMultiSelect';
 import { EquipmentAssetAutocomplete } from '@/components/request/EquipmentAssetAutocomplete';
+import { getNacCodeValidationError } from '@/utils/nacCodeUtils';
 interface TenderReceiveItemFormProps {
     isOpen: boolean;
     onClose: () => void;
@@ -90,8 +91,9 @@ export const TenderReceiveItemForm = ({ isOpen, onClose, item, onSubmit, isManua
         if (!formData.receiveQuantity || formData.receiveQuantity <= 0) {
             newErrors.receiveQuantity = 'Valid receive quantity is required';
         }
-        if (!formData.nacCode || !/^(GT|TW|GS) \d{5}$/.test(formData.nacCode)) {
-            newErrors.nacCode = 'NAC code must be in format: GT/TW/GS followed by 5 digits (e.g., GT 12345)';
+        const nacFormatError = getNacCodeValidationError(formData.nacCode, { allowSuffix: true });
+        if (nacFormatError) {
+            newErrors.nacCode = nacFormatError;
         }
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;

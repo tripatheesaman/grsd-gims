@@ -1,12 +1,18 @@
 'use client';
 
+import { useState, useCallback, Fragment } from 'react';
 import { Eye, Package } from 'lucide-react';
-import { SearchResult, ReceiveSearchResult } from '@/types/search';
+import { SearchResult, ReceiveSearchResult, StockVariant } from '@/types/search';
 import { SpareApplicableEquipmentsCell } from '@/components/search/SpareApplicableEquipmentsCell';
+import {
+    FamilyNacCell,
+    PartSummaryCell,
+    BalanceCell,
+    VariantExpandPanel,
+} from '@/components/search/InventoryFamilyRow';
 import { DataTablePagination } from '@/components/inventory/DataTablePagination';
 import { InventoryTableStates } from '@/components/inventory/InventoryTableStates';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
     Table,
     TableBody,
@@ -35,6 +41,29 @@ interface SearchResultsProps {
     hasActiveFilters?: boolean;
 }
 
+function resolveVariants(item: SearchResult | ReceiveSearchResult): StockVariant[] {
+    const list = item.variants && item.variants.length > 0 ? [...item.variants] : [];
+    if (list.length > 1 && item.id) {
+        const idx = list.findIndex((v) => v.id === item.id);
+        if (idx > 0) {
+            const [preferred] = list.splice(idx, 1);
+            list.unshift(preferred);
+        }
+    }
+    return list;
+}
+
+function sumBalances(
+    item: SearchResult | ReceiveSearchResult,
+    variants: StockVariant[],
+    field: 'virtualBalance' | 'trueBalance'
+): number {
+    if (item[field] != null && Number.isFinite(Number(item[field]))) {
+        return Number(item[field]);
+    }
+    return variants.reduce((sum, v) => sum + Number(v[field] || 0), 0);
+}
+
 export const SearchResults = ({
     results,
     isLoading,
@@ -52,6 +81,23 @@ export const SearchResults = ({
     onPageSizeChange,
     hasActiveFilters = false,
 }: SearchResultsProps) => {
+    const [expandedFamilies, setExpandedFamilies] = useState<Set<string>>(new Set());
+
+    const toggleFamily = useCallback((nacCode: string, variantCount?: number) => {
+        if (!variantCount || variantCount <= 1) {
+            return;
+        }
+        setExpandedFamilies(prev => {
+            const next = new Set(prev);
+            if (next.has(nacCode)) {
+                next.delete(nacCode);
+            } else {
+                next.add(nacCode);
+            }
+            return next;
+        });
+    }, []);
+
     if (isLoading) {
         return <InventoryTableStates variant="loading" />;
     }
@@ -80,6 +126,8 @@ export const SearchResults = ({
         }
     };
 
+    const colSpan = canViewFullDetails ? 8 : 7;
+
     return (
         <div className="flex flex-col">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
@@ -107,8 +155,11 @@ export const SearchResults = ({
                             <TableHead className="min-w-[160px] text-xs font-semibold uppercase tracking-wide text-slate-600">
                                 Item name
                             </TableHead>
-                            <TableHead className="w-[90px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                Balance
+                            <TableHead className="w-[100px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Virtual bal.
+                            </TableHead>
+                            <TableHead className="w-[100px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                True bal.
                             </TableHead>
                             <TableHead className="min-w-[360px] text-xs font-semibold uppercase tracking-wide text-slate-600">
                                 Applicable for
@@ -126,75 +177,89 @@ export const SearchResults = ({
                     <TableBody>
                         {results.map((item, index) => {
                             const isSelected = selectedItemId === item.id;
-                            const balance = Number(item.currentBalance);
-                            const lowStock = Number.isFinite(balance) && balance <= 0;
+                            const variantCount = Number(item.variantCount || 1);
+                            const hasVariants = variantCount > 1;
+                            const isExpanded = expandedFamilies.has(item.nacCode);
+                            const variants = resolveVariants(item);
+                            const virtualBalance = sumBalances(item, variants, 'virtualBalance');
+                            const trueBalance = sumBalances(item, variants, 'trueBalance');
 
                             return (
-                                <TableRow
-                                    key={item.id}
-                                    className={cn(
-                                        'cursor-pointer border-slate-100 transition-colors',
-                                        isSelected ? 'bg-[#003594]/8' : index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50',
-                                        'hover:bg-[#003594]/5'
-                                    )}
-                                    onClick={() => {
-                                        onRowClick?.(item);
-                                        openDetails(item);
-                                    }}
-                                    onDoubleClick={() => onRowDoubleClick?.(item)}
-                                >
-                                    <TableCell className="py-3">
-                                        <span className="font-mono text-sm font-semibold text-[#003594]">
-                                            {item.nacCode}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 text-sm text-slate-700">
-                                        {item.partNumber || '—'}
-                                    </TableCell>
-                                    <TableCell className="py-3 max-w-[220px]">
-                                        <span className="line-clamp-2 text-sm text-slate-900" title={item.itemName}>
-                                            {item.itemName}
-                                        </span>
-                                    </TableCell>
-                                    <TableCell className="py-3 text-center">
-                                        <Badge
-                                            variant={lowStock ? 'destructive' : 'secondary'}
-                                            className={cn(
-                                                'tabular-nums font-semibold',
-                                                !lowStock && 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                            )}
-                                        >
-                                            {item.currentBalance}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="py-3 min-w-[360px] align-top">
-                                        <SpareApplicableEquipmentsCell
-                                            equipmentNumber={item.equipmentNumber}
-                                            equipmentDisplay={item.equipmentDisplay ?? undefined}
-                                            showAll
-                                        />
-                                    </TableCell>
-                                    <TableCell className="py-3 text-sm text-slate-600">
-                                        {item.location || '—'}
-                                    </TableCell>
-                                    {canViewFullDetails && (
-                                        <TableCell className="py-3 text-right">
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onViewDetails?.(item);
-                                                }}
-                                            >
-                                                <Eye className="h-4 w-4" />
-                                                <span className="sr-only">View</span>
-                                            </Button>
+                                <Fragment key={item.id}>
+                                    <TableRow
+                                        className={cn(
+                                            'cursor-pointer border-slate-100 transition-colors',
+                                            isSelected ? 'bg-[#003594]/8' : index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50',
+                                            'hover:bg-[#003594]/5'
+                                        )}
+                                        onClick={() => {
+                                            onRowClick?.(item);
+                                            openDetails(item);
+                                        }}
+                                        onDoubleClick={() => onRowDoubleClick?.(item)}
+                                    >
+                                        <TableCell className="py-3">
+                                            <FamilyNacCell
+                                                nacCode={item.nacCode}
+                                                variantCount={variantCount}
+                                                isExpanded={isExpanded}
+                                                onToggle={() => toggleFamily(item.nacCode, variantCount)}
+                                            />
                                         </TableCell>
+                                        <TableCell className="py-3">
+                                            <PartSummaryCell
+                                                partNumber={item.partNumber}
+                                                variantCount={variantCount}
+                                                variants={variants.length ? variants : undefined}
+                                                preferredVariantId={item.id}
+                                            />
+                                        </TableCell>
+                                        <TableCell className="py-3 max-w-[220px]">
+                                            <span className="line-clamp-2 text-sm text-slate-900" title={item.itemName}>
+                                                {item.itemName}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell className="py-3 text-center">
+                                            <BalanceCell value={virtualBalance} variant="virtual" />
+                                        </TableCell>
+                                        <TableCell className="py-3 text-center">
+                                            <BalanceCell value={trueBalance} variant="true" />
+                                        </TableCell>
+                                        <TableCell className="py-3 min-w-[360px] align-top">
+                                            <SpareApplicableEquipmentsCell
+                                                equipmentNumber={item.equipmentNumber}
+                                                equipmentDisplay={item.equipmentDisplay ?? undefined}
+                                                showAll
+                                            />
+                                        </TableCell>
+                                        <TableCell className="py-3 text-sm text-slate-600">
+                                            {item.location || '—'}
+                                        </TableCell>
+                                        {canViewFullDetails && (
+                                            <TableCell className="py-3 text-right">
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onViewDetails?.(item);
+                                                    }}
+                                                >
+                                                    <Eye className="h-4 w-4" />
+                                                    <span className="sr-only">View</span>
+                                                </Button>
+                                            </TableCell>
+                                        )}
+                                    </TableRow>
+                                    {hasVariants && isExpanded && (
+                                        <VariantExpandPanel
+                                            variants={variants}
+                                            colSpan={colSpan}
+                                        />
                                     )}
-                                </TableRow>
+                                </Fragment>
                             );
                         })}
                     </TableBody>

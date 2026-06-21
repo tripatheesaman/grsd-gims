@@ -12,6 +12,9 @@ import { SearchResult } from '@/types/search';
 import { useAuthContext } from '@/context/AuthContext';
 import { useCustomToast } from "@/components/ui/custom-toast";
 import { startOfDay, format } from 'date-fns';
+import { Label } from '@/components/ui/label';
+import { stripSuffixFromNac } from '@/utils/nacCodeUtils';
+import { Search } from 'lucide-react';
 export default function IssuePage() {
     const { user } = useAuthContext();
     const { showSuccessToast, showErrorToast } = useCustomToast();
@@ -26,31 +29,43 @@ export default function IssuePage() {
         message: string;
         originalIndex: number;
     }[]>([]);
-    const { results, isLoading, error, handleSearch, } = useSearch();
-    const adjustCurrentBalance = (searchResults: SearchResult[] | null) => {
+    const { results, isLoading, error, handleSearch, searchParams } = useSearch();
+    const adjustTrueBalance = (searchResults: SearchResult[] | null) => {
         if (!searchResults)
             return null;
         return searchResults.map(result => {
-            const cartItems = cart.filter(item => item.nacCode === result.nacCode);
+            const familyKey = result.nacCode;
+            const cartItems = cart.filter(
+                (item) => stripSuffixFromNac(item.nacCode) === familyKey
+            );
             const totalCartQuantity = cartItems.reduce((sum, item) => sum + item.issueQuantity, 0);
             if (cartItems.length > 0) {
                 return {
                     ...result,
-                    currentBalance: (parseFloat(result.currentBalance) - totalCartQuantity).toString()
+                    trueBalance: Number(result.trueBalance ?? 0) - totalCartQuantity,
                 };
             }
             return result;
         });
     };
-    const adjustedResults = results ? adjustCurrentBalance(results) : null;
+    const adjustedResults = results ? adjustTrueBalance(results) : null;
     const handleRowDoubleClick = (item: SearchResult) => {
+        const partHint =
+            searchParams.partNumber.trim() ||
+            (searchParams.universal.trim() &&
+            !/^(GT|TW|GS)\s*\d/i.test(searchParams.universal.trim())
+                ? searchParams.universal.trim()
+                : '') ||
+            item.partNumber;
         const issueCartItem: IssueCartItem = {
             ...item,
             id: String(item.id),
-            currentBalance: Number(item.currentBalance),
-            selectedEquipment: item.equipmentNumber,
+            currentBalance: Number(item.trueBalance ?? 0),
+            selectedEquipment: '',
             issueQuantity: 1,
             quantity: 1,
+            preferredPartNumber: partHint,
+            partNumber: item.partNumber,
         };
         setSelectedItem(issueCartItem);
         setIsItemFormOpen(true);
@@ -220,28 +235,32 @@ export default function IssuePage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            <div className="lg:col-span-2 space-y-8">
+            <div className="lg:col-span-2 space-y-6">
               <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
+                <div className="flex items-center gap-2 mb-4">
+                  <Search className="h-5 w-5 text-[#003594]" />
+                  <h2 className="text-lg font-semibold text-[#003594]">Search inventory</h2>
+                </div>
                 <SearchControls onUniversalSearch={handleSearch('universal')} onEquipmentSearch={handleSearch('equipmentNumber')} onPartSearch={handleSearch('partNumber')}/>
+                <p className="mt-3 text-xs text-gray-500">
+                  Search by part number to open the matching sub-code variant. Double-click a row to add it to the issue cart.
+                </p>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
-                {isLoading ? (<div className="flex items-center justify-center h-24">
+              <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 overflow-hidden hover:border-[#d2293b]/20 transition-colors">
+                {isLoading ? (<div className="flex items-center justify-center h-24 p-6">
                     <div className="animate-spin rounded-full h-6 w-6 border-2 border-[#003594] border-t-transparent"></div>
                   </div>) : (<SearchResults results={adjustedResults} isLoading={isLoading} error={error} onRowDoubleClick={handleRowDoubleClick} canViewFullDetails={true}/>)}
               </div>
             </div>
 
             
-            <div className="space-y-8">
+            <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border border-[#002a6e]/10 p-6 hover:border-[#d2293b]/20 transition-colors">
-                <div className="space-y-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-[#003594]">Issue Date</h2>
-                    <div className="mt-2">
-                      <Calendar value={date} onChange={(newDate) => newDate && setDate(startOfDay(newDate))} className="rounded-md border"/>
-                    </div>
-                  </div>
+                <div className="space-y-3">
+                  <Label className="text-lg font-semibold text-[#003594]">Issue date *</Label>
+                  <p className="text-xs text-gray-500">Required before submitting your issue request.</p>
+                  <Calendar value={date} onChange={(newDate) => newDate && setDate(startOfDay(newDate))} className="rounded-md border w-full"/>
                 </div>
               </div>
 

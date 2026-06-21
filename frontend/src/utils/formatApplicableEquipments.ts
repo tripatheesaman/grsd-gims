@@ -118,13 +118,52 @@ function collapseConsecutiveNumbers(numbers: number[]): string[] {
     return ranges;
 }
 
+/** Split comma/space-separated numeric lists into individual tokens. */
+export function tokenizeEquipmentCodes(raw: string): string[] {
+    const normalized = String(raw || '')
+        .replace(/\b(ge|GE)\b/g, '')
+        .trim();
+    if (!normalized) {
+        return [];
+    }
+
+    const tokens: string[] = [];
+    for (const segment of normalized.split(',')) {
+        const trimmed = segment.trim();
+        if (!trimmed) {
+            continue;
+        }
+
+        const embeddedRange = trimmed.match(/^(\d+)\s*-\s*(\d+)$/);
+        if (embeddedRange) {
+            tokens.push(`${embeddedRange[1]}-${embeddedRange[2]}`);
+            continue;
+        }
+
+        const spaceParts = trimmed.split(/\s+/).filter(Boolean);
+        if (
+            spaceParts.length > 1 &&
+            spaceParts.every((part) => /^\d+$/.test(part) || /^\d+\s*-\s*\d+$/.test(part))
+        ) {
+            for (const part of spaceParts) {
+                const rangePart = part.match(/^(\d+)\s*-\s*(\d+)$/);
+                tokens.push(rangePart ? `${rangePart[1]}-${rangePart[2]}` : part);
+            }
+            continue;
+        }
+
+        tokens.push(trimmed);
+    }
+    return tokens;
+}
+
 /** Format equipment codes into compact ranges where possible. */
 export function formatEquipmentCodeRanges(codes: string[]): string {
     const explicitRanges: string[] = [];
     const numericSingles: number[] = [];
     const textCodes: string[] = [];
 
-    for (const raw of codes) {
+    for (const raw of codes.flatMap((code) => tokenizeEquipmentCodes(code))) {
         const code = raw.trim();
         if (!code) {
             continue;
@@ -143,6 +182,15 @@ export function formatEquipmentCodeRanges(codes: string[]): string {
 
     const collapsed = collapseConsecutiveNumbers(numericSingles);
     return [...explicitRanges, ...collapsed, ...textCodes].join(', ');
+}
+
+/** Normalize a stored equipment selection (ranges, sections, multi-select). */
+export function collapseEquipmentSelectionValue(value: string): string {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) {
+        return '';
+    }
+    return formatEquipmentCodeRanges(trimmed.split(',').map((part) => part.trim()).filter(Boolean));
 }
 
 export function groupEquipmentEntries(

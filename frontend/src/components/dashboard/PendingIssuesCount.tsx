@@ -7,10 +7,30 @@ import { usePendingIssuesQuery } from '@/hooks/api/usePendingApprovals';
 import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 import { isAxiosError } from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { FileText, Eye, X, Check } from 'lucide-react';
+import { FileText, AlertTriangle, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTrigger, } from '@/components/ui/modal';
+import { Badge } from '@/components/ui/badge';
+import { Modal, ModalTrigger, ModalDescription, ModalTitle } from '@/components/ui/modal';
+import { Label } from '@/components/ui/label';
 import { useCustomToast } from '@/components/ui/custom-toast';
+import {
+    ApprovalListModal,
+    ApprovalListCard,
+    ApprovalDetailModal,
+    ApprovalActionBar,
+    ApprovalMetaGrid,
+    ApprovalConfirmModal,
+    ApprovalAlertBanner,
+    ApprovalResponsiveTable,
+    ApprovalModalShell,
+    ApprovalModalHeaderSection,
+    ApprovalModalBody,
+    formatApprovalDate,
+    personDetailsMetaBlock,
+} from '@/components/approvals';
+import type { ApprovalTableColumn } from '@/components/approvals';
+import type { PersonDetails } from '@/types/personDetails';
+
 interface PendingIssue {
     id: number;
     nac_code: string;
@@ -20,14 +40,13 @@ interface PendingIssue {
     remaining_balance: number;
     issue_slip_number: string;
     issue_date: string;
-    issued_by: {
-        name: string;
-        staffId: string;
-    };
+    issued_by: PersonDetails;
     issued_for: string;
     item_name: string;
+    extends_applicable_equipment?: boolean;
     items?: PendingIssue[];
 }
+
 function groupPendingIssues(issues: PendingIssue[]): PendingIssue[] {
     const nonFuelIssues = issues.filter((issue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000');
     const groupedIssues = nonFuelIssues.reduce((acc: Record<string, PendingIssue[]>, curr) => {
@@ -40,8 +59,71 @@ function groupPendingIssues(issues: PendingIssue[]): PendingIssue[] {
     return Object.values(groupedIssues).map((items) => ({
         ...items[0],
         items,
+        extends_applicable_equipment: items.some((i) => i.extends_applicable_equipment),
     }));
 }
+
+const issueItemColumns: ApprovalTableColumn<PendingIssue>[] = [
+    {
+        id: 'item_name',
+        header: 'Item Name',
+        cell: (item) => (
+            <span className="block max-w-[200px] truncate" title={item.item_name}>
+                {item.item_name}
+            </span>
+        ),
+    },
+    {
+        id: 'part_number',
+        header: 'Part Number',
+        cell: (item) => (
+            <span className="block max-w-[150px] truncate" title={item.part_number}>
+                {item.part_number}
+            </span>
+        ),
+    },
+    {
+        id: 'nac_code',
+        header: 'NAC Code',
+        cell: (item) => (
+            <span className="block max-w-[120px] truncate" title={item.nac_code}>
+                {item.nac_code}
+            </span>
+        ),
+    },
+    {
+        id: 'issue_quantity',
+        header: 'Quantity',
+        cell: (item) => item.issue_quantity,
+    },
+    {
+        id: 'issue_cost',
+        header: 'Cost',
+        cell: (item) => `NPR ${item.issue_cost.toFixed(2)}`,
+    },
+    {
+        id: 'remaining_balance',
+        header: 'Balance',
+        cell: (item) => item.remaining_balance,
+    },
+    {
+        id: 'issued_for',
+        header: 'Issued For',
+        cell: (item) => (
+            <div className="flex max-w-[180px] flex-col gap-1">
+                <span className="truncate" title={item.issued_for}>
+                    {item.issued_for}
+                </span>
+                {item.extends_applicable_equipment && (
+                    <Badge variant="outline" className="w-fit border-amber-300 bg-amber-50 text-[10px] text-amber-800">
+                        <AlertTriangle className="mr-1 h-3 w-3" />
+                        Will extend applicable list
+                    </Badge>
+                )}
+            </div>
+        ),
+    },
+];
 
 export function PendingIssuesCount() {
     const queryClient = useQueryClient();
@@ -58,6 +140,8 @@ export function PendingIssuesCount() {
     } | null>(null);
     const [editQuantity, setEditQuantity] = useState('');
     const [isApproving, setIsApproving] = useState(false);
+    const [isRejecting, setIsRejecting] = useState(false);
+    const isProcessing = isApproving || isRejecting;
     const shouldPoll = !isDetailsOpen && !isEditOpen && !isRejectOpen;
     const { data: pendingRes, isLoading } = usePendingIssuesQuery(
         Boolean(permissions?.includes('can_approve_issues') && shouldPoll)
@@ -69,8 +153,8 @@ export function PendingIssuesCount() {
         return groupPendingIssues(issues);
     }, [pendingRes?.data]);
     const pendingCount = pendingIssues.length;
-    const refreshPendingIssues = async () => {
-        await invalidatePendingApprovals(queryClient);
+    const refreshPendingIssues = () => {
+        void invalidatePendingApprovals(queryClient, ['issue', 'fuel']);
     };
     const handleViewDetails = async (issueSlipNumber: string) => {
         const issue = pendingIssues.find(issue => issue.issue_slip_number === issueSlipNumber);
@@ -80,7 +164,7 @@ export function PendingIssuesCount() {
         }
     };
     const handleApproveIssue = async () => {
-        if (!selectedIssue?.items || isApproving)
+        if (!selectedIssue?.items || isProcessing)
             return;
         setIsApproving(true);
         try {
@@ -95,8 +179,8 @@ export function PendingIssuesCount() {
                     message: "Issue approved successfully",
                     duration: 3000,
                 });
-                await refreshPendingIssues();
                 setIsDetailsOpen(false);
+                refreshPendingIssues();
             }
             else {
                 throw new Error(response.data?.message || 'Failed to approve issue');
@@ -104,8 +188,8 @@ export function PendingIssuesCount() {
         }
         catch (error) {
             if (isAxiosError(error) && error.response?.status === 409) {
-                await refreshPendingIssues();
                 setIsDetailsOpen(false);
+                refreshPendingIssues();
                 showSuccessToast({
                     title: 'Already processed',
                     message: 'This issue was already approved.',
@@ -127,8 +211,9 @@ export function PendingIssuesCount() {
         setIsRejectOpen(true);
     };
     const handleRejectIssue = async () => {
-        if (!selectedIssue?.items)
+        if (!selectedIssue?.items || isProcessing)
             return;
+        setIsRejecting(true);
         try {
             const itemIds = selectedIssue.items.map(item => item.id);
             const response = await API.put(`/api/issue/reject`, {
@@ -141,9 +226,9 @@ export function PendingIssuesCount() {
                     message: "Issue rejected successfully",
                     duration: 3000,
                 });
-                await refreshPendingIssues();
                 setIsDetailsOpen(false);
                 setIsRejectOpen(false);
+                refreshPendingIssues();
             }
             else {
                 throw new Error(response.data?.message || 'Failed to reject issue');
@@ -155,6 +240,9 @@ export function PendingIssuesCount() {
                 message: error instanceof Error ? error.message : "Failed to reject issue",
                 duration: 5000,
             });
+        }
+        finally {
+            setIsRejecting(false);
         }
     };
     const handleEditClick = (item: PendingIssue) => {
@@ -242,195 +330,166 @@ export function PendingIssuesCount() {
             </CardContent>
           </Card>
         </ModalTrigger>
-        <ModalContent className="max-w-4xl bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-              Pending Spares
-            </ModalTitle>
-            <ModalDescription className="text-gray-600 mt-2">
-              You have {pendingCount ?? 0} pending spare{pendingCount !== 1 ? 's' : ''} that need your attention.
-            </ModalDescription>
-          </ModalHeader>
-          <div className="mt-6 space-y-4 max-h-[60vh] overflow-y-auto pr-2">
-            {pendingIssues.map((issue) => (<div key={issue.id} className="rounded-lg border border-[#002a6e]/10 p-6 hover:bg-[#003594]/5 transition-all duration-200 hover:shadow-md">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-[#003594]">Issue Slip #</p>
-                  <p className="text-lg font-semibold text-gray-900">{issue.issue_slip_number}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-[#003594]">Issue Date</p>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {new Date(issue.issue_date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            })}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-[#003594]">Item</p>
-                  <p className="text-lg font-semibold text-gray-900">{issue.item_name}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-[#003594]">Issued By</p>
-                  <p className="text-lg font-semibold text-gray-900">{issue.issued_by.name}</p>
-                </div>
-                <div className="flex justify-end">
-                  <Button onClick={() => handleViewDetails(issue.issue_slip_number)} className="flex items-center gap-2 bg-[#003594] hover:bg-[#003594]/90 text-white transition-colors">
-                    <Eye className="h-4 w-4"/>
-                    View Details
-                  </Button>
-                </div>
-              </div>))}
-          </div>
-        </ModalContent>
       </Modal>
 
-      <Modal open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <ModalContent className="max-w-[95vw] md:max-w-6xl bg-white rounded-xl shadow-xl border-[#002a6e]/10 h-[90vh] flex flex-col">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4 flex-shrink-0">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="min-w-0 flex-1">
-                <ModalTitle className="text-xl md:text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent break-words">
-                  Issue Details #{selectedIssue?.issue_slip_number}
-                </ModalTitle>
-                <div className="mt-2 text-gray-600 space-y-2">
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
-                    <span className="break-words">Issued By: {selectedIssue?.issued_by.name}</span>
-                    <span className="hidden md:block h-1 w-1 rounded-full bg-gray-400 flex-shrink-0"></span>
-                    <span className="break-words">Staff ID: {selectedIssue?.issued_by.staffId}</span>
-                  </div>
-                  <div className="flex flex-col md:flex-row items-start md:items-center gap-2 md:gap-4">
-                    <span className="break-words">Issue Date: {selectedIssue?.issue_date ? new Date(selectedIssue.issue_date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        }) : 'N/A'}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 w-full md:w-auto flex-shrink-0">
-                <Button variant="default" size="sm" disabled={isApproving} className="flex-1 md:flex-none flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white transition-colors" onClick={handleApproveIssue}>
-                  <Check className="h-4 w-4"/>
-                  <span className="hidden sm:inline">Approve</span>
-                </Button>
-                <Button variant="destructive" size="sm" className="flex-1 md:flex-none flex items-center gap-2 bg-[#d2293b] hover:bg-[#d2293b]/90 transition-colors" onClick={handleRejectClick}>
-                  <X className="h-4 w-4"/>
-                  <span className="hidden sm:inline">Reject</span>
-                </Button>
-              </div>
-            </div>
-          </ModalHeader>
-          <div className="flex-1 overflow-hidden mt-6">
-            <div className="h-full overflow-auto rounded-lg border border-[#002a6e]/10">
-              <table className="w-full">
-                <thead className="bg-[#003594]/5 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Item Name</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Part Number</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">NAC Code</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Quantity</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Cost</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Balance</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Issued For</th>
-                    <th className="px-3 py-3 text-left text-xs font-medium text-[#003594] uppercase tracking-wider whitespace-nowrap">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-[#002a6e]/10">
-                  {selectedIssue?.items?.map((item) => (<tr key={item.id} className="hover:bg-[#003594]/5 transition-colors">
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 max-w-[200px] truncate" title={item.item_name}>
-                        {item.item_name}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 max-w-[150px] truncate" title={item.part_number}>
-                        {item.part_number}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 max-w-[120px] truncate" title={item.nac_code}>
-                        {item.nac_code}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {item.issue_quantity}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                        NPR {item.issue_cost.toFixed(2)}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {item.remaining_balance}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900 max-w-[150px] truncate" title={item.issued_for}>
-                        {item.issued_for}
-                      </td>
-                      <td className="px-3 py-4 whitespace-nowrap text-sm text-gray-900">
-                        <div className="flex items-center gap-1">
-                          <Button variant="outline" size="sm" className="flex items-center gap-1 text-[#003594] hover:bg-[#003594]/10 h-8 px-2" onClick={() => handleEditClick(item)}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-                            </svg>
-                            <span className="hidden sm:inline">Edit</span>
-                          </Button>
-                          <Button variant="outline" size="sm" className="flex items-center gap-1 text-[#d2293b] hover:bg-[#d2293b]/10 h-8 px-2" onClick={() => handleDeleteItem(item.id)}>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M3 6h18"/>
-                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                            </svg>
-                            <span className="hidden sm:inline">Delete</span>
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </ModalContent>
-      </Modal>
+      <ApprovalListModal
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        title="Pending Spares"
+        description={`You have ${pendingCount ?? 0} pending spare${pendingCount !== 1 ? 's' : ''} that need your attention.`}
+        count={pendingCount}
+        isEmpty={!isLoading && pendingIssues.length === 0}
+        emptyMessage="No pending spares"
+        size="xl"
+      >
+        {pendingIssues.map((issue) => (
+          <ApprovalListCard
+            key={issue.id}
+            onView={() => handleViewDetails(issue.issue_slip_number)}
+            onClick={() => handleViewDetails(issue.issue_slip_number)}
+            viewLabel="View Details"
+            hint="Tap to review details"
+            footer={
+              issue.extends_applicable_equipment ? (
+                <Badge variant="outline" className="shrink-0 border-amber-300 bg-amber-50 text-amber-800">
+                  <AlertTriangle className="mr-1 h-3.5 w-3.5" />
+                  New equipment linkage
+                </Badge>
+              ) : undefined
+            }
+          >
+            <ApprovalMetaGrid
+              columns={3}
+              items={[
+                { label: 'Issue Slip #', value: issue.issue_slip_number },
+                { label: 'Issue Date', value: formatApprovalDate(issue.issue_date) },
+                { label: 'Item', value: issue.item_name },
+                personDetailsMetaBlock('Issued By', issue.issued_by),
+              ]}
+            />
+          </ApprovalListCard>
+        ))}
+      </ApprovalListModal>
 
-      <Modal open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <ModalContent className="max-w-md bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-bold text-[#003594]">Edit Quantity</ModalTitle>
-            <ModalDescription className="text-gray-600 mt-2">
-              Update the quantity for this item.
-            </ModalDescription>
-          </ModalHeader>
-          <div className="mt-6 space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[#003594]">Quantity</label>
-              <input type="number" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value)} className="w-full p-3 rounded-lg border border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 transition-colors" min="1" placeholder="Enter quantity..."/>
+      <ApprovalDetailModal
+        open={isDetailsOpen}
+        onOpenChange={setIsDetailsOpen}
+        title={`Issue Details #${selectedIssue?.issue_slip_number ?? ''}`}
+        meta={
+          selectedIssue ? (
+            <ApprovalMetaGrid
+              columns={4}
+              items={[
+                personDetailsMetaBlock('Issued By', selectedIssue.issued_by),
+                { label: 'Issue Date', value: formatApprovalDate(selectedIssue.issue_date) },
+              ]}
+              className="mt-1"
+            />
+          ) : undefined
+        }
+        alert={
+          selectedIssue?.extends_applicable_equipment ? (
+            <ApprovalAlertBanner variant="warning">
+              One or more lines issue to equipment outside the applicable list.
+              Approving will add that equipment to each item&apos;s applicable list.
+            </ApprovalAlertBanner>
+          ) : undefined
+        }
+        processing={isProcessing}
+        processingLabel={isApproving ? 'Approving issue…' : 'Rejecting issue…'}
+        size="full"
+        actions={
+          <ApprovalActionBar
+            onApprove={handleApproveIssue}
+            onReject={handleRejectClick}
+            isApproving={isApproving}
+            isRejecting={isRejecting}
+            approveLabel="Approve"
+          />
+        }
+      >
+        <ApprovalResponsiveTable
+          columns={issueItemColumns}
+          rows={selectedIssue?.items ?? []}
+          getRowKey={(item) => item.id}
+          emptyMessage="No line items"
+          rowActions={(item) => (
+            <div className="flex flex-wrap items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex h-8 items-center gap-1 px-2 text-[#003594] hover:bg-[#003594]/10"
+                onClick={() => handleEditClick(item)}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Edit</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex h-8 items-center gap-1 px-2 text-[#d2293b] hover:bg-[#d2293b]/10"
+                onClick={() => handleDeleteItem(item.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Delete</span>
+              </Button>
             </div>
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <Button variant="outline" onClick={() => {
-            setIsEditOpen(false);
-            setEditingItem(null);
-            setEditQuantity('');
-        }} className="border-[#002a6e]/10 hover:bg-gray-50">
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateQuantity} className="bg-[#003594] hover:bg-[#003594]/90 text-white transition-colors">
-              Update Quantity
-            </Button>
-          </div>
-        </ModalContent>
-      </Modal>
+          )}
+        />
+      </ApprovalDetailModal>
 
-      <Modal open={isRejectOpen} onOpenChange={setIsRejectOpen}>
-        <ModalContent className="max-w-md bg-white rounded-xl shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-xl font-bold text-[#003594]">Reject Issue</ModalTitle>
-            <ModalDescription className="text-gray-600 mt-2">
-              Are you sure you want to reject this issue?
-            </ModalDescription>
-          </ModalHeader>
-          <div className="mt-6 flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setIsRejectOpen(false)} className="border-[#002a6e]/10 hover:bg-gray-50">
-              Cancel
-            </Button>
-            <Button onClick={handleRejectIssue} className="bg-[#d2293b] hover:bg-[#d2293b]/90 text-white transition-colors">
-              Reject Issue
-            </Button>
+      <ApprovalModalShell open={isEditOpen} onOpenChange={setIsEditOpen} size="sm" layout="flex">
+        <ApprovalModalHeaderSection>
+          <ModalTitle className="text-lg font-bold text-[#003594]">Edit Quantity</ModalTitle>
+          <ModalDescription className="mt-1 text-sm text-slate-600">
+            Update the quantity for this item.
+          </ModalDescription>
+        </ApprovalModalHeaderSection>
+        <ApprovalModalBody>
+          <div className="space-y-2">
+            <Label htmlFor="edit-issue-quantity" className="text-sm font-medium text-[#003594]">
+              Quantity
+            </Label>
+            <input
+              id="edit-issue-quantity"
+              type="number"
+              value={editQuantity}
+              onChange={(e) => setEditQuantity(e.target.value)}
+              className="w-full rounded-lg border border-[#002a6e]/10 p-3 transition-colors focus:border-[#003594] focus:ring-[#003594]/20"
+              min="1"
+              placeholder="Enter quantity..."
+            />
           </div>
-        </ModalContent>
-      </Modal>
+        </ApprovalModalBody>
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-100 px-4 py-4 sm:flex-row sm:justify-end sm:px-6">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setIsEditOpen(false);
+              setEditingItem(null);
+              setEditQuantity('');
+            }}
+            className="w-full border-[#002a6e]/10 hover:bg-gray-50 sm:w-auto"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleUpdateQuantity}
+            className="w-full bg-[#003594] text-white transition-colors hover:bg-[#003594]/90 sm:w-auto"
+          >
+            Update Quantity
+          </Button>
+        </div>
+      </ApprovalModalShell>
+
+      <ApprovalConfirmModal
+        open={isRejectOpen}
+        onOpenChange={setIsRejectOpen}
+        title="Reject Issue"
+        description="Are you sure you want to reject this issue slip?"
+        onConfirm={handleRejectIssue}
+        isProcessing={isRejecting}
+        confirmLabel="Reject Issue"
+      />
     </>);
 }

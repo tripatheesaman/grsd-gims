@@ -9,6 +9,7 @@ import { API } from '@/lib/api';
 import { cn } from '@/utils/utils';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { getErrorMessage } from '@/lib/errorHandling';
+import { isNotificationUnread } from '@/lib/notifications';
 export function NotificationBell() {
     const [isOpen, setIsOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -132,6 +133,9 @@ export function NotificationBell() {
                     }
                     break;
                 }
+                case 'communication':
+                    router.push(`/communications?thread=${notification.referenceNumber}`);
+                    break;
                 default:
                     break;
             }
@@ -165,10 +169,10 @@ export function NotificationBell() {
           <div className="max-h-[480px] overflow-y-auto">
             {notifications.length === 0 ? (<div className="p-6 text-center text-gray-500">
                 No notifications
-              </div>) : (notifications.map((notification) => (<div key={notification.id} className={cn("p-4 hover:bg-[#003594]/5 cursor-pointer transition-colors border-b border-[#002a6e]/10 last:border-b-0", notification.isRead === 0 && "bg-[#003594]/5")} onClick={() => handleNotificationClick(notification)}>
+              </div>) : (notifications.map((notification) => (<div key={notification.id} className={cn("p-4 hover:bg-[#003594]/5 cursor-pointer transition-colors border-b border-[#002a6e]/10 last:border-b-0", isNotificationUnread(notification.isRead) && "bg-[#003594]/5")} onClick={() => handleNotificationClick(notification)}>
                   <div className="flex justify-between items-start gap-4">
                     <p className="text-sm text-gray-700">{notification.message}</p>
-                    {notification.isRead === 0 && (<Check className="h-4 w-4 text-[#003594] flex-shrink-0"/>)}
+                    {isNotificationUnread(notification.isRead) && (<Check className="h-4 w-4 text-[#003594] flex-shrink-0"/>)}
                   </div>
                   <p className="text-xs text-gray-500 mt-2">
                     {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}

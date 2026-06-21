@@ -3,6 +3,20 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
+import { migrateInventoryPartVariants } from '../services/inventoryPartSplitMigration';
+import { reconcileInventoryFamilies } from '../services/inventoryFamilyReconcileService';
+import {
+    VARIANT_VIRTUAL_BALANCE_SQL,
+    VARIANT_TRUE_BALANCE_SQL,
+} from '../services/spareEquipmentDisplay';
+import {
+    findVariantByPartNumber,
+    getFamilyVariants,
+    previewReceiveTarget,
+    syncFamilyLocation,
+} from '../services/inventoryVariantService';
+import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE } from '../utils/nacCodeUtils';
+import { processItemName } from '../utils/utils';
 
 const expandEquipmentTokens = (input: string): string[] => {
     const normalized = String(input || '')
@@ -76,6 +90,111 @@ const backfillCompatForNac = async (connection: any, nacCode: string, equipmentN
         );
     }
 };
+export const migratePartVariants = async (req: Request, res: Response): Promise<void> => {
+    try {
+        await ensureAssetSpareSchema();
+        const dryRun = !!req.body?.dryRun;
+        const split = await migrateInventoryPartVariants({ dryRun });
+        const reconcile = await reconcileInventoryFamilies({ dryRun });
+        const result = { ...split, reconcile };
+        logEvents(`Inventory family migration ${dryRun ? '(dry run)' : ''} completed: ${JSON.stringify(result)}`, 'stockLog.log');
+        res.status(200).json(result);
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in migratePartVariants: ${errorMessage}`, 'stockLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage
+        });
+    }
+};
+
+export const resolveVariant = async (req: Request, res: Response): Promise<void> => {
+    const baseNac = String(req.query.baseNac || req.query.nacCode || '').trim();
+    const partNumber = String(req.query.partNumber || '').trim();
+    if (!baseNac || !partNumber) {
+        res.status(400).json({
+            error: 'Bad Request',
+            message: 'baseNac and partNumber are required'
+        });
+        return;
+    }
+    const connection = await pool.getConnection();
+    try {
+        await ensureAssetSpareSchema();
+        const base = stripSuffixFromNac(baseNac);
+        const existing = await findVariantByPartNumber(connection, base, partNumber);
+        if (existing) {
+            res.json({
+                nacCode: existing.nac_code,
+                baseNacCode: base,
+                isNewVariant: false,
+                requiresNewPhoto: false,
+            });
+            return;
+        }
+        const resolved = await previewReceiveTarget(connection, { baseNacCode: base, partNumber });
+        res.json(resolved);
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        res.status(400).json({
+            error: 'Bad Request',
+            message: errorMessage
+        });
+    }
+    finally {
+        connection.release();
+    }
+};
+
+export const getFamilyVariantsHandler = async (req: Request, res: Response): Promise<void> => {
+    const baseNac = String(req.params.baseNac || '').trim();
+    if (!baseNac) {
+        res.status(400).json({ error: 'Bad Request', message: 'baseNac is required' });
+        return;
+    }
+    const connection = await pool.getConnection();
+    try {
+        const variants = await getFamilyVariants(connection, baseNac);
+        const nacCodes = variants.map(v => v.nac_code);
+        const balanceByNac = new Map<string, { virtualBalance: number; trueBalance: number }>();
+        if (nacCodes.length) {
+            const placeholders = nacCodes.map(() => '?').join(', ');
+            const [balanceRows] = await connection.execute<RowDataPacket[]>(
+                `SELECT sd.nac_code as nacCode,
+                    ${VARIANT_VIRTUAL_BALANCE_SQL} as virtualBalance,
+                    ${VARIANT_TRUE_BALANCE_SQL} as trueBalance
+                 FROM stock_details sd WHERE sd.nac_code IN (${placeholders})`,
+                nacCodes
+            );
+            for (const row of balanceRows) {
+                balanceByNac.set(String(row.nacCode), {
+                    virtualBalance: Number(row.virtualBalance),
+                    trueBalance: Number(row.trueBalance),
+                });
+            }
+        }
+        res.json({
+            baseNacCode: stripSuffixFromNac(baseNac),
+            variants: variants.map(v => ({
+                id: v.id,
+                nacCode: v.nac_code,
+                partNumber: v.part_numbers,
+                virtualBalance: balanceByNac.get(v.nac_code)?.virtualBalance ?? 0,
+                trueBalance: balanceByNac.get(v.nac_code)?.trueBalance ?? 0,
+                location: v.location,
+                imageUrl: v.image_url,
+                unit: v.unit,
+            })),
+        });
+    }
+    finally {
+        connection.release();
+    }
+};
+
 export const createStockItem = async (req: Request, res: Response): Promise<void> => {
     const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location } = req.body;
     const connection = await pool.getConnection();
@@ -89,6 +208,21 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
             });
             return;
         }
+        if (String(itemName).includes(',') || String(partNumber).includes(',')) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Item name and part number must be single values (no commas)'
+            });
+            return;
+        }
+        if (!validateNacCodeFormat(nacCode)) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: NAC_CODE_VARIANT_FORMAT_MESSAGE
+            });
+            return;
+        }
+        const baseNacCode = stripSuffixFromNac(nacCode);
         const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id FROM stock_details WHERE nac_code = ?', [nacCode]);
         if (existingItem.length > 0) {
             res.status(409).json({
@@ -100,14 +234,15 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         await connection.beginTransaction();
         started = true;
         const [result] = await connection.execute(`INSERT INTO stock_details (
-        nac_code, 
+        nac_code,
+        base_nac_code,
         item_name, 
         part_numbers, 
         applicable_equipments, 
         current_balance, 
         location, 
         open_amount
-      ) VALUES (?, ?, ?, ?, ?, ?, 0)`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location]);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`, [nacCode, baseNacCode, processItemName(itemName), partNumber.trim(), equipmentNumber, currentBalance, location]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();
         res.status(201).json({
@@ -144,7 +279,22 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
             });
             return;
         }
-        const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id, nac_code FROM stock_details WHERE id = ?', [id]);
+        if (String(itemName).includes(',') || String(partNumber).includes(',')) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Item name and part number must be single values (no commas)'
+            });
+            return;
+        }
+        const nacFormatError = getNacCodeValidationError(String(nacCode), { allowSuffix: true });
+        if (nacFormatError) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: nacFormatError
+            });
+            return;
+        }
+        const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id, nac_code, base_nac_code FROM stock_details WHERE id = ?', [id]);
         if (existingItem.length === 0) {
             res.status(404).json({
                 error: 'Not Found',
@@ -163,14 +313,17 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         }
         await connection.beginTransaction();
         started = true;
+        const baseNacCode = stripSuffixFromNac(nacCode);
         await connection.execute(`UPDATE stock_details SET 
         nac_code = ?, 
+        base_nac_code = ?,
         item_name = ?, 
         part_numbers = ?, 
         applicable_equipments = ?, 
         current_balance = ?, 
         location = ?
-      WHERE id = ?`, [nacCode, itemName, partNumber, equipmentNumber, currentBalance, location, id]);
+      WHERE id = ?`, [nacCode, baseNacCode, processItemName(itemName), partNumber.trim(), equipmentNumber, currentBalance, location, id]);
+        await syncFamilyLocation(connection, baseNacCode, location);
         await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [oldNacCode]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();

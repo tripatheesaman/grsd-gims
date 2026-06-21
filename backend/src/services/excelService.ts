@@ -13,6 +13,7 @@ import {
     restoreWorksheetLayout,
     flattenWorksheetFormulas,
 } from './excelTemplateUtils';
+import { REQUEST_ITEM_NAME_SQL } from './requestItemService';
 import { adToBs } from '../utils/dateConverter';
 import { formatRrpDisplayNumber } from '../utils/rrpNumberUtils';
 import PDFDocument from 'pdfkit';
@@ -118,10 +119,13 @@ export class ExcelService {
                 logEvents(`Request not found: ${requestNumber}`, "excelServiceLog.log");
                 throw new Error('Request not found');
             }
-            const [itemRows] = await connection.query<RequestItem[]>(`SELECT nac_code, item_name, part_number, unit, requested_quantity, 
-                        current_balance, previous_rate, equipment_number, specifications, image_path
-                 FROM request_details 
-                 WHERE request_number = ?`, [requestNumber]);
+            const [itemRows] = await connection.query<RequestItem[]>(`SELECT rd.nac_code,
+                        ${REQUEST_ITEM_NAME_SQL.replace(/\s+/g, ' ').trim()} AS item_name,
+                        rd.part_number, rd.unit, rd.requested_quantity, 
+                        rd.current_balance, rd.previous_rate, rd.equipment_number, rd.specifications, rd.image_path
+                 FROM request_details rd
+                 LEFT JOIN stock_details sd ON sd.nac_code COLLATE utf8mb4_unicode_ci = rd.nac_code COLLATE utf8mb4_unicode_ci
+                 WHERE rd.request_number = ?`, [requestNumber]);
             logEvents(`Found ${itemRows.length} items for request: ${requestNumber}`, "excelServiceLog.log");
             const requestedBy = requestRows[0].requested_by?.trim();
             logEvents(`Looking up user with requested_by value: "${requestedBy}" for request: ${requestNumber}`, "excelServiceLog.log");

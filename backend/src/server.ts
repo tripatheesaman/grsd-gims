@@ -39,6 +39,7 @@ import assetReceiveRoutes from './routes/assetReceiveRoutes';
 import capitalRrpRoutes from './routes/capitalRrpRoutes';
 import assetSettingsRoutes from './routes/assetSettingsRoutes';
 import locationPhrasesRoutes from './routes/locationPhrasesRoutes';
+import communicationsRoutes from './routes/communicationsRoutes';
 import { startRequestReminderWorker } from './services/requestReminderService';
 const app = express();
 const PORT = process.env.PORT || 3500;
@@ -113,6 +114,7 @@ app.use('/api/assets', verifyJWT, assetRoutes);
 app.use('/api/asset-receive', verifyJWT, assetReceiveRoutes);
 app.use('/api/capital-rrp', verifyJWT, capitalRrpRoutes);
 app.use('/api/settings/assets', verifyJWT, assetSettingsRoutes);
+app.use('/api/communications', verifyJWT, communicationsRoutes);
 const healthHandler = async (req: Request, res: Response) => {
     try {
         await pool.query("SELECT 1");

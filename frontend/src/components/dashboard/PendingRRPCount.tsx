@@ -4,9 +4,17 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { FileText, Eye } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Modal, ModalContent, ModalHeader, ModalTitle, ModalDescription, ModalTrigger, } from '@/components/ui/modal';
+import { FileText } from 'lucide-react';
+import { Modal, ModalTrigger } from '@/components/ui/modal';
+import { Badge } from '@/components/ui/badge';
+import {
+    ApprovalListModal,
+    ApprovalListCard,
+    ApprovalMetaGrid,
+    formatApprovalDate,
+    personDetailsMetaBlock,
+} from '@/components/approvals';
+import type { PersonDetails } from '@/types/personDetails';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { RRPDetailsModal } from '@/components/rrp/RRPDetailsModal';
 import {
@@ -40,6 +48,7 @@ interface PendingRRP {
     };
     approval_status: string;
     created_by: string;
+    createdByDetails?: PersonDetails;
     total_amount: string;
     receive_fk: number;
     item_name: string;
@@ -97,6 +106,7 @@ interface PendingCapitalRRP {
         inspection_details?: Record<string, unknown>;
     };
     created_by: string;
+    createdByDetails?: PersonDetails;
     total_amount: string;
     item_price: string;
     model_name: string;
@@ -118,6 +128,7 @@ type PendingRRPListEntry = {
     rrp_number: string;
     date: string;
     created_by: string;
+    createdByDetails?: PersonDetails;
     category: 'spare' | 'capital';
 };
 export function PendingRRPCount() {
@@ -201,7 +212,8 @@ export function PendingRRPCount() {
                     listEntries.push({
                         rrp_number: item.rrp_number,
                         date: item.date,
-                        created_by: item.created_by,
+                        created_by: item.createdByDetails?.name || item.created_by,
+                        createdByDetails: item.createdByDetails,
                         category: 'spare',
                     });
                 }
@@ -212,7 +224,8 @@ export function PendingRRPCount() {
                     listEntries.push({
                         rrp_number: item.rrp_number,
                         date: item.date,
-                        created_by: item.created_by,
+                        created_by: item.createdByDetails?.name || item.created_by,
+                        createdByDetails: item.createdByDetails,
                         category: 'capital',
                     });
                 }
@@ -407,7 +420,7 @@ export function PendingRRPCount() {
                 duration: 3000,
             });
             setIsDetailsOpen(false);
-            await invalidatePendingApprovals(queryClient);
+            void invalidatePendingApprovals(queryClient, ['rrp']);
             fetchPendingCount();
         }
         catch (error: unknown) {
@@ -440,7 +453,7 @@ export function PendingRRPCount() {
             });
             setIsCapitalDetailsOpen(false);
             setSelectedCapitalRRP(null);
-            await invalidatePendingApprovals(queryClient);
+            void invalidatePendingApprovals(queryClient, ['capitalRrp']);
             fetchPendingCount();
         }
         catch (error: unknown) {
@@ -795,43 +808,46 @@ export function PendingRRPCount() {
             </CardContent>
           </Card>
         </ModalTrigger>
-        <ModalContent className="max-w-3xl bg-white rounded-lg shadow-xl border-[#002a6e]/10">
-          <ModalHeader className="border-b border-[#002a6e]/10 pb-4">
-            <ModalTitle className="text-2xl font-bold bg-gradient-to-r from-[#003594] to-[#d2293b] bg-clip-text text-transparent">
-              Pending RRP
-            </ModalTitle>
-            <ModalDescription className="text-gray-600">
-              Review and manage pending RRP requests
-            </ModalDescription>
-          </ModalHeader>
-          <div className="mt-6 space-y-4">
-            {pendingRRPs.map((rrp) => (<div key={`${rrp.category}-${rrp.rrp_number}`} className="rounded-lg border border-[#002a6e]/10 p-6 hover:bg-[#003594]/5 transition-colors">
-                <div className="grid grid-cols-4 gap-6 items-center">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">RRP #</p>
-                    <p className="text-lg font-semibold text-gray-900">{rrp.rrp_number}</p>
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${rrp.category === 'capital' ? 'bg-violet-100 text-violet-800' : 'bg-sky-100 text-sky-800'}`}>
-                      {rrp.category === 'capital' ? 'Capital (RRCP)' : 'Spare'}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Date</p>
-                    <p className="text-lg font-semibold text-gray-900">{new Date(rrp.date).toLocaleDateString()}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#003594]">Created By</p>
-                    <p className="text-lg font-semibold text-gray-900">{rrp.created_by}</p>
-                  </div>
-                  <div className="flex justify-end">
-                    <Button onClick={() => handleViewDetails(rrp.rrp_number, rrp.category)} className="flex items-center gap-2 bg-[#003594] hover:bg-[#003594]/90 text-white">
-                      <Eye className="h-4 w-4"/>
-                      View Details
-                    </Button>
-                  </div>
-                </div>
-              </div>))}
-          </div>
-        </ModalContent>
+        <ApprovalListModal
+            open={isOpen}
+            onOpenChange={setIsOpen}
+            title="Pending RRP"
+            description="Spare and capital (RRCP) receive register papers awaiting approval"
+            count={pendingCount}
+            isEmpty={pendingRRPs.length === 0}
+            emptyMessage="No pending RRP records"
+            size="xl"
+        >
+            {pendingRRPs.map((rrp) => (
+                <ApprovalListCard
+                    key={`${rrp.category}-${rrp.rrp_number}`}
+                    onView={() => handleViewDetails(rrp.rrp_number, rrp.category)}
+                    onClick={() => handleViewDetails(rrp.rrp_number, rrp.category)}
+                    hint="Tap to review RRP details"
+                    footer={
+                        <Badge
+                            variant="outline"
+                            className={
+                                rrp.category === 'capital'
+                                    ? 'border-violet-200 bg-violet-50 text-violet-800'
+                                    : 'border-sky-200 bg-sky-50 text-sky-800'
+                            }
+                        >
+                            {rrp.category === 'capital' ? 'Capital (RRCP)' : 'Spare'}
+                        </Badge>
+                    }
+                >
+                    <ApprovalMetaGrid
+                        columns={3}
+                        items={[
+                            { label: 'RRP #', value: rrp.rrp_number },
+                            { label: 'Date', value: formatApprovalDate(rrp.date) },
+                            personDetailsMetaBlock('Created by', rrp.createdByDetails),
+                        ]}
+                    />
+                </ApprovalListCard>
+            ))}
+        </ApprovalListModal>
       </Modal>
 
       {selectedRRP && (<RRPDetailsModal isOpen={isDetailsOpen} onClose={() => setIsDetailsOpen(false)} rrpData={selectedRRP} onApprove={handleApproveRRP} onReject={handleRejectRRP} onEdit={handleEditRRP} onDeleteItem={handleDeleteItem} config={config!}/>)}

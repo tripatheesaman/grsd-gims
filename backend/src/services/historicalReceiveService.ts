@@ -8,6 +8,7 @@ import {
     parseExcelDate,
     parseQuantity
 } from './historicalExcelUtils';
+import { getNacCodeValidationError } from '../utils/nacCodeUtils';
 
 const BATCH_SIZE = 1000;
 
@@ -102,6 +103,15 @@ export const parseHistoricalReceiveWorkbook = (workbook: {
             skipped++;
             if (errors.length < 20) {
                 errors.push(`Row ${i}: invalid date, NAC code, or quantity`);
+            }
+            continue;
+        }
+
+        const nacFormatError = getNacCodeValidationError(nacCode, { allowSuffix: true });
+        if (nacFormatError) {
+            skipped++;
+            if (errors.length < 20) {
+                errors.push(`Row ${i}: ${nacFormatError}`);
             }
             continue;
         }

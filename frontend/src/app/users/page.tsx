@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, } from '@/components/Card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, } from '@/components/ui/dropdown-menu';
 import { Loader2, Plus, MoreVertical, Search } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { isUserActive, userStatusLabel } from '@/lib/userStatus';
 interface User {
     id: number;
     username: string;
@@ -150,8 +151,8 @@ export default function UsersPage() {
                     <TableCell>{user.role_name}</TableCell>
                     <TableCell>{user.designation}</TableCell>
                     <TableCell>
-                      <Badge variant={user.status === 1 ? "success" : "destructive"} className="bg-[#003594]/10 text-[#003594] hover:bg-[#003594]/20">
-                        {user.status === 1 ? 'Active' : 'Inactive'}
+                      <Badge variant={isUserActive(user.status) ? "success" : "destructive"} className="bg-[#003594]/10 text-[#003594] hover:bg-[#003594]/20">
+                        {userStatusLabel(user.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">

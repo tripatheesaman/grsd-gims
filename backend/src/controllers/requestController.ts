@@ -10,10 +10,19 @@ import fs from 'fs';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
+import {
+    prepareRequestItemForSave,
+    REQUEST_ITEM_NAME_SQL,
+    REQUEST_STOCK_JOIN,
+} from '../services/requestItemService';
+import { resolveRequestVariantTarget } from '../services/inventoryVariantService';
+import { getRequestEquipmentOptions } from '../services/requestEquipmentService';
+import { collapseEquipmentSelectionValue } from '../services/spareEquipmentGrouping';
+import { PoolConnection } from 'mysql2/promise';
+import { resolveRequestRequester } from '../services/personDetailsService';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
-    unit: string;
 }
 
 interface ReceiveDetail extends RowDataPacket {
@@ -134,20 +143,21 @@ const ensureRequestReferenceSkipColumns = async () => {
     }
 };
 
-const getStockDetails = async (nacCode: string): Promise<StockDetail | null> => {
-    try {
-        const [rows] = await pool.query<StockDetail[]>(
-            'SELECT current_balance, unit FROM stock_details WHERE nac_code = ?',
-            [nacCode]
-        );
-        return rows[0] || null;
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error fetching stock details for NAC code ${nacCode}: ${errorMessage}`, "requestLog.log");
-        throw error;
-    }
-};
-
+const requestRowsSelectSql = `
+    rd.id,
+    rd.request_number,
+    rd.request_date,
+    rd.part_number,
+    ${REQUEST_ITEM_NAME_SQL} AS item_name,
+    rd.unit,
+    rd.requested_quantity,
+    rd.equipment_number,
+    rd.remarks,
+    rd.requested_by,
+    rd.requested_by_id,
+    rd.requested_by_email,
+    rd.nac_code
+`;
 
 const validateRequestDate = async (requestDate: string, excludeRequestNumber?: string): Promise<{ isValid: boolean; lastRequestDate?: Date; errorMessage?: string }> => {
     try {
@@ -276,10 +286,10 @@ const sendRequestForceCloseEmail = async (requestNumber: string): Promise<void> 
 
         const [requestRows] = await pool.query<RowDataPacket[]>(
             `SELECT 
-                request_number, request_date, part_number, item_name, unit, requested_quantity,
-                equipment_number, remarks, requested_by, requested_by_id, requested_by_email, nac_code
-             FROM request_details
-             WHERE request_number = ?`,
+                ${requestRowsSelectSql}
+             FROM request_details rd
+             ${REQUEST_STOCK_JOIN}
+             WHERE rd.request_number = ?`,
             [requestNumber]
         );
 
@@ -452,10 +462,10 @@ const sendRequestApprovalEmail = async (requestNumber: string): Promise<void> =>
 
         const [requestRows] = await pool.query<RowDataPacket[]>(
             `SELECT 
-                request_number, request_date, part_number, item_name, unit, requested_quantity,
-                equipment_number, remarks, requested_by, requested_by_id, requested_by_email, nac_code
-             FROM request_details
-             WHERE request_number = ?`,
+                ${requestRowsSelectSql}
+             FROM request_details rd
+             ${REQUEST_STOCK_JOIN}
+             WHERE rd.request_number = ?`,
             [requestNumber]
         );
 
@@ -614,35 +624,24 @@ const computeNextRequestNumber = (lastRequestNumber: string | null, sectionCode:
 
 
 const processRequestItem = async (
+    connection: PoolConnection,
     item: CreateRequestDTO['items'][0],
     requestData: CreateRequestDTO
 ): Promise<RequestDetail> => {
     try {
-        let currentBalance: number | string = 'N/A';
-        let unit = item.unit || 'N/A';
-
-        if (item.nacCode !== 'N/A') {
-            const stockDetail = await getStockDetails(item.nacCode);
-            if (stockDetail) {
-                currentBalance = stockDetail.current_balance;
-                unit = stockDetail.unit;
-            }
-        } else {
-            currentBalance = 0;
-        }
-
-        const previousRate = await getPreviousRate(item.nacCode);
+        const prepared = await prepareRequestItemForSave(connection, item);
+        const previousRate = await getPreviousRate(prepared.nacCode);
 
         return {
             request_number: requestData.requestNumber,
             request_date: new Date(requestData.requestDate),
-            part_number: item.partNumber,
-            item_name: item.itemName,
-            unit,
+            part_number: prepared.partNumber,
+            item_name: prepared.itemName,
+            unit: prepared.unit,
             requested_quantity: item.requestQuantity,
-            current_balance: currentBalance,
+            current_balance: prepared.currentBalance,
             previous_rate: previousRate,
-            equipment_number: item.equipmentNumber,
+            equipment_number: collapseEquipmentSelectionValue(item.equipmentNumber || ''),
             image_path: item.imagePath,
             specifications: item.specifications,
             remarks: requestData.remarks,
@@ -650,11 +649,11 @@ const processRequestItem = async (
             requested_by_id: item.requestedById ?? null,
             requested_by_email: item.requestedByEmail ?? null,
             approval_status: 'PENDING',
-            nac_code: item.nacCode
+            nac_code: prepared.nacCode
         };
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error processing request item for ${item.itemName}: ${errorMessage}`, "requestLog.log");
+        logEvents(`Error processing request item for ${item.nacCode}: ${errorMessage}`, "requestLog.log");
         throw error;
     }
 };
@@ -745,15 +744,16 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             if (!item.equipmentNumber?.trim()) {
                 continue;
             }
+            const prepared = await prepareRequestItemForSave(connection, item);
             const targetCheck = await validateRequestTarget(
                 connection,
-                item.nacCode,
+                prepared.nacCode,
                 item.equipmentNumber,
                 validationCaches
             );
             if (!targetCheck.valid) {
                 compatibilityErrors.push({
-                    nacCode: item.nacCode || 'N/A',
+                    nacCode: prepared.nacCode || 'N/A',
                     message: targetCheck.message || `Invalid equipment ${item.equipmentNumber}`,
                     originalIndex: i
                 });
@@ -771,7 +771,7 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
         }
         
         const requestDetails = await Promise.all(
-            requestData.items.map(item => processRequestItem(item, requestData))
+            requestData.items.map(item => processRequestItem(connection, item, requestData))
         );
 
         for (const detail of requestDetails) {
@@ -824,22 +824,92 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
     }
 };
 
+export const resolveRequestTarget = async (req: Request, res: Response): Promise<void> => {
+    const nacCode = String(req.query.nacCode || '').trim();
+    const partNumber = String(req.query.partNumber || '').trim();
+
+    if (!nacCode || !partNumber) {
+        res.status(400).json({
+            error: 'Bad Request',
+            message: 'nacCode and partNumber are required',
+        });
+        return;
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        const resolved = await resolveRequestVariantTarget(connection, nacCode, partNumber);
+        const [unitRows] = await connection.execute<RowDataPacket[]>(
+            `SELECT unit, is_default FROM nac_units WHERE nac_code = ? ORDER BY is_default DESC, unit ASC`,
+            [resolved.nacCode]
+        );
+        const units = unitRows.map(row => String(row.unit));
+        res.status(200).json({
+            nacCode: resolved.nacCode,
+            partNumber: resolved.partNumber,
+            itemName: resolved.itemName,
+            defaultUnit: resolved.defaultUnit,
+            units,
+        });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error resolving request target for ${nacCode}/${partNumber}: ${errorMessage}`, "requestLog.log");
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
+        });
+    } finally {
+        connection.release();
+    }
+};
+
+export const getRequestEquipmentOptionsHandler = async (req: Request, res: Response): Promise<void> => {
+    const nacCode = String(req.query.nacCode || '').trim() || 'N/A';
+    const search = String(req.query.search || '').trim();
+    const connection = await pool.getConnection();
+    try {
+        await ensureAssetSpareSchema();
+        const result = await getRequestEquipmentOptions(connection, nacCode, search || undefined);
+        res.status(200).json(result);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error fetching request equipment options for ${nacCode}: ${errorMessage}`, "requestLog.log");
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
+        });
+    } finally {
+        connection.release();
+    }
+};
+
 export const getPendingRequests = async (req: Request, res: Response): Promise<void> => {
     try {
         setNoCacheHeaders(res);
-        const [rows] = await pool.query<PendingRequest[]>(
-            `SELECT id,nac_code,request_number, request_date, requested_by 
-             FROM request_details 
-             WHERE approval_status = 'PENDING'`
+        const [rows] = await pool.query<RowDataPacket[]>(
+            `SELECT rd.id, rd.nac_code, rd.request_number, rd.request_date,
+                    rd.requested_by, rd.requested_by_id, rd.requested_by_email
+             FROM request_details rd
+             WHERE rd.approval_status = 'PENDING'`
         );
 
-        const pendingRequests = rows.map(row => ({
-            requestId: row.id,
-            nacCode: row.nac_code,
-            requestNumber: row.request_number,
-            requestDate: row.request_date,
-            requestedBy: row.requested_by
-        }));
+        const pendingRequests = await Promise.all(
+            rows.map(async (row) => {
+                const requestedByDetails = await resolveRequestRequester(pool, {
+                    requestedById: row.requested_by_id,
+                    requestedByEmail: row.requested_by_email,
+                    requestedBy: row.requested_by,
+                });
+                return {
+                    requestId: row.id,
+                    nacCode: row.nac_code,
+                    requestNumber: row.request_number,
+                    requestDate: row.request_date,
+                    requestedBy: requestedByDetails.name,
+                    requestedByDetails,
+                };
+            })
+        );
         
         logEvents(`Successfully fetched ${pendingRequests.length} pending requests`, "requestLog.log");
         res.status(200).json(pendingRequests);
@@ -858,30 +928,43 @@ export const getRequestItems = async (req: Request, res: Response): Promise<void
         const { requestNumber } = req.params;
 
         const [rows] = await pool.query<RowDataPacket[]>(
-            `SELECT id, request_number, nac_code, item_name, part_number, equipment_number, 
-                    requested_quantity, image_path, specifications, remarks, unit,
-                    requested_by_id, requested_by_email, requested_by
-             FROM request_details 
-             WHERE request_number = ?`,
+            `SELECT rd.id, rd.request_number, rd.nac_code,
+                    ${REQUEST_ITEM_NAME_SQL} AS item_name,
+                    rd.part_number, rd.equipment_number,
+                    rd.requested_quantity, rd.image_path, rd.specifications, rd.remarks, rd.unit,
+                    rd.requested_by_id, rd.requested_by_email, rd.requested_by
+             FROM request_details rd
+             ${REQUEST_STOCK_JOIN}
+             WHERE rd.request_number = ?`,
             [requestNumber]
         );
 
-        const requestItems = rows.map(row => ({
-            id: row.id,
-            requestNumber: row.request_number,
-            nacCode: row.nac_code,
-            itemName: row.item_name,
-            partNumber: row.part_number,
-            equipmentNumber: row.equipment_number,
-            requestedQuantity: row.requested_quantity,
-            imageUrl: row.image_path,
-            specifications: row.specifications,
-            remarks: row.remarks,
-            unit: row.unit,
-            requestedById: row.requested_by_id ?? null,
-            requestedByEmail: row.requested_by_email ?? null,
-            requestedBy: row.requested_by ?? null
-        }));
+        const requestItems = await Promise.all(
+            rows.map(async (row) => {
+                const requestedByDetails = await resolveRequestRequester(pool, {
+                    requestedById: row.requested_by_id,
+                    requestedByEmail: row.requested_by_email,
+                    requestedBy: row.requested_by,
+                });
+                return {
+                    id: row.id,
+                    requestNumber: row.request_number,
+                    nacCode: row.nac_code,
+                    itemName: row.item_name,
+                    partNumber: row.part_number,
+                    equipmentNumber: row.equipment_number,
+                    requestedQuantity: row.requested_quantity,
+                    imageUrl: row.image_path,
+                    specifications: row.specifications,
+                    remarks: row.remarks,
+                    unit: row.unit,
+                    requestedById: row.requested_by_id ?? null,
+                    requestedByEmail: row.requested_by_email ?? null,
+                    requestedBy: requestedByDetails.name,
+                    requestedByDetails,
+                };
+            })
+        );
         
         logEvents(`Successfully fetched ${requestItems.length} items for request ${requestNumber}`, "requestLog.log");
         res.status(200).json(requestItems);
@@ -949,15 +1032,16 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
             if (!item.equipmentNumber?.trim()) {
                 continue;
             }
+            const prepared = await prepareRequestItemForSave(connection, item);
             const targetCheck = await validateRequestTarget(
                 connection,
-                item.nacCode,
+                prepared.nacCode,
                 item.equipmentNumber,
                 updateValidationCaches
             );
             if (!targetCheck.valid) {
                 updateCompatibilityErrors.push({
-                    nacCode: item.nacCode || 'N/A',
+                    nacCode: prepared.nacCode || 'N/A',
                     message: targetCheck.message || `Invalid equipment ${item.equipmentNumber}`,
                     originalIndex: i
                 });
@@ -974,8 +1058,9 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
         }
 
         for (const item of items) {
+            const prepared = await prepareRequestItemForSave(connection, item);
             if (item.id) {
-                logEvents(`Updating item ${item.id} with NAC code: ${item.nacCode}`, "requestLog.log");
+                logEvents(`Updating item ${item.id} with NAC code: ${prepared.nacCode}`, "requestLog.log");
 
                 
                 const [existingItemRows] = await connection.query<RowDataPacket[]>(
@@ -1036,11 +1121,11 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 const updateValues = [
                     newRequestNumber,
                     formatDateForDB(requestDate),
-                    item.nacCode,
-                    item.partNumber,
-                    item.itemName,
+                    prepared.nacCode,
+                    prepared.partNumber,
+                    prepared.itemName,
                     item.requestedQuantity,
-                    item.equipmentNumber,
+                    collapseEquipmentSelectionValue(item.equipmentNumber || ''),
                     item.specifications,
                     item.imageUrl,
                     remarks,
@@ -1061,7 +1146,7 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                     [...updateValues, item.id]
                 );
             } else {
-                logEvents(`Inserting new item with NAC code: ${item.nacCode}`, "requestLog.log");
+                logEvents(`Inserting new item with NAC code: ${prepared.nacCode}`, "requestLog.log");
 
                 let newItemRequestedBy = requestedBy || '';
                 let newItemRequestedById = item.requestedById ?? null;
@@ -1098,11 +1183,11 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 const insertValues = [
                     newRequestNumber,
                     formatDateForDB(requestDate),
-                    item.nacCode,
-                    item.partNumber,
-                    item.itemName,
+                    prepared.nacCode,
+                    prepared.partNumber,
+                    prepared.itemName,
                     item.requestedQuantity,
-                    item.equipmentNumber,
+                    collapseEquipmentSelectionValue(item.equipmentNumber || ''),
                     item.specifications,
                     item.imageUrl,
                     remarks,
@@ -1207,13 +1292,14 @@ export const approveRequest = async (req: Request, res: Response): Promise<void>
 
         await connection.commit();
         logEvents(`Successfully approved request ${requestNumber} by user: ${approvedBy}`, "requestLog.log");
-        
-        
-        await sendRequestApprovalEmail(requestNumber);
 
         res.status(200).json({ 
             message: 'Request approved successfully',
             requestNumber
+        });
+
+        setImmediate(() => {
+            void sendRequestApprovalEmail(requestNumber);
         });
     } catch (error) {
         await connection.rollback();
@@ -1457,6 +1543,144 @@ export const forceCloseRequest = async (req: Request, res: Response): Promise<vo
     }
 };
 
+export const forceCloseRequestItem = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+
+    try {
+        const { id } = req.params;
+        const { closedBy } = req.body as { closedBy: string };
+
+        await connection.beginTransaction();
+
+        const [itemRows] = await connection.query<RowDataPacket[]>(
+            `SELECT id, request_number, approval_status, requested_by, requested_quantity, item_name
+             FROM request_details
+             WHERE id = ?
+             FOR UPDATE`,
+            [id]
+        );
+
+        if (itemRows.length === 0) {
+            await connection.rollback();
+            res.status(404).json({
+                error: 'Not Found',
+                message: 'Request line item not found',
+            });
+            return;
+        }
+
+        const item = itemRows[0];
+        const requestNumber = item.request_number as string;
+        const approvalStatus = item.approval_status as string;
+
+        if (approvalStatus === 'CLOSED') {
+            await connection.rollback();
+            res.status(409).json({
+                error: 'Conflict',
+                message: 'This line item is already closed',
+            });
+            return;
+        }
+
+        if (approvalStatus === 'REJECTED') {
+            await connection.rollback();
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Cannot close a rejected line item',
+            });
+            return;
+        }
+
+        const [receiveTotals] = await connection.query<RowDataPacket[]>(
+            `SELECT COALESCE(SUM(received_quantity), 0) AS total_received_approved
+             FROM receive_details
+             WHERE request_fk = ?
+               AND approval_status = 'APPROVED'`,
+            [id]
+        );
+        const requestedQty = Number(item.requested_quantity || 0);
+        const approvedReceived = Number(receiveTotals[0]?.total_received_approved || 0);
+
+        if (requestedQty > 0 && approvedReceived >= requestedQty) {
+            await connection.rollback();
+            res.status(409).json({
+                error: 'Conflict',
+                message: 'This line item is already fully received',
+            });
+            return;
+        }
+
+        await connection.query(
+            `UPDATE request_details
+             SET approval_status = 'CLOSED',
+                 rejected_by = ?,
+                 rejection_reason = 'Force closed by administrator (line item)'
+             WHERE id = ?`,
+            [closedBy, id]
+        );
+
+        const requestedBy = item.requested_by as string | null;
+        if (requestedBy) {
+            const [users] = await connection.query<RowDataPacket[]>(
+                'SELECT id FROM users WHERE username = ?',
+                [requestedBy]
+            );
+            if (users.length > 0) {
+                const itemLabel = item.item_name ? String(item.item_name) : `line #${id}`;
+                await connection.query(
+                    `INSERT INTO notifications (user_id, reference_type, message, reference_id, is_read, created_at)
+                     VALUES (?, ?, ?, ?, 0, NOW())`,
+                    [
+                        users[0].id,
+                        'request_closed',
+                        `Line item "${itemLabel}" on request ${requestNumber} was force closed by an administrator.`,
+                        id,
+                    ]
+                );
+            }
+        }
+
+        const [remainingOpen] = await connection.query<RowDataPacket[]>(
+            `SELECT COUNT(*) AS open_count
+             FROM request_details
+             WHERE request_number = ?
+               AND approval_status NOT IN ('CLOSED', 'REJECTED')`,
+            [requestNumber]
+        );
+        const allLinesClosed = Number(remainingOpen[0]?.open_count || 0) === 0;
+
+        await connection.commit();
+        logEvents(
+            `Force closed request line ${id} (${requestNumber}) by user: ${closedBy}`,
+            'requestLog.log'
+        );
+
+        if (allLinesClosed) {
+            await sendRequestForceCloseEmail(requestNumber);
+        }
+
+        res.status(200).json({
+            message: 'Request line item force closed successfully',
+            requestNumber,
+            itemId: Number(id),
+            allLinesClosed,
+        });
+    } catch (error) {
+        await connection.rollback();
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(
+            `Error force closing request item ${req.params.id}: ${errorMessage} by user: ${req.body.closedBy}`,
+            'requestLog.log'
+        );
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error instanceof Error ? error.message : 'An error occurred while force closing the request line item',
+        });
+    } finally {
+        connection.release();
+    }
+};
+
 export const getRequestById = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     
@@ -1480,12 +1704,15 @@ export const getRequestById = async (req: Request, res: Response): Promise<void>
         const requestNumber = requestRows[0].request_number;
 
         const [items] = await connection.query<RequestWithItems[]>(
-            `SELECT id, request_number, request_date, part_number, item_name, unit,
-                    requested_quantity, current_balance, previous_rate, equipment_number,
-                    image_path, specifications, remarks, requested_by, requested_by_id, requested_by_email, approval_status, nac_code
-             FROM request_details
-             WHERE request_number = ?
-             ORDER BY id`,
+            `SELECT rd.id, rd.request_number, rd.request_date, rd.part_number,
+                    ${REQUEST_ITEM_NAME_SQL} AS item_name, rd.unit,
+                    rd.requested_quantity, rd.current_balance, rd.previous_rate, rd.equipment_number,
+                    rd.image_path, rd.specifications, rd.remarks, rd.requested_by, rd.requested_by_id,
+                    rd.requested_by_email, rd.approval_status, rd.nac_code
+             FROM request_details rd
+             ${REQUEST_STOCK_JOIN}
+             WHERE rd.request_number = ?
+             ORDER BY rd.id`,
             [requestNumber]
         );
 
@@ -1546,13 +1773,14 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                 rd.request_date,
                 rd.requested_by,
                 rd.part_number,
-                rd.item_name,
+                ${REQUEST_ITEM_NAME_SQL} AS item_name,
                 rd.equipment_number,
                 rd.requested_quantity,
                 rd.approval_status,
                 rd.nac_code,
                 rd.reference_doc
             FROM request_details rd
+            ${REQUEST_STOCK_JOIN}
             WHERE 1=1
         `;
         const params: (string | number)[] = [];
@@ -1602,8 +1830,9 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             
             
             const itemsQuery = `
-                SELECT rd.*
+                SELECT rd.*, ${REQUEST_ITEM_NAME_SQL} AS display_item_name
                 FROM request_details rd
+                ${REQUEST_STOCK_JOIN}
                 WHERE rd.request_number IN (${requestNumbers})
                 ORDER BY CAST(
                     CASE
@@ -1632,7 +1861,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                 acc[result.request_number].items.push({
                     id: result.id,
                     partNumber: result.part_number,
-                    itemName: result.item_name,
+                    itemName: (result as RowDataPacket).display_item_name || result.item_name,
                     equipmentNumber: result.equipment_number,
                     requestedQuantity: result.requested_quantity,
                     nacCode: result.nac_code
@@ -1657,7 +1886,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         if (universal) {
             query += ` AND (
                 rd.request_number LIKE ? OR
-                rd.item_name LIKE ? OR
+                ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
                 rd.part_number LIKE ? OR
                 rd.equipment_number LIKE ? OR
                 rd.nac_code LIKE ?
@@ -1690,13 +1919,14 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         let distinctQuery = `
             SELECT DISTINCT rd.request_number, rd.request_date, rd.requested_by, rd.approval_status, rd.reference_doc
             FROM request_details rd
+            ${REQUEST_STOCK_JOIN}
             WHERE 1=1
         `;
         
         if (universal) {
             distinctQuery += ` AND (
                 rd.request_number LIKE ? OR
-                rd.item_name LIKE ? OR
+                ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
                 rd.part_number LIKE ? OR
                 rd.equipment_number LIKE ? OR
                 rd.nac_code LIKE ?
@@ -1745,8 +1975,9 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         
         
         const itemsQuery = `
-            SELECT rd.*
+            SELECT rd.*, ${REQUEST_ITEM_NAME_SQL} AS display_item_name
             FROM request_details rd
+            ${REQUEST_STOCK_JOIN}
             WHERE rd.request_number IN (${requestNumbers})
             ORDER BY CAST(
                 CASE
@@ -1762,12 +1993,12 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         
         let totalCount = 0;
         try {
-            let countQuery = 'SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd WHERE 1=1';
+            let countQuery = `SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd ${REQUEST_STOCK_JOIN} WHERE 1=1`;
             const countParams: (string | number)[] = [];
             if (universal) {
                 countQuery += ` AND (
                     rd.request_number LIKE ? OR
-                    rd.item_name LIKE ? OR
+                    ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
                     rd.part_number LIKE ? OR
                     rd.equipment_number LIKE ? OR
                     rd.nac_code LIKE ?
@@ -1811,7 +2042,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             acc[result.request_number].items.push({
                 id: result.id,
                 partNumber: result.part_number,
-                itemName: result.item_name,
+                itemName: (result as RowDataPacket).display_item_name || result.item_name,
                 equipmentNumber: result.equipment_number,
                 requestedQuantity: result.requested_quantity,
                 nacCode: result.nac_code

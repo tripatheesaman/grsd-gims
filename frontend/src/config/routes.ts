@@ -1,5 +1,16 @@
 import { RouteConfig } from '@/types/routes';
+import {
+    FUEL_MENU_PERMISSIONS,
+    PRINT_PERMISSIONS,
+    REPORT_PERMISSIONS,
+    SETTINGS_PERMISSIONS,
+} from '@/config/permissionGroups';
 export const routes: RouteConfig[] = [
+    {
+        path: '/reset-password',
+        requiresAuth: false,
+        title: 'Reset Password',
+    },
     {
         path: '/login',
         requiresAuth: false,
@@ -24,6 +35,11 @@ export const routes: RouteConfig[] = [
         ],
     },
     {
+        path: '/communications',
+        requiresAuth: true,
+        title: 'Communications',
+    },
+    {
         path: '/asset-receive',
         requiresAuth: true,
         title: 'Assets Receive',
@@ -45,7 +61,7 @@ export const routes: RouteConfig[] = [
         path: '/receive',
         requiresAuth: true,
         title: 'Receive Items',
-        permissions: ['can_receive_items'],
+        permissions: ['can_receive_items', 'can_receive_items_from_purchase'],
     },
     {
         path: '/issue',
@@ -90,16 +106,64 @@ export const routes: RouteConfig[] = [
         permissions: ['can_access_predictive_analysis'],
     },
     {
+        path: '/settings/app',
+        requiresAuth: true,
+        title: 'App Settings',
+        permissions: ['can_access_app_settings', 'can_access_settings'],
+    },
+    {
+        path: '/settings/request',
+        requiresAuth: true,
+        title: 'Request Settings',
+        permissions: ['can_access_request_settings'],
+    },
+    {
+        path: '/settings/receive',
+        requiresAuth: true,
+        title: 'Receive Settings',
+        permissions: ['can_access_receive_settings'],
+    },
+    {
+        path: '/settings/issue',
+        requiresAuth: true,
+        title: 'Issue Settings',
+        permissions: ['can_access_issue_settings'],
+    },
+    {
+        path: '/settings/rrp',
+        requiresAuth: true,
+        title: 'RRP Settings',
+        permissions: ['can_access_rrp_settings'],
+    },
+    {
+        path: '/settings/fuel',
+        requiresAuth: true,
+        title: 'Fuel Settings',
+        permissions: ['can_access_fuel_settings'],
+    },
+    {
+        path: '/settings/authorities',
+        requiresAuth: true,
+        title: 'Authority Settings',
+        permissions: ['can_access_rrp_settings', 'can_access_request_settings'],
+    },
+    {
         path: '/settings',
         requiresAuth: true,
         title: 'Settings',
-        permissions: ['can_access_settings'],
+        permissions: [...SETTINGS_PERMISSIONS],
+    },
+    {
+        path: '/reports',
+        requiresAuth: true,
+        title: 'Reports',
+        permissions: [...REPORT_PERMISSIONS],
     },
     {
         path: '/print',
         requiresAuth: true,
         title: 'Print',
-        permissions: ['can_print'],
+        permissions: [...PRINT_PERMISSIONS],
     },
     {
         path: '/print/request',
@@ -198,34 +262,34 @@ export const routes: RouteConfig[] = [
         permissions: ['can_receive_petrol'],
     },
     {
-        path: '/reports/fuel',
-        requiresAuth: true,
-        title: 'Fuel Reports',
-        permissions: ['can_access_fuel_menu'],
-    },
-    {
         path: '/reports/fuel/diesel/weekly',
         requiresAuth: true,
         title: 'Weekly Diesel Report',
-        permissions: ['can_access_fuel_menu'],
+        permissions: ['can_generate_fuel_diesel_weekly_report', 'can_access_fuel_menu'],
     },
     {
         path: '/reports/fuel/petrol/weekly',
         requiresAuth: true,
         title: 'Weekly Petrol Report',
-        permissions: ['can_access_fuel_menu'],
+        permissions: ['can_generate_fuel_petrol_weekly_report', 'can_access_fuel_menu'],
     },
     {
         path: '/reports/fuel/petrol/consumption',
         requiresAuth: true,
         title: 'Petrol Consumption Report',
-        permissions: ['can_access_fuel_menu'],
+        permissions: ['can_generate_fuel_petrol_consumption_report', 'can_access_fuel_menu'],
     },
     {
         path: '/reports/fuel/oil/consumption',
         requiresAuth: true,
         title: 'Oil Consumption Report',
-        permissions: ['can_access_fuel_menu'],
+        permissions: ['can_generate_fuel_oil_consumption_report', 'can_access_fuel_menu'],
+    },
+    {
+        path: '/reports/fuel',
+        requiresAuth: true,
+        title: 'Fuel Reports',
+        permissions: [...FUEL_MENU_PERMISSIONS, 'can_generate_fuel_diesel_weekly_report', 'can_generate_fuel_petrol_weekly_report', 'can_generate_fuel_petrol_consumption_report', 'can_generate_fuel_oil_consumption_report'],
     },
     {
         path: '/reports/request-receive',
@@ -243,13 +307,13 @@ export const routes: RouteConfig[] = [
         path: '/reports/assets',
         requiresAuth: true,
         title: 'Assets Report',
-        permissions: ['can_access_report'],
+        permissions: ['can_access_assets_report', 'can_access_report'],
     },
     {
         path: '/reports/insurance',
         requiresAuth: true,
         title: 'Insurance Report',
-        permissions: ['can_access_report'],
+        permissions: ['can_access_insurance_report', 'can_access_report'],
     },
     {
         path: '/reports/current-stock',

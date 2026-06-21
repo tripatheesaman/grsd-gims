@@ -36,7 +36,13 @@ export default function SearchPage() {
 
     const handleViewDetails = (item: SearchResult | ReceiveSearchResult) => {
         if (canViewFullDetails) {
-            fetchItemDetails(item.id);
+            const partHint =
+                searchParams.partNumber.trim() ||
+                (searchParams.universal.trim() && !/^(GT|TW|GS)\s*\d/i.test(searchParams.universal.trim())
+                    ? searchParams.universal.trim()
+                    : '') ||
+                item.partNumber;
+            fetchItemDetails(item.id, { partNumber: partHint });
         }
     };
 

@@ -8,7 +8,7 @@ import { RequestCartItem } from '@/types/request';
 import { Trash2, Pencil } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PartNumberSelect } from './PartNumberSelect';
-import { EquipmentRangeSelect } from './EquipmentRangeSelect';
+import { RequestEquipmentSelect } from './RequestEquipmentSelect';
 import Image from 'next/image';
 import { useAuthContext } from '@/context/AuthContext';
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
@@ -124,8 +124,12 @@ export function RequestCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSub
                 </div>
 
                 <div>
-                  <Label htmlFor="editEquipmentNumber" className="text-sm font-medium text-[#003594]">Equipment Number</Label>
-                  <EquipmentRangeSelect equipmentList={editingItem?.equipmentNumber || ""} value={editFormData.equipmentNumber || ""} onChange={(value) => setEditFormData(prev => ({ ...prev, equipmentNumber: value }))}/>
+                  <Label htmlFor="editEquipmentNumber" className="text-sm font-medium text-[#003594]">Equipment / Section</Label>
+                  <RequestEquipmentSelect
+                    nacCode={editFormData.nacCode || 'N/A'}
+                    value={editFormData.equipmentNumber || ''}
+                    onChange={(value) => setEditFormData(prev => ({ ...prev, equipmentNumber: value }))}
+                  />
                 </div>
 
               <div>

@@ -228,6 +228,28 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
         }
     }
 
+    const baseNacCodeCol = await hasColumn('stock_details', 'base_nac_code');
+    if (!baseNacCodeCol) {
+        await pool.query(
+            `ALTER TABLE stock_details ADD COLUMN base_nac_code VARCHAR(64) NULL`
+        );
+    }
+    const baseNacIndex = await hasIndex('stock_details', 'idx_stock_details_base_nac');
+    if (!baseNacIndex) {
+        await pool.query(
+            `CREATE INDEX idx_stock_details_base_nac ON stock_details (base_nac_code)`
+        ).catch(() => undefined);
+    }
+    await pool.query(
+        `UPDATE stock_details
+         SET base_nac_code = CASE
+           WHEN nac_code REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
+             THEN LEFT(nac_code, 8)
+           ELSE nac_code
+         END
+         WHERE base_nac_code IS NULL OR base_nac_code = ''`
+    ).catch(() => undefined);
+
     const requestEqCol = await hasColumn('request_details', 'equipment_number');
     const requestDateCol = await hasColumn('request_details', 'request_date');
     if (requestEqCol && requestDateCol) {
@@ -259,6 +281,13 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
                 `CREATE INDEX idx_issue_details_issued_for_issue_date ON issue_details (issued_for(191), issue_date)`
             ).catch(() => undefined);
         }
+    }
+
+    if (!(await hasColumn('issue_details', 'extends_applicable_equipment'))) {
+        await pool.query(
+            `ALTER TABLE issue_details
+             ADD COLUMN extends_applicable_equipment TINYINT(1) NOT NULL DEFAULT 0`
+        ).catch(() => undefined);
     }
 
     await pool.query(
@@ -309,7 +338,14 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
         { name: 'can_receive_assets', readable: 'Receive Assets (Capital Equipment)', type: 'receive' },
         { name: 'can_approve_assets_receive', readable: 'Approve Assets Receive', type: 'receive' },
         { name: 'can_create_assets_rrp', readable: 'Create Assets RRP (Capital)', type: 'rrp' },
-        { name: 'can_access_asset_settings', readable: 'Access Asset Settings', type: 'assets' },
+        { name: 'can_access_asset_settings', readable: 'Access Asset Settings', type: 'settings' },
+        { name: 'can_access_app_settings', readable: 'Access App Settings', type: 'settings' },
+        { name: 'can_access_assets_report', readable: 'Access Assets Report', type: 'reports' },
+        { name: 'can_access_insurance_report', readable: 'Access Insurance Report', type: 'reports' },
+        { name: 'can_generate_fuel_diesel_weekly_report', readable: 'Fuel Report — Weekly Diesel', type: 'reports' },
+        { name: 'can_generate_fuel_petrol_weekly_report', readable: 'Fuel Report — Weekly Petrol', type: 'reports' },
+        { name: 'can_generate_fuel_petrol_consumption_report', readable: 'Fuel Report — Petrol Consumption', type: 'reports' },
+        { name: 'can_generate_fuel_oil_consumption_report', readable: 'Fuel Report — Oil Consumption', type: 'reports' },
         // Settings sub-page permissions
         { name: 'can_access_request_settings', readable: 'Access Request Settings', type: 'settings' },
         { name: 'can_access_receive_settings', readable: 'Access Receive Settings', type: 'settings' },

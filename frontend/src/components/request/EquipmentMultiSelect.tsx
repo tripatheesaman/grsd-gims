@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown, X } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { collapseEquipmentSelectionValue } from '@/utils/equipmentNumbers';
 interface EquipmentMultiSelectProps {
     equipmentList: string[] | string;
     value: string;
@@ -96,12 +97,12 @@ export function EquipmentMultiSelect({ equipmentList, value, onChange, error, }:
     const handleSelect = (currentValue: string) => {
         const newSelected = selectedValues.includes(currentValue)
             ? selectedValues.filter((v) => v !== currentValue)
-            : [...selectedValues, currentValue];
-        onChange(newSelected.join(', '));
+            : [...selectedValues, collapseEquipmentSelectionValue(currentValue)];
+        onChange(collapseEquipmentSelectionValue(newSelected.join(', ')));
         setInputValue('');
     };
     const handleRemove = (val: string) => {
-        onChange(selectedValues.filter((v) => v !== val).join(', '));
+        onChange(collapseEquipmentSelectionValue(selectedValues.filter((v) => v !== val).join(', ')));
     };
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
