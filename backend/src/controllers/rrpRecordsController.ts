@@ -5,6 +5,11 @@ import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 import { formatDate } from '../utils/dateUtils';
 import { releaseRrpReceives } from '../services/rrpReleaseService';
+import {
+    appendPartNumberFilter,
+    appendRecordsRrpUniversalFilter,
+} from '../services/searchSqlBuilder';
+import { rankByRelevance } from '../services/searchRelevanceService';
 export interface RRPRecord {
     id: number;
     rrp_number: string;
@@ -85,36 +90,29 @@ export const getAllRRPRecords = async (req: Request, res: Response): Promise<voi
         const offset = (Number(page) - 1) * Number(pageSize);
         const currentFY = await resolveCurrentFiscalYear(connection);
         const fyFilter = resolveFilterFiscalYear(fiscalYearQuery as string | undefined, currentFY);
-        let whereConditions = [];
-        let queryParams: any[] = [];
+        let whereClause = 'WHERE 1=1';
+        const queryParams: unknown[] = [];
         if (fyFilter) {
-            whereConditions.push('rd.current_fy = ?');
+            whereClause += ' AND rd.current_fy = ?';
             queryParams.push(fyFilter);
         }
         if (universal) {
-            whereConditions.push(`(rd.rrp_number LIKE ? OR red.item_name LIKE ? OR red.part_number LIKE ? OR rqd.request_number LIKE ?)`);
-            const searchParam = `%${universal}%`;
-            queryParams.push(searchParam, searchParam, searchParam, searchParam);
+            whereClause = appendRecordsRrpUniversalFilter(whereClause, String(universal), queryParams);
         }
         if (equipmentNumber) {
-            whereConditions.push(`(rqd.equipment_number LIKE ? OR a.name LIKE ?)`);
+            whereClause += ` AND (rqd.equipment_number LIKE ? OR a.name LIKE ?)`;
             queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
-            whereConditions.push(`red.part_number LIKE ?`);
-            queryParams.push(`%${partNumber}%`);
+            whereClause = appendPartNumberFilter(whereClause, 'red.part_number', String(partNumber), queryParams);
         }
         if (status && status !== 'all') {
-            whereConditions.push(`rd.approval_status = ?`);
+            whereClause += ` AND rd.approval_status = ?`;
             queryParams.push(status);
         }
         if (createdBy && createdBy !== 'all') {
-            whereConditions.push(`rd.created_by LIKE ?`);
+            whereClause += ` AND rd.created_by LIKE ?`;
             queryParams.push(`%${createdBy}%`);
-        }
-        let whereClause = '';
-        if (whereConditions.length > 0) {
-            whereClause = `WHERE ${whereConditions.join(' AND ')}`;
         }
         const countQuery = `
       SELECT COUNT(DISTINCT rd.rrp_number) as total 
@@ -178,8 +176,19 @@ export const getAllRRPRecords = async (req: Request, res: Response): Promise<voi
       LIMIT ${Number(pageSize)} OFFSET ${offset}
     `;
         const [rows] = await connection.execute<RowDataPacket[]>(dataQuery, queryParams);
+        let rankedRows = rows;
+        if (universal) {
+            rankedRows = rankByRelevance(rows, String(universal), (row) => [
+                row.rrp_number,
+                row.item_name,
+                row.part_number,
+                row.nac_code,
+                row.request_number,
+                row.equipment_number,
+            ]);
+        }
         const response: RRPRecordsResponse = {
-            data: rows as RRPRecord[],
+            data: rankedRows as RRPRecord[],
             totalCount,
             totalPages,
             currentPage: Number(page),

@@ -19,6 +19,18 @@ import { normalizePartNumber, stripSuffixFromNac, getNacCodeValidationError } fr
 import { processItemName } from '../utils/utils';
 import { PoolConnection } from 'mysql2/promise';
 import { resolveRequestRequester, resolveActorPerson } from '../services/personDetailsService';
+import { appendReceivableSearchFilters } from '../services/searchSqlBuilder';
+import { rankByRelevance } from '../services/searchRelevanceService';
+
+const RECEIVABLE_ELIGIBILITY_WHERE = `
+            WHERE rd.approval_status = 'APPROVED'
+            AND rd.is_received = 0
+            AND rd.requested_quantity > (
+                SELECT COALESCE(SUM(ri.received_quantity), 0)
+                FROM receive_details ri
+                WHERE ri.request_fk = rd.id
+                AND ri.approval_status IN ('PENDING','APPROVED')
+            )`;
 export interface SearchRequestResult extends RowDataPacket {
     id: number;
     request_number: string;
@@ -147,6 +159,12 @@ export const getPendingReceives = async (req: Request, res: Response): Promise<v
 export const searchReceivables = async (req: Request, res: Response): Promise<void> => {
     const { universal, equipmentNumber, partNumber, page = 1, pageSize = 20 } = req.query;
     try {
+        const searchFilters = {
+            universal: universal?.toString(),
+            equipmentNumber: equipmentNumber?.toString(),
+            partNumber: partNumber?.toString(),
+        };
+        const params: (string | number)[] = [];
         let query = `
             SELECT DISTINCT
                 rd.id,
@@ -176,34 +194,8 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
                 ) as remaining_quantity
             FROM request_details rd
             LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci
-            WHERE rd.approval_status = 'APPROVED'
-            AND rd.is_received = 0
-            AND rd.requested_quantity > (
-                SELECT COALESCE(SUM(ri.received_quantity), 0)
-                FROM receive_details ri
-                WHERE ri.request_fk = rd.id
-                AND ri.approval_status IN ('PENDING','APPROVED')
-            )
-        `;
-        const params: (string | number)[] = [];
-        if (universal && universal.toString().trim() !== '') {
-            query += ` AND (
-                rd.request_number LIKE ? OR
-                rd.item_name LIKE ? OR
-                rd.part_number LIKE ? OR
-                rd.equipment_number LIKE ? OR
-                rd.nac_code LIKE ?
-            )`;
-            params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-        }
-        if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-            query += ` AND rd.equipment_number LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
-        }
-        if (partNumber && partNumber.toString().trim() !== '') {
-            query += ` AND rd.part_number LIKE ?`;
-            params.push(`%${partNumber}%`);
-        }
+            ${RECEIVABLE_ELIGIBILITY_WHERE}`;
+        query = appendReceivableSearchFilters(query, searchFilters, params);
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
@@ -211,26 +203,9 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
         const [results] = await pool.execute<SearchRequestResult[]>(query, params);
         let totalCount = 0;
         try {
-            let countQuery = 'SELECT COUNT(DISTINCT rd.id) as total FROM request_details rd LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci WHERE rd.approval_status = "APPROVED" AND rd.is_received = 0 AND rd.requested_quantity > (SELECT COALESCE(SUM(ri.received_quantity), 0) FROM receive_details ri WHERE ri.request_fk = rd.id AND ri.approval_status IN (\'PENDING\',\'APPROVED\'))';
+            let countQuery = `SELECT COUNT(DISTINCT rd.id) as total FROM request_details rd LEFT JOIN stock_details sd ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd.nac_code COLLATE utf8mb4_unicode_ci ${RECEIVABLE_ELIGIBILITY_WHERE}`;
             const countParams: (string | number)[] = [];
-            if (universal && universal.toString().trim() !== '') {
-                countQuery += ` AND (
-                    rd.request_number LIKE ? OR
-                    rd.item_name LIKE ? OR
-                    rd.part_number LIKE ? OR
-                    rd.equipment_number LIKE ? OR
-                    rd.nac_code LIKE ?
-                )`;
-                countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-            }
-            if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery += ` AND rd.equipment_number LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
-            }
-            if (partNumber && partNumber.toString().trim() !== '') {
-                countQuery += ` AND rd.part_number LIKE ?`;
-                countParams.push(`%${partNumber}%`);
-            }
+            countQuery = appendReceivableSearchFilters(countQuery, searchFilters, countParams);
             const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, countParams);
             totalCount = (countResult as any)[0]?.total || 0;
         }
@@ -265,7 +240,19 @@ export const searchReceivables = async (req: Request, res: Response): Promise<vo
             });
             return acc;
         }, {} as Record<string, any>);
-        const response = Object.values(groupedResults);
+        const rankTerm = searchFilters.universal?.trim() || '';
+        let response = Object.values(groupedResults);
+        if (rankTerm) {
+            response = rankByRelevance(response, rankTerm, (group: any) => [
+                group.requestNumber,
+                ...group.items.flatMap((item: any) => [
+                    item.itemName,
+                    item.partNumber,
+                    item.equipmentNumber,
+                    item.nacCode,
+                ]),
+            ]);
+        }
         logEvents(`Successfully searched receivables with ${response.length} results`, "receiveLog.log");
         res.json({
             data: response,
