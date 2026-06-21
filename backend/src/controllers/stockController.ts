@@ -196,7 +196,16 @@ export const getFamilyVariantsHandler = async (req: Request, res: Response): Pro
 };
 
 export const createStockItem = async (req: Request, res: Response): Promise<void> => {
-    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location } = req.body;
+    const {
+        nacCode,
+        itemName,
+        partNumber,
+        equipmentNumber,
+        currentBalance,
+        openQuantity = 0,
+        openAmount = 0,
+        location,
+    } = req.body;
     const connection = await pool.getConnection();
     let started = false;
     try {
@@ -241,8 +250,19 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         applicable_equipments, 
         current_balance, 
         location, 
+        open_quantity,
         open_amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)`, [nacCode, baseNacCode, processItemName(itemName), partNumber.trim(), equipmentNumber, currentBalance, location]);
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+            nacCode,
+            baseNacCode,
+            processItemName(itemName),
+            partNumber.trim(),
+            equipmentNumber,
+            currentBalance,
+            location,
+            Number(openQuantity) || 0,
+            Number(openAmount) || 0,
+        ]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();
         res.status(201).json({
@@ -267,7 +287,16 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
 };
 export const updateStockItem = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
-    const { nacCode, itemName, partNumber, equipmentNumber, currentBalance, location } = req.body;
+    const {
+        nacCode,
+        itemName,
+        partNumber,
+        equipmentNumber,
+        currentBalance,
+        openQuantity = 0,
+        openAmount = 0,
+        location,
+    } = req.body;
     const connection = await pool.getConnection();
     let started = false;
     try {
@@ -321,8 +350,21 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         part_numbers = ?, 
         applicable_equipments = ?, 
         current_balance = ?, 
+        open_quantity = ?,
+        open_amount = ?,
         location = ?
-      WHERE id = ?`, [nacCode, baseNacCode, processItemName(itemName), partNumber.trim(), equipmentNumber, currentBalance, location, id]);
+      WHERE id = ?`, [
+            nacCode,
+            baseNacCode,
+            processItemName(itemName),
+            partNumber.trim(),
+            equipmentNumber,
+            currentBalance,
+            Number(openQuantity) || 0,
+            Number(openAmount) || 0,
+            location,
+            id,
+        ]);
         await syncFamilyLocation(connection, baseNacCode, location);
         await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [oldNacCode]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);

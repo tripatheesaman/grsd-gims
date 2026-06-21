@@ -19,7 +19,7 @@ import { resolveRequestVariantTarget } from '../services/inventoryVariantService
 import { getRequestEquipmentOptions } from '../services/requestEquipmentService';
 import { collapseEquipmentSelectionValue } from '../services/spareEquipmentGrouping';
 import { PoolConnection } from 'mysql2/promise';
-import { resolveRequestRequester } from '../services/personDetailsService';
+import { resolveActorPerson } from '../services/personDetailsService';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
@@ -895,11 +895,7 @@ export const getPendingRequests = async (req: Request, res: Response): Promise<v
 
         const pendingRequests = await Promise.all(
             rows.map(async (row) => {
-                const requestedByDetails = await resolveRequestRequester(pool, {
-                    requestedById: row.requested_by_id,
-                    requestedByEmail: row.requested_by_email,
-                    requestedBy: row.requested_by,
-                });
+                const requestedByDetails = await resolveActorPerson(pool, row.requested_by);
                 return {
                     requestId: row.id,
                     nacCode: row.nac_code,
@@ -941,11 +937,7 @@ export const getRequestItems = async (req: Request, res: Response): Promise<void
 
         const requestItems = await Promise.all(
             rows.map(async (row) => {
-                const requestedByDetails = await resolveRequestRequester(pool, {
-                    requestedById: row.requested_by_id,
-                    requestedByEmail: row.requested_by_email,
-                    requestedBy: row.requested_by,
-                });
+                const requestedByDetails = await resolveActorPerson(pool, row.requested_by);
                 return {
                     id: row.id,
                     requestNumber: row.request_number,

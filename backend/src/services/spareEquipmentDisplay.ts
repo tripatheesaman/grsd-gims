@@ -72,6 +72,19 @@ export const VARIANT_TRUE_BALANCE_SQL = `(
   - ${VARIANT_ISSUE_QTY_SQL}
 )`;
 
+/** Family open qty/amt from stock_details only (not inflated by spare_compatibility joins). */
+export const FAMILY_OPEN_QUANTITY_SQL = `(
+  SELECT COALESCE(SUM(sd_oq.open_quantity), 0)
+  FROM stock_details sd_oq
+  WHERE ${sqlFamilyKeyExpression('sd_oq')} = ${STOCK_FAMILY_KEY_SQL}
+)`;
+
+export const FAMILY_OPEN_AMOUNT_SQL = `(
+  SELECT COALESCE(SUM(sd_oq.open_amount), 0)
+  FROM stock_details sd_oq
+  WHERE ${sqlFamilyKeyExpression('sd_oq')} = ${STOCK_FAMILY_KEY_SQL}
+)`;
+
 /**
  * Base equipment number: digits before an optional T-type suffix.
  * 344, 344T, 344T14, and 344TXXX (any chars after T) all resolve to "344".
