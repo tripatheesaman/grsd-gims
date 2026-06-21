@@ -9,8 +9,6 @@ import {
     STOCK_FAMILY_KEY_SQL,
     VARIANT_VIRTUAL_BALANCE_SQL,
     VARIANT_TRUE_BALANCE_SQL,
-    FAMILY_OPEN_QUANTITY_SQL,
-    FAMILY_OPEN_AMOUNT_SQL,
     appendEquipmentFilter,
     appendUniversalAssetNameFilter,
     buildFamilyGroupedStockListSql,
@@ -553,8 +551,8 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         ${SPARE_EQUIPMENT_DISPLAY_SQL} as equipmentDisplay,
         MAX(sd.location) as location,
         MAX(sd.unit) as unit,
-        ${FAMILY_OPEN_QUANTITY_SQL} as openQuantity,
-        ${FAMILY_OPEN_AMOUNT_SQL} as openAmount,
+        0 as openQuantity,
+        0 as openAmount,
         COUNT(DISTINCT sd.id) as variantCount
       FROM ${tableName} sd
       ${SPARE_STOCK_JOIN}
@@ -658,17 +656,9 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
                     results = [];
                 }
             }
-            else if (useSpareCompatibility) {
-                try {
-                    logEvents('Attempting family-grouped fallback with filters', 'searchLog.log');
-                    const [fallbackResults] = await pool.execute<SearchResult[]>(
-                        buildFamilyGroupedStockListSql(limit, offset)
-                    );
-                    results = fallbackResults;
-                }
-                catch {
-                    results = [];
-                }
+            else if (useSpareCompatibility && hasFilters) {
+                logEvents('Filtered stock search failed; not using unfiltered fallback', 'searchLog.log');
+                results = [];
             }
             else if (universal && universal.toString().trim() !== '') {
                 try {
