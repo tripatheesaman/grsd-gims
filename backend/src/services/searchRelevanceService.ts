@@ -1,5 +1,83 @@
 import { parseNacCode, normalizePartNumber } from '../utils/nacCodeUtils';
 
+export type SearchIntent = 'nac' | 'text';
+
+/** Classify whether the user is likely searching a NAC code vs item/part text. */
+export function classifySearchTerm(term: string): SearchIntent {
+    const raw = String(term || '').trim();
+    if (!raw) {
+        return 'text';
+    }
+    if (parseNacCode(raw)) {
+        return 'nac';
+    }
+    const compact = normalizeCompact(raw);
+    if (/^(gt|tw|gs)\d{3,5}[a-z]?$/i.test(compact)) {
+        return 'nac';
+    }
+    if (/^(gt|tw|gs)\s*\d/i.test(raw)) {
+        return 'nac';
+    }
+    if (/^\d{3,5}$/.test(compact)) {
+        return 'nac';
+    }
+    if (/[a-z]{2,}/i.test(raw) && !/^\d/.test(raw)) {
+        return 'text';
+    }
+    if (/\d{3,5}/.test(raw) && !/[a-z]{3,}/i.test(raw.replace(/^(gt|tw|gs)\s*/i, ''))) {
+        return 'nac';
+    }
+    return 'text';
+}
+
+/** Extract the 5-digit (or partial) NAC number from a search term. */
+export function extractNacDigitFragment(term: string): string {
+    const parsed = parseNacCode(term);
+    if (parsed) {
+        return parsed.digits;
+    }
+    const digits = String(term || '').replace(/\D/g, '');
+    if (digits.length >= 3 && digits.length <= 5) {
+        return digits.padStart(5, '0');
+    }
+    return digits;
+}
+
+function addNacSqlPatterns(patterns: Set<string>, term: string, maxPatterns: number): void {
+    const raw = String(term || '').trim();
+    if (!raw) {
+        return;
+    }
+    patterns.add(`%${raw}%`);
+
+    const parsed = parseNacCode(raw);
+    if (parsed) {
+        patterns.add(`%${parsed.nacCode}%`);
+        patterns.add(`%${parsed.nacCode.replace(/\s+/g, '')}%`);
+        if (parsed.baseNacCode !== parsed.nacCode) {
+            patterns.add(`%${parsed.baseNacCode}%`);
+        }
+        return;
+    }
+
+    const digitFragment = extractNacDigitFragment(raw);
+    if (digitFragment.length >= 3) {
+        patterns.add(`%${digitFragment}%`);
+        for (const prefix of ['GT', 'TW', 'GS']) {
+            if (patterns.size >= maxPatterns) {
+                break;
+            }
+            patterns.add(`%${prefix} ${digitFragment}%`);
+            patterns.add(`%${prefix}${digitFragment}%`);
+        }
+    }
+
+    const compact = normalizeCompact(raw);
+    if (compact && patterns.size < maxPatterns) {
+        patterns.add(`%${compact}%`);
+    }
+}
+
 /** Lowercase, strip diacritics, collapse punctuation for comparison. */
 export function normalizeSearchText(input: string): string {
     return String(input || '')
@@ -77,6 +155,37 @@ export function generateTypoVariants(term: string, maxVariants = 8): string[] {
         }
     }
     return [...variants].slice(0, maxVariants);
+}
+
+/** Few widened patterns for SQL WHERE clauses. Typo ranking happens in rankByRelevance(). */
+export function buildSqlLikePatterns(
+    term: string,
+    maxPatterns = 4,
+    intent?: SearchIntent
+): string[] {
+    const patterns = new Set<string>();
+    const raw = String(term || '').trim();
+    if (!raw) {
+        return [];
+    }
+
+    const classified = intent ?? classifySearchTerm(term);
+    if (classified === 'nac') {
+        addNacSqlPatterns(patterns, term, maxPatterns);
+        return [...patterns].slice(0, maxPatterns);
+    }
+
+    patterns.add(`%${raw}%`);
+    const compact = normalizeCompact(raw);
+    if (compact && compact !== raw.toLowerCase()) {
+        patterns.add(`%${compact}%`);
+    }
+    const partNorm = normalizePartNumber(raw);
+    if (partNorm && partNorm !== compact) {
+        patterns.add(`%${partNorm}%`);
+    }
+
+    return [...patterns].slice(0, maxPatterns);
 }
 
 /** Build SQL LIKE patterns: exact, compact, NAC variants, token + typo wideners. */
@@ -213,6 +322,97 @@ export function scoreSearchHit(
     }
 
     return best;
+}
+
+/** Score how well a NAC code matches a search fragment (e.g. 04552 → GT 04552). */
+export function scoreNacMatch(query: string, nacCode: string | null | undefined): number {
+    const nac = String(nacCode || '').trim();
+    if (!nac) {
+        return 0;
+    }
+
+    const qParsed = parseNacCode(query);
+    const nParsed = parseNacCode(nac);
+    if (qParsed && nParsed) {
+        if (qParsed.nacCode === nParsed.nacCode) {
+            return 100;
+        }
+        if (qParsed.baseNacCode === nParsed.baseNacCode) {
+            return qParsed.isSubCode || nParsed.isSubCode ? 97 : 98;
+        }
+        if (qParsed.digits === nParsed.digits) {
+            return 96;
+        }
+    }
+
+    const qDigits = extractNacDigitFragment(query);
+    const nDigits = nParsed?.digits || nac.replace(/\D/g, '').slice(-5).padStart(5, '0');
+    if (qDigits.length >= 3 && nDigits) {
+        if (nDigits === qDigits) {
+            return 98;
+        }
+        if (nDigits.endsWith(qDigits) && qDigits.length >= 4) {
+            return 94;
+        }
+        if (nDigits.includes(qDigits)) {
+            return 88;
+        }
+    }
+
+    const qCompact = normalizeCompact(query);
+    const nCompact = normalizeCompact(nac);
+    if (qCompact.length >= 3 && nCompact.includes(qCompact)) {
+        return 85;
+    }
+
+    return 0;
+}
+
+/** Rank stock families — NAC matches first, then part/name for text queries. */
+export function rankStockSearchResults<T>(
+    items: T[],
+    query: string,
+    getFields: (item: T) => {
+        nacCode?: string | null;
+        itemName?: string | null;
+        partNumber?: string | null;
+        equipmentNumber?: string | null;
+        equipmentDisplay?: string | null;
+    }
+): T[] {
+    const trimmed = String(query || '').trim();
+    if (!trimmed || items.length <= 1) {
+        return items;
+    }
+
+    const intent = classifySearchTerm(trimmed);
+    const scored = items.map((item) => {
+        const fields = getFields(item);
+        const nacScore = scoreNacMatch(trimmed, fields.nacCode);
+        const textScore = scoreSearchHit(trimmed, [
+            fields.itemName,
+            fields.partNumber,
+            fields.equipmentNumber,
+            fields.equipmentDisplay,
+        ]);
+        const combined = intent === 'nac'
+            ? Math.max(nacScore, Math.round(textScore * 0.65))
+            : Math.max(textScore, Math.round(nacScore * 0.5));
+        return { item, score: combined, nacScore };
+    });
+
+    scored.sort((a, b) => {
+        if (b.score !== a.score) {
+            return b.score - a.score;
+        }
+        if (b.nacScore !== a.nacScore) {
+            return b.nacScore - a.nacScore;
+        }
+        return 0;
+    });
+
+    const withSignal = scored.filter((row) => row.score > 0);
+    return (withSignal.length ? withSignal : scored).map((row) => row.item);
 }
 
 export function rankByRelevance<T>(
