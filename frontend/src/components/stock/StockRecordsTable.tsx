@@ -185,14 +185,12 @@ export function StockRecordsTable({
                                 (sum, v) => sum + Number(v.trueBalance || 0),
                                 0
                             );
-                            const openQuantity = r.openQuantity ?? variants.reduce(
-                                (sum, v) => sum + Number(v.openQuantity || 0),
-                                0
-                            );
-                            const openAmount = r.openAmount ?? variants.reduce(
-                                (sum, v) => sum + Number(v.openAmount || 0),
-                                0
-                            );
+                            const openQuantity = variants.length > 0
+                                ? variants.reduce((sum, v) => sum + Number(v.openQuantity || 0), 0)
+                                : Number(r.openQuantity ?? 0);
+                            const openAmount = variants.length > 0
+                                ? variants.reduce((sum, v) => sum + Number(v.openAmount || 0), 0)
+                                : Number(r.openAmount ?? 0);
 
                             return (
                                 <Fragment key={r.id}>

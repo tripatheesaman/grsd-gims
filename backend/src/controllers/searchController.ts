@@ -9,6 +9,8 @@ import {
     STOCK_FAMILY_KEY_SQL,
     VARIANT_VIRTUAL_BALANCE_SQL,
     VARIANT_TRUE_BALANCE_SQL,
+    FAMILY_OPEN_QUANTITY_SQL,
+    FAMILY_OPEN_AMOUNT_SQL,
     appendEquipmentFilter,
     appendUniversalAssetNameFilter,
     buildFamilyGroupedStockListSql,
@@ -183,12 +185,8 @@ async function attachFamilyDetails(results: SearchResult[]): Promise<void> {
         }
         result.virtualBalance = variants.reduce((sum, v) => sum + Number(v.virtualBalance || 0), 0);
         result.trueBalance = variants.reduce((sum, v) => sum + Number(v.trueBalance || 0), 0);
-        if (result.openQuantity === undefined || result.openQuantity === null) {
-            result.openQuantity = variants.reduce((sum, v) => sum + Number(v.openQuantity || 0), 0);
-        }
-        if (result.openAmount === undefined || result.openAmount === null) {
-            result.openAmount = variants.reduce((sum, v) => sum + Number(v.openAmount || 0), 0);
-        }
+        result.openQuantity = variants.reduce((sum, v) => sum + Number(v.openQuantity || 0), 0);
+        result.openAmount = variants.reduce((sum, v) => sum + Number(v.openAmount || 0), 0);
         if (!result.variantCount) {
             result.variantCount = variants.length || 1;
         }
@@ -555,8 +553,8 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         ${SPARE_EQUIPMENT_DISPLAY_SQL} as equipmentDisplay,
         MAX(sd.location) as location,
         MAX(sd.unit) as unit,
-        COALESCE(SUM(sd.open_quantity), 0) as openQuantity,
-        COALESCE(SUM(sd.open_amount), 0) as openAmount,
+        ${FAMILY_OPEN_QUANTITY_SQL} as openQuantity,
+        ${FAMILY_OPEN_AMOUNT_SQL} as openAmount,
         COUNT(DISTINCT sd.id) as variantCount
       FROM ${tableName} sd
       ${SPARE_STOCK_JOIN}

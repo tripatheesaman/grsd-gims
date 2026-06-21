@@ -15,7 +15,7 @@ import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpRepo
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { appendFamilyEquipmentFilter } from '../services/spareEquipmentDisplay';
-import { sqlFamilyKeyExpression } from '../utils/nacCodeUtils';
+import { sqlFamilyKeyExpression, sqlFamilyKeyFromNacOnlyExpression, sqlTransactionMatchesFamilyKey } from '../utils/nacCodeUtils';
 import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
@@ -3143,7 +3143,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
-    const FAMILY_KEY_SD2 = sqlFamilyKeyExpression('sd2');
+    const FAMILY_KEY_RD = sqlFamilyKeyFromNacOnlyExpression('rd');
+    const FAMILY_KEY_ID = sqlFamilyKeyFromNacOnlyExpression('id');
     try {
         await ensureAssetSpareSchema();
         const defaultFromDate = '2025-07-17';
@@ -3200,33 +3201,29 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date < ?
                 ) as pre_date_receive_qty,
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date < ?
                 ) as pre_date_issue_qty,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date BETWEEN ? AND ?
                 ) as received_quantity,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3234,9 +3231,8 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 (
                     SELECT COALESCE(SUM(rrp.total_amount), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3244,16 +3240,14 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_quantity,
                 (
                     SELECT COALESCE(SUM(id.issue_cost), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_amount
@@ -3279,7 +3273,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
                 COALESCE(SUM(s.open_quantity), 0) as sum_open_quantity,
                 COALESCE(SUM(s.open_amount), 0) as sum_open_amount
              FROM stock_details s
-             ${whereClause}`, params);
+             ${whereClause}${countQueryExtra}`, params);
         const sumOpenQuantity = Number(openSumRows[0]?.sum_open_quantity || 0);
         const sumOpenAmount = Number(openSumRows[0]?.sum_open_amount || 0);
         const reportItems: StockReportItem[] = results.map((row: any) => {
@@ -3354,7 +3348,8 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
-    const FAMILY_KEY_SD2 = sqlFamilyKeyExpression('sd2');
+    const FAMILY_KEY_RD = sqlFamilyKeyFromNacOnlyExpression('rd');
+    const FAMILY_KEY_ID = sqlFamilyKeyFromNacOnlyExpression('id');
     try {
         await ensureAssetSpareSchema();
         const ExcelJS = require('exceljs');
@@ -3413,33 +3408,29 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date < ?
                 ) as pre_date_receive_qty,
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date < ?
                 ) as pre_date_issue_qty,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.receive_date BETWEEN ? AND ?
                 ) as received_quantity,
                 (
                     SELECT COALESCE(SUM(rd.received_quantity), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3447,9 +3438,8 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 (
                     SELECT COALESCE(SUM(rrp.total_amount), 0)
                     FROM receive_details rd
-                    INNER JOIN stock_details sd2 ON rd.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
                     JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
                     AND rd.approval_status = 'APPROVED'
                     AND rd.rrp_fk IS NOT NULL
                     AND rd.receive_date BETWEEN ? AND ?
@@ -3457,16 +3447,14 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
                 (
                     SELECT COALESCE(SUM(id.issue_quantity), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_quantity,
                 (
                     SELECT COALESCE(SUM(id.issue_cost), 0)
                     FROM issue_details id
-                    INNER JOIN stock_details sd2 ON id.nac_code COLLATE utf8mb4_unicode_ci = sd2.nac_code COLLATE utf8mb4_unicode_ci
-                    WHERE ${FAMILY_KEY_SD2} = ${FAMILY_KEY_S}
+                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
                     AND id.approval_status = 'APPROVED'
                     AND id.issue_date BETWEEN ? AND ?
                 ) as issue_amount
@@ -3640,6 +3628,9 @@ export const getStockHistory = async (req: Request, res: Response): Promise<void
         }
         const reportFromDate = String(fromDate);
         const reportToDate = String(toDate);
+        const familyNacCode = String(nacCode);
+        const receiveFamilyMatch = sqlTransactionMatchesFamilyKey('rd');
+        const issueFamilyMatch = sqlTransactionMatchesFamilyKey('id');
         const receiveQuery = `
             SELECT 
                 'RECEIVE' as transaction_type,
@@ -3661,7 +3652,7 @@ export const getStockHistory = async (req: Request, res: Response): Promise<void
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-            WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${receiveFamilyMatch}
             AND rd.receive_date BETWEEN ? AND ?
             ORDER BY rd.receive_date DESC, rd.id DESC
         `;
@@ -3681,12 +3672,12 @@ export const getStockHistory = async (req: Request, res: Response): Promise<void
                 id.part_number,
                 id.issued_for as equipment_number
             FROM issue_details id
-            WHERE id.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${issueFamilyMatch}
             AND id.issue_date BETWEEN ? AND ?
             ORDER BY id.issue_date DESC, id.id DESC
         `;
-        const [receives] = await connection.execute<RowDataPacket[]>(receiveQuery, [nacCode, reportFromDate, reportToDate]);
-        const [issues] = await connection.execute<RowDataPacket[]>(issueQuery, [nacCode, reportFromDate, reportToDate]);
+        const [receives] = await connection.execute<RowDataPacket[]>(receiveQuery, [familyNacCode, reportFromDate, reportToDate]);
+        const [issues] = await connection.execute<RowDataPacket[]>(issueQuery, [familyNacCode, reportFromDate, reportToDate]);
         const history: StockHistoryItem[] = [
             ...receives.map((row: any) => ({
                 transaction_type: 'RECEIVE' as const,
@@ -3755,10 +3746,14 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
         }
         const reportFromDate = String(fromDate);
         const reportToDate = String(toDate);
+        const familyNacCode = String(nacCode);
+        const receiveFamilyMatch = sqlTransactionMatchesFamilyKey('rd');
+        const issueFamilyMatch = sqlTransactionMatchesFamilyKey('id');
         const [stockItem] = await connection.execute<RowDataPacket[]>(`SELECT nac_code, item_name, part_numbers, applicable_equipments, location 
-             FROM stock_details 
-             WHERE nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci 
-             LIMIT 1`, [nacCode]);
+             FROM stock_details s
+             WHERE ${sqlFamilyKeyExpression('s')} COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+                OR s.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+             LIMIT 1`, [familyNacCode, familyNacCode]);
         const receiveQuery = `
             SELECT 
                 'RECEIVE' as transaction_type,
@@ -3780,7 +3775,7 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
             LEFT JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-            WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${receiveFamilyMatch}
             AND rd.receive_date BETWEEN ? AND ?
             ORDER BY rd.receive_date DESC, rd.id DESC
         `;
@@ -3800,12 +3795,12 @@ export const exportStockHistory = async (req: Request, res: Response): Promise<v
                 id.part_number,
                 id.issued_for as equipment_number
             FROM issue_details id
-            WHERE id.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${issueFamilyMatch}
             AND id.issue_date BETWEEN ? AND ?
             ORDER BY id.issue_date DESC, id.id DESC
         `;
-        const [receives] = await connection.execute<RowDataPacket[]>(receiveQuery, [nacCode, reportFromDate, reportToDate]);
-        const [issues] = await connection.execute<RowDataPacket[]>(issueQuery, [nacCode, reportFromDate, reportToDate]);
+        const [receives] = await connection.execute<RowDataPacket[]>(receiveQuery, [familyNacCode, reportFromDate, reportToDate]);
+        const [issues] = await connection.execute<RowDataPacket[]>(issueQuery, [familyNacCode, reportFromDate, reportToDate]);
         const history: StockHistoryItem[] = [
             ...receives.map((row: any) => ({
                 transaction_type: 'RECEIVE' as const,
@@ -3965,8 +3960,10 @@ export const getRRPDetailsForNAC = async (req: Request, res: Response): Promise<
         }
         const reportFromDate = fromDate ? String(fromDate) : null;
         const reportToDate = toDate ? String(toDate) : null;
+        const familyNacCode = String(nacCode);
+        const receiveFamilyMatch = sqlTransactionMatchesFamilyKey('rd');
         let dateFilter = '';
-        const params: any[] = [String(nacCode)];
+        const params: any[] = [familyNacCode];
         if (reportFromDate && reportToDate) {
             dateFilter = 'AND rd.receive_date BETWEEN ? AND ?';
             params.push(reportFromDate, reportToDate);
@@ -4003,7 +4000,7 @@ export const getRRPDetailsForNAC = async (req: Request, res: Response): Promise<
             FROM rrp_details rrp
             JOIN receive_details rd ON rrp.receive_fk = rd.id
             LEFT JOIN request_details req ON rd.request_fk = req.id
-            WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${receiveFamilyMatch}
             AND rd.rrp_fk IS NOT NULL
             ${dateFilter}
             ORDER BY rrp.date DESC, rrp.id DESC
@@ -4097,8 +4094,10 @@ export const getIssueDetailsForNAC = async (req: Request, res: Response): Promis
         }
         const reportFromDate = fromDate ? String(fromDate) : null;
         const reportToDate = toDate ? String(toDate) : null;
+        const familyNacCode = String(nacCode);
+        const issueFamilyMatch = sqlTransactionMatchesFamilyKey('id');
         let dateFilter = '';
-        const params: any[] = [String(nacCode)];
+        const params: any[] = [familyNacCode];
         if (reportFromDate && reportToDate) {
             dateFilter = 'AND id.issue_date BETWEEN ? AND ?';
             params.push(reportFromDate, reportToDate);
@@ -4116,7 +4115,7 @@ export const getIssueDetailsForNAC = async (req: Request, res: Response): Promis
                 id.part_number,
                 id.remaining_balance
             FROM issue_details id
-            WHERE id.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${issueFamilyMatch}
             ${dateFilter}
             ORDER BY id.issue_date DESC, id.id DESC
         `;
@@ -4322,8 +4321,10 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
         }
         const reportFromDate = fromDate ? String(fromDate) : null;
         const reportToDate = toDate ? String(toDate) : null;
+        const familyNacCode = String(nacCode);
+        const receiveFamilyMatch = sqlTransactionMatchesFamilyKey('rd');
         let dateFilter = '';
-        const params: any[] = [String(nacCode)];
+        const params: any[] = [familyNacCode];
         if (reportFromDate && reportToDate) {
             dateFilter = 'AND rd.receive_date BETWEEN ? AND ?';
             params.push(reportFromDate, reportToDate);
@@ -4349,7 +4350,7 @@ export const getReceiveDetailsForNAC = async (req: Request, res: Response): Prom
                 rd.item_name
             FROM receive_details rd
             LEFT JOIN request_details req ON rd.request_fk = req.id
-            WHERE rd.nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+            WHERE ${receiveFamilyMatch}
             ${dateFilter}
             ORDER BY rd.receive_date DESC, rd.id DESC
         `;

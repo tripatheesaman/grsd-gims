@@ -142,3 +142,32 @@ export function sqlFamilyKeyExpression(alias = 'sd'): string {
         END
     )`;
 }
+
+/** Family key from nac_code only (tables without base_nac_code, e.g. receive_details). */
+export function sqlFamilyKeyFromNacOnlyExpression(alias = 't'): string {
+    const nac = `${alias}.nac_code`;
+    return `CASE WHEN ${nac} REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
+             THEN LEFT(${nac}, 8)
+             ELSE ${nac}
+        END`;
+}
+
+/** Match a transaction row to an inventory family key passed as a query parameter. */
+export function sqlTransactionMatchesFamilyKey(alias: string, familyKeyParam = '?'): string {
+    const familyFromNac = sqlFamilyKeyFromNacOnlyExpression(alias);
+    return `(
+        ${alias}.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+        OR ${familyFromNac} COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+        OR EXISTS (
+            SELECT 1
+            FROM stock_details sd_match
+            WHERE sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${alias}.nac_code COLLATE utf8mb4_unicode_ci
+              AND (
+                  sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+                  OR sd_match.base_nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+                  OR ${sqlFamilyKeyExpression('sd_match')} COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+              )
+            LIMIT 1
+        )
+    )`;
+}
