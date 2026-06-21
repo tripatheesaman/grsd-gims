@@ -1,6 +1,8 @@
 import pool from '../config/db';
+import { buildStockSearchKey } from './searchRelevanceService';
 
 let ensured = false;
+let ensurePromise: Promise<void> | null = null;
 
 const hasColumn = async (tableName: string, columnName: string) => {
     const [rows] = await pool.query<any[]>(
@@ -25,6 +27,33 @@ const hasIndex = async (tableName: string, indexName: string) => {
     );
     return rows.length > 0;
 };
+
+const hasTableCollation = async (tableName: string, collation: string) => {
+    const [rows] = await pool.query<any[]>(
+        `SELECT TABLE_COLLATION
+         FROM INFORMATION_SCHEMA.TABLES
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?`,
+        [tableName]
+    );
+    return rows.length > 0 && String(rows[0].TABLE_COLLATION) === collation;
+};
+
+async function backfillSearchKeysBatch(): Promise<void> {
+    if (!(await hasColumn('stock_details', 'search_key'))) {
+        return;
+    }
+    const [rows] = await pool.query<any[]>(
+        `SELECT id, nac_code, part_numbers, item_name, applicable_equipments
+         FROM stock_details
+         WHERE search_key IS NULL OR search_key = ''
+         LIMIT 500`
+    );
+    for (const row of rows as Array<Record<string, string>>) {
+        const key = buildStockSearchKey(row);
+        await pool.query(`UPDATE stock_details SET search_key = ? WHERE id = ?`, [key, row.id]);
+    }
+}
 
 /** Runs on every call — adds capital RRP columns if the DB was created before they existed. */
 export const ensureAssetImageColumns = async (): Promise<void> => {
@@ -76,8 +105,20 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
     if (ensured) {
         return;
     }
-    ensured = true;
+    if (!ensurePromise) {
+        ensurePromise = runEnsureAssetSpareSchemaWork()
+            .then(() => {
+                ensured = true;
+            })
+            .catch((error) => {
+                ensurePromise = null;
+                throw error;
+            });
+    }
+    await ensurePromise;
+};
 
+async function runEnsureAssetSpareSchemaWork(): Promise<void> {
     const equipmentCodeCol = await hasColumn('assets', 'equipment_code');
     if (!equipmentCodeCol) {
         await pool.query(
@@ -206,10 +247,11 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
             KEY idx_spare_compatibility_equipment (equipment_code)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     );
-    // Fix collation if table was created with the wrong one
-    await pool.query(
-        `ALTER TABLE spare_compatibility CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-    ).catch(() => undefined);
+    if (!(await hasTableCollation('spare_compatibility', 'utf8mb4_unicode_ci'))) {
+        await pool.query(
+            `ALTER TABLE spare_compatibility CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+        ).catch(() => undefined);
+    }
 
     const spareCompatibilityReverseIndex = await hasIndex('spare_compatibility', 'idx_spare_compatibility_equipment_nac');
     if (!spareCompatibilityReverseIndex) {
@@ -282,6 +324,35 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
             ).catch(() => undefined);
         }
     }
+
+    const searchIndexes: Array<{ table: string; name: string; ddl: string }> = [
+        { table: 'stock_details', name: 'idx_stock_details_search_key', ddl: 'CREATE INDEX idx_stock_details_search_key ON stock_details (search_key(191))' },
+        { table: 'stock_details', name: 'idx_stock_details_part_numbers', ddl: 'CREATE INDEX idx_stock_details_part_numbers ON stock_details (part_numbers(191))' },
+        { table: 'request_details', name: 'idx_request_details_request_number', ddl: 'CREATE INDEX idx_request_details_request_number ON request_details (request_number)' },
+        { table: 'request_details', name: 'idx_request_details_part_number', ddl: 'CREATE INDEX idx_request_details_part_number ON request_details (part_number)' },
+        { table: 'request_details', name: 'idx_request_details_nac_code', ddl: 'CREATE INDEX idx_request_details_nac_code ON request_details (nac_code)' },
+        { table: 'request_details', name: 'idx_request_details_status_received', ddl: 'CREATE INDEX idx_request_details_status_received ON request_details (approval_status, is_received)' },
+        { table: 'receive_details', name: 'idx_receive_details_request_fk_status', ddl: 'CREATE INDEX idx_receive_details_request_fk_status ON receive_details (request_fk, approval_status)' },
+        { table: 'receive_details', name: 'idx_receive_details_part_number', ddl: 'CREATE INDEX idx_receive_details_part_number ON receive_details (part_number)' },
+        { table: 'receive_details', name: 'idx_receive_details_nac_code', ddl: 'CREATE INDEX idx_receive_details_nac_code ON receive_details (nac_code)' },
+        { table: 'rrp_details', name: 'idx_rrp_details_rrp_number', ddl: 'CREATE INDEX idx_rrp_details_rrp_number ON rrp_details (rrp_number)' },
+        { table: 'issue_details', name: 'idx_issue_details_part_number', ddl: 'CREATE INDEX idx_issue_details_part_number ON issue_details (part_number)' },
+        { table: 'issue_details', name: 'idx_issue_details_nac_code', ddl: 'CREATE INDEX idx_issue_details_nac_code ON issue_details (nac_code)' },
+        { table: 'assets', name: 'idx_assets_equipment_code', ddl: 'CREATE INDEX idx_assets_equipment_code ON assets (equipment_code)' },
+        { table: 'assets', name: 'idx_assets_name', ddl: 'CREATE INDEX idx_assets_name ON assets (name(191))' },
+    ];
+    for (const idx of searchIndexes) {
+        if (!(await hasIndex(idx.table, idx.name))) {
+            await pool.query(idx.ddl).catch(() => undefined);
+        }
+    }
+
+    if (stockNacCodeCol && !(await hasColumn('stock_details', 'search_key'))) {
+        await pool.query(
+            `ALTER TABLE stock_details ADD COLUMN search_key VARCHAR(512) NULL`
+        ).catch(() => undefined);
+    }
+    void backfillSearchKeysBatch().catch(() => undefined);
 
     if (!(await hasColumn('issue_details', 'extends_applicable_equipment'))) {
         await pool.query(
@@ -403,17 +474,19 @@ export const ensureAssetSpareSchema = async (): Promise<void> => {
         }
     }
 
-    const connection = await pool.getConnection();
-    try {
-        const { backfillAssetDepreciationBaselines } = await import('./assetDepreciationService');
-        await backfillAssetDepreciationBaselines(connection);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Asset depreciation backfill skipped: ${message}`);
-    }
-    finally {
-        connection.release();
-    }
+    void (async () => {
+        const connection = await pool.getConnection();
+        try {
+            const { backfillAssetDepreciationBaselines } = await import('./assetDepreciationService');
+            await backfillAssetDepreciationBaselines(connection);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`Asset depreciation backfill skipped: ${message}`);
+        }
+        finally {
+            connection.release();
+        }
+    })();
 };
 

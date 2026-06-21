@@ -135,9 +135,6 @@ export function useRequestSearch() {
             fetchAllRequests(1);
         }
     }, [debouncedUniversal, debouncedEquipmentNumber, debouncedPartNumber, searchParams.referenceStatus, fetchSearchResults, fetchAllRequests]);
-    useEffect(() => {
-        fetchAllRequests(1);
-    }, [fetchAllRequests]);
     const handleSearch = useCallback((type: keyof RequestSearchParams) => (value: string) => {
         setSearchParams(prev => ({ ...prev, [type]: value }));
     }, []);

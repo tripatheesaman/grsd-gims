@@ -20,6 +20,12 @@ import { getRequestEquipmentOptions } from '../services/requestEquipmentService'
 import { collapseEquipmentSelectionValue } from '../services/spareEquipmentGrouping';
 import { PoolConnection } from 'mysql2/promise';
 import { resolveActorPerson } from '../services/personDetailsService';
+import { rankByRelevance } from '../services/searchRelevanceService';
+import {
+    appendPartNumberFilter,
+    buildRequestSearchWhereClause,
+    sqlInListPlaceholders,
+} from '../services/searchSqlBuilder';
 
 interface StockDetail extends RowDataPacket {
     current_balance: number;
@@ -1818,14 +1824,14 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             }
 
             
-            const requestNumbers = distinctResults.map((r: any) => `'${r.request_number}'`).join(',');
-            
-            
+            const requestNumbers = distinctResults.map((r: RowDataPacket) => String(r.request_number));
+            const { clause: inClause, params: inParams } = sqlInListPlaceholders(requestNumbers);
+
             const itemsQuery = `
                 SELECT rd.*, ${REQUEST_ITEM_NAME_SQL} AS display_item_name
                 FROM request_details rd
                 ${REQUEST_STOCK_JOIN}
-                WHERE rd.request_number IN (${requestNumbers})
+                WHERE rd.request_number IN (${inClause})
                 ORDER BY CAST(
                     CASE
                         WHEN rd.request_number LIKE '%T%'
@@ -1835,7 +1841,7 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
                 ) DESC, rd.request_date DESC, rd.request_number DESC
             `;
             
-            const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery);
+            const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery, inParams);
             
             const groupedResults = results.reduce((acc, result) => {
                 if (!acc[result.request_number]) {
@@ -1875,79 +1881,36 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             return;
         }
 
-        if (universal) {
-            query += ` AND (
-                rd.request_number LIKE ? OR
-                ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
-                rd.part_number LIKE ? OR
-                rd.equipment_number LIKE ? OR
-                rd.nac_code LIKE ?
-            )`;
-            params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-        }
+        const filterParams: (string | number)[] = [];
+        const whereClause = buildRequestSearchWhereClause(
+            {
+                universal: universal ? String(universal) : undefined,
+                equipmentNumber: equipmentNumber ? String(equipmentNumber) : undefined,
+                partNumber: partNumber ? String(partNumber) : undefined,
+                referenceStatus: referenceStatus ? String(referenceStatus) : undefined,
+            },
+            REQUEST_ITEM_NAME_SQL,
+            filterParams
+        );
 
-        if (equipmentNumber) {
-            query += ` AND rd.equipment_number LIKE ?`;
-            params.push(`%${equipmentNumber}%`);
-        }
-
-        if (partNumber) {
-            query += ` AND rd.part_number LIKE ?`;
-            params.push(`%${partNumber}%`);
-        }
-
-        if (referenceStatus === 'uploaded') {
-            query += ` AND rd.reference_doc IS NOT NULL`;
-        } else if (referenceStatus === 'not_uploaded') {
-            query += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
-        }
-
-        
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
 
-        
-        let distinctQuery = `
+        const distinctQuery = `
             SELECT DISTINCT rd.request_number, rd.request_date, rd.requested_by, rd.approval_status, rd.reference_doc
             FROM request_details rd
             ${REQUEST_STOCK_JOIN}
-            WHERE 1=1
-        `;
-        
-        if (universal) {
-            distinctQuery += ` AND (
-                rd.request_number LIKE ? OR
-                ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
-                rd.part_number LIKE ? OR
-                rd.equipment_number LIKE ? OR
-                rd.nac_code LIKE ?
-            )`;
-        }
-
-        if (equipmentNumber) {
-            distinctQuery += ` AND rd.equipment_number LIKE ?`;
-        }
-
-        if (partNumber) {
-            distinctQuery += ` AND rd.part_number LIKE ?`;
-        }
-
-        if (referenceStatus === 'uploaded') {
-            distinctQuery += ` AND rd.reference_doc IS NOT NULL`;
-        } else if (referenceStatus === 'not_uploaded') {
-            distinctQuery += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
-        }
-
-        distinctQuery += ` ORDER BY CAST(
+            ${whereClause}
+            ORDER BY CAST(
                 CASE
                     WHEN rd.request_number LIKE '%T%'
                         THEN SUBSTRING_INDEX(SUBSTRING_INDEX(rd.request_number, 'RN', -1), 'T', 1)
                     ELSE SUBSTRING_INDEX(rd.request_number, 'RN', -1)
                 END AS UNSIGNED
             ) DESC, rd.request_date DESC, rd.request_number DESC LIMIT ${limit} OFFSET ${offset}`;
-        
-        const [distinctResults] = await pool.execute<RowDataPacket[]>(distinctQuery, params);
+
+        const [distinctResults] = await pool.execute<RowDataPacket[]>(distinctQuery, filterParams);
         
         if (distinctResults.length === 0) {
             res.json({
@@ -1963,14 +1926,14 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         }
 
         
-        const requestNumbers = distinctResults.map((r: any) => `'${r.request_number}'`).join(',');
-        
-        
+        const requestNumbers = distinctResults.map((r: RowDataPacket) => String(r.request_number));
+        const { clause: inClause, params: inParams } = sqlInListPlaceholders(requestNumbers);
+
         const itemsQuery = `
             SELECT rd.*, ${REQUEST_ITEM_NAME_SQL} AS display_item_name
             FROM request_details rd
             ${REQUEST_STOCK_JOIN}
-            WHERE rd.request_number IN (${requestNumbers})
+            WHERE rd.request_number IN (${inClause})
             ORDER BY CAST(
                 CASE
                     WHEN rd.request_number LIKE '%T%'
@@ -1980,42 +1943,26 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
             ) DESC, rd.request_date DESC, rd.request_number DESC
         `;
         
-        const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery);
-        
-        
+        const [results] = await pool.execute<SearchRequestResult[]>(itemsQuery, inParams);
+
         let totalCount = 0;
         try {
-            let countQuery = `SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd ${REQUEST_STOCK_JOIN} WHERE 1=1`;
             const countParams: (string | number)[] = [];
-            if (universal) {
-                countQuery += ` AND (
-                    rd.request_number LIKE ? OR
-                    ${REQUEST_ITEM_NAME_SQL} LIKE ? OR
-                    rd.part_number LIKE ? OR
-                    rd.equipment_number LIKE ? OR
-                    rd.nac_code LIKE ?
-                )`;
-                countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-            }
-            if (equipmentNumber) {
-                countQuery += ` AND rd.equipment_number LIKE ?`;
-                countParams.push(`%${equipmentNumber}%`);
-            }
-            if (partNumber) {
-                countQuery += ` AND rd.part_number LIKE ?`;
-                countParams.push(`%${partNumber}%`);
-            }
-            if (referenceStatus === 'uploaded') {
-                countQuery += ` AND rd.reference_doc IS NOT NULL`;
-            } else if (referenceStatus === 'not_uploaded') {
-                countQuery += ` AND (rd.reference_doc IS NULL OR rd.reference_doc = '')`;
-            }
-
+            const countWhere = buildRequestSearchWhereClause(
+                {
+                    universal: universal ? String(universal) : undefined,
+                    equipmentNumber: equipmentNumber ? String(equipmentNumber) : undefined,
+                    partNumber: partNumber ? String(partNumber) : undefined,
+                    referenceStatus: referenceStatus ? String(referenceStatus) : undefined,
+                },
+                REQUEST_ITEM_NAME_SQL,
+                countParams
+            );
+            const countQuery = `SELECT COUNT(DISTINCT rd.request_number) as total FROM request_details rd ${REQUEST_STOCK_JOIN} ${countWhere}`;
             const [countResult] = await pool.execute<RowDataPacket[]>(countQuery, countParams);
-            totalCount = (countResult as any)[0]?.total || 0;
+            totalCount = (countResult as RowDataPacket[])[0]?.total || 0;
         } catch (countError) {
             logEvents(`Count query failed: ${JSON.stringify(countError)}`, "requestLog.log");
-            
         }
         
         const groupedResults = results.reduce((acc, result) => {
@@ -2043,9 +1990,21 @@ export const searchRequests = async (req: Request, res: Response): Promise<void>
         }, {} as Record<string, any>);
 
         const response = Object.values(groupedResults);
-        logEvents(`Successfully searched requests with ${response.length} results`, "requestLog.log");
+        const rankTerm = String(universal || partNumber || equipmentNumber || '').trim();
+        const ranked = rankTerm
+            ? rankByRelevance(response, rankTerm, (group: any) => [
+                group.requestNumber,
+                ...(group.items || []).flatMap((item: any) => [
+                    item.itemName,
+                    item.partNumber,
+                    item.nacCode,
+                    item.equipmentNumber,
+                ]),
+            ])
+            : response;
+        logEvents(`Successfully searched requests with ${ranked.length} results`, "requestLog.log");
         res.json({
-            data: response,
+            data: ranked,
             pagination: {
                 currentPage,
                 pageSize: limit,

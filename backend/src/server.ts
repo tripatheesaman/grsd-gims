@@ -41,6 +41,7 @@ import assetSettingsRoutes from './routes/assetSettingsRoutes';
 import locationPhrasesRoutes from './routes/locationPhrasesRoutes';
 import communicationsRoutes from './routes/communicationsRoutes';
 import { startRequestReminderWorker } from './services/requestReminderService';
+import { ensureAssetSpareSchema } from './services/assetSpareSchema';
 const app = express();
 const PORT = process.env.PORT || 3500;
 const truthyValues = new Set(["1", "true", "yes", "on"]);
@@ -168,6 +169,10 @@ const startServer = async () => {
     try {
         await pool.query("SELECT 1");
         logEvents("Connected to MySQL", "serverLog.log");
+        await ensureAssetSpareSchema().catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            logEvents(`Schema migration warning: ${message}`, "serverLog.log");
+        });
         app.listen(PORT, () => {
             logEvents(`Server running on port ${PORT}`, "serverLog.log");
             startRequestReminderWorker();

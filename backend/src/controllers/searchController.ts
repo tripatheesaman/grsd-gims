@@ -10,12 +10,15 @@ import {
     VARIANT_VIRTUAL_BALANCE_SQL,
     VARIANT_TRUE_BALANCE_SQL,
     appendEquipmentFilter,
-    appendUniversalAssetNameFilter,
-    buildFamilyGroupedStockListSql,
-    buildFamilyGroupedStockCountSql,
+    equipmentNameExistsSql,
     equipmentDisplaySubquery,
 } from '../services/spareEquipmentDisplay';
 import { enrichEquipmentDisplays } from '../services/spareEquipmentEnrichment';
+import { rankByRelevance } from '../services/searchRelevanceService';
+import {
+    appendPartNumberFilter,
+    appendStockUniversalFilter,
+} from '../services/searchSqlBuilder';
 import { normalizePartNumber, stripSuffixFromNac } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 
@@ -496,52 +499,13 @@ export const getItemDetails = async (req: Request, res: Response): Promise<void>
 };
 export const searchStockDetails = async (req: Request, res: Response): Promise<void> => {
     const { universal, equipmentNumber, partNumber, page = 1, pageSize = 20 } = req.query;
-    logEvents(`searchStockDetails called with query params: ${JSON.stringify(req.query)}`, "searchLog.log");
-    logEvents(`Request headers: ${JSON.stringify(req.headers)}`, "searchLog.log");
     try {
-        logEvents(`Starting stock search with parameters: universal=${universal}, equipmentNumber=${equipmentNumber}, partNumber=${partNumber}, page=${page}, pageSize=${pageSize}`, "searchLog.log");
-        let tableName = 'stock_details';
-        let tableCheck: any;
-        try {
-            const [tables] = await pool.execute('SHOW TABLES');
-            logEvents(`Available tables: ${JSON.stringify(tables)}`, "searchLog.log");
-            try {
-                [tableCheck] = await pool.execute('DESCRIBE stock_details');
-                logEvents(`Table structure check for stock_details: ${JSON.stringify(tableCheck)}`, "searchLog.log");
-            }
-            catch (tableError) {
-                logEvents(`stock_details table not found, trying alternatives`, "searchLog.log");
-                const alternativeNames = ['stock_detail', 'stock', 'inventory', 'items'];
-                for (const altName of alternativeNames) {
-                    try {
-                        [tableCheck] = await pool.execute(`DESCRIBE ${altName}`);
-                        tableName = altName;
-                        logEvents(`Found alternative table: ${altName}`, "searchLog.log");
-                        break;
-                    }
-                    catch (altError) {
-                    }
-                }
-                if (!tableCheck) {
-                    throw new Error(`No suitable table found. Available tables: ${JSON.stringify(tables)}`);
-                }
-            }
-        }
-        catch (tableError) {
-            logEvents(`Table structure check failed: ${JSON.stringify(tableError)}`, "searchLog.log");
-            res.status(500).json({
-                error: 'Database Error',
-                message: 'stock_details table not found or inaccessible',
-                details: tableError instanceof Error ? tableError.message : 'Unknown table error'
-            });
-            return;
-        }
-        const useSpareCompatibility = tableName === 'stock_details';
+        const tableName = 'stock_details';
+        const useSpareCompatibility = true;
         const partSearchHint = resolvePartSearchHint(partNumber, universal);
         const hasPartHint = Boolean(partSearchHint);
         const partHintParams = hasPartHint ? [partHintLike(partSearchHint), partHintLike(partSearchHint)] : [];
-        let query = useSpareCompatibility
-            ? `
+        let query = `
       SELECT 
         ${familyIdSelectSql(hasPartHint)} as id,
         ${STOCK_FAMILY_KEY_SQL} as nacCode,
@@ -557,56 +521,22 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
       FROM ${tableName} sd
       ${SPARE_STOCK_JOIN}
       WHERE 1=1
-    `
-            : `
-      SELECT 
-        id as id,
-        nac_code as nacCode,
-        item_name as itemName,
-        part_numbers as partNumber,
-        applicable_equipments as equipmentNumber,
-        applicable_equipments as equipmentDisplay,
-        location as location,
-        unit as unit,
-        COALESCE(open_quantity, 0) as openQuantity,
-        COALESCE(open_amount, 0) as openAmount
-      FROM ${tableName}
-      WHERE 1=1
     `;
-        logEvents(`Base query: ${query}`, "searchLog.log");
-        const params: any[] = [];
+        const params: unknown[] = [];
         let hasSearchConditions = false;
-        if (universal && universal.toString().trim() !== '') {
+        const universalTerm = universal?.toString().trim() || '';
+        if (universalTerm) {
             hasSearchConditions = true;
-            if (useSpareCompatibility) {
-                query += ` AND (
-        sd.nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-        ${STOCK_FAMILY_KEY_SQL} COLLATE utf8mb4_unicode_ci LIKE ? OR
-        sd.item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-        sd.part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-        sd.applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?`;
-                params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-                query = appendUniversalAssetNameFilter('sd', useSpareCompatibility, query, params);
-                params.push(`%${universal}%`);
-            }
-            else {
-                query += ` AND (
-        nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-        item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-        part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-        applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?`;
-                params.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-            }
-            query += `)`;
-            logEvents(`Using LIKE search for universal parameter: ${universal}`, "searchLog.log");
-            logEvents(`Search term: "${universal}", length: ${universal.length}, trimmed: "${universal.toString().trim()}"`, "searchLog.log");
-            try {
-                const [directSearch] = await pool.execute(`SELECT COUNT(*) as count FROM ${tableName} WHERE nac_code LIKE ?`, [`%${universal}%`]);
-                logEvents(`Direct search count for "${universal}": ${JSON.stringify(directSearch)}`, "searchLog.log");
-            }
-            catch (directError) {
-                logEvents(`Direct search failed: ${JSON.stringify(directError)}`, "searchLog.log");
-            }
+            query = appendStockUniversalFilter(
+                query,
+                STOCK_FAMILY_KEY_SQL,
+                universalTerm,
+                params,
+                {
+                    includeSearchKey: true,
+                    assetNameExistsSql: equipmentNameExistsSql('sd', '?'),
+                }
+            );
         }
         if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
             hasSearchConditions = true;
@@ -614,163 +544,68 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         }
         if (partNumber && partNumber.toString().trim() !== '') {
             hasSearchConditions = true;
-            query += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
-            params.push(`%${partNumber}%`);
+            query = appendPartNumberFilter(query, 'sd.part_numbers', String(partNumber), params);
         }
         const currentPage = parseInt(page.toString()) || 1;
         const limit = parseInt(pageSize.toString()) || 20;
         const offset = (currentPage - 1) * limit;
-        if (useSpareCompatibility) {
-            query += ` GROUP BY ${STOCK_FAMILY_KEY_SQL}`;
-        }
-        query += ` ORDER BY ${useSpareCompatibility ? 'MIN(sd.id)' : 'id'} ASC LIMIT ${limit} OFFSET ${offset}`;
+        query += ` GROUP BY ${STOCK_FAMILY_KEY_SQL}`;
+        query += ` ORDER BY MIN(sd.id) ASC LIMIT ${limit} OFFSET ${offset}`;
         const executeParams =
-            useSpareCompatibility && hasPartHint ? [...partHintParams, ...params] : params;
-        logEvents(`Executing RRP search query: ${query} with params: ${JSON.stringify(executeParams)}`, "searchLog.log");
+            hasPartHint ? [...partHintParams, ...params] : params;
+
         let results: SearchResult[] = [];
-        try {
-            const [queryResults] = await pool.execute<SearchResult[]>(query, executeParams);
-            results = queryResults;
-            logEvents(`Search query returned ${results.length} results`, "searchLog.log");
-            if (results.length > 0) {
-                logEvents(`First result: ${JSON.stringify(results[0])}`, "searchLog.log");
-            }
-        }
-        catch (queryError) {
-            logEvents(`Main search query failed: ${JSON.stringify(queryError)}`, "searchLog.log");
-            const hasFilters =
-                Boolean(universal && universal.toString().trim()) ||
-                Boolean(equipmentNumber && equipmentNumber.toString().trim()) ||
-                Boolean(partNumber && partNumber.toString().trim());
-            if (!hasFilters && useSpareCompatibility) {
-                try {
-                    logEvents('Attempting family-grouped stock list fallback (no filters)', 'searchLog.log');
-                    const [fallbackResults] = await pool.execute<SearchResult[]>(
-                        buildFamilyGroupedStockListSql(limit, offset)
-                    );
-                    results = fallbackResults;
-                    logEvents(`Family grouped fallback returned ${results.length} results`, 'searchLog.log');
-                }
-                catch (fallbackError) {
-                    logEvents(`Family grouped fallback failed: ${JSON.stringify(fallbackError)}`, 'searchLog.log');
-                    results = [];
-                }
-            }
-            else if (useSpareCompatibility && hasFilters) {
-                logEvents('Filtered stock search failed; not using unfiltered fallback', 'searchLog.log');
-                results = [];
-            }
-            else if (universal && universal.toString().trim() !== '') {
-                try {
-                    logEvents(`Attempting fallback search for: ${universal}`, "searchLog.log");
-                    const [fallbackResults] = await pool.execute<SearchResult[]>(`SELECT 
-              id,
-              nac_code as nacCode,
-              item_name as itemName,
-              part_numbers as partNumber,
-              applicable_equipments as equipmentNumber,
-              applicable_equipments as equipmentDisplay,
-              current_balance as currentBalance,
-              COALESCE(open_quantity, 0) as openQuantity,
-              COALESCE(open_amount, 0) as openAmount,
-              unit,
-              location
-            FROM ${tableName}
-            WHERE nac_code LIKE ? OR item_name LIKE ?
-            ORDER BY id ASC LIMIT ${limit} OFFSET ${offset}`, [`%${universal}%`, `%${universal}%`]);
-                    results = fallbackResults;
-                    logEvents(`Fallback search returned ${results.length} results`, "searchLog.log");
-                }
-                catch (fallbackError) {
-                    logEvents(`Fallback search also failed: ${JSON.stringify(fallbackError)}`, "searchLog.log");
-                    results = [];
-                }
-            }
-        }
+        const [queryResults] = await pool.execute<SearchResult[]>(query, executeParams);
+        results = queryResults;
+
         let totalCount = 0;
-        try {
-            let countQuery = useSpareCompatibility
-                ? `SELECT COUNT(DISTINCT ${STOCK_FAMILY_KEY_SQL}) as total FROM ${tableName} sd WHERE 1=1`
-                : `SELECT COUNT(*) as total FROM ${tableName} WHERE 1=1`;
-            const countParams: any[] = [];
-            if (universal && universal.toString().trim() !== '') {
-                if (useSpareCompatibility) {
-                    countQuery += ` AND (
-          sd.nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-          ${STOCK_FAMILY_KEY_SQL} COLLATE utf8mb4_unicode_ci LIKE ? OR
-          sd.item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-          sd.part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-          sd.applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?`;
-                    countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-                    countQuery = appendUniversalAssetNameFilter('sd', useSpareCompatibility, countQuery, countParams);
-                    countParams.push(`%${universal}%`);
+        let countQuery = `SELECT COUNT(DISTINCT ${STOCK_FAMILY_KEY_SQL}) as total FROM ${tableName} sd WHERE 1=1`;
+        const countParams: unknown[] = [];
+        if (universalTerm) {
+            countQuery = appendStockUniversalFilter(
+                countQuery,
+                STOCK_FAMILY_KEY_SQL,
+                universalTerm,
+                countParams,
+                {
+                    includeSearchKey: true,
+                    assetNameExistsSql: equipmentNameExistsSql('sd', '?'),
                 }
-                else {
-                    countQuery += ` AND (
-          nac_code COLLATE utf8mb4_unicode_ci LIKE ? OR
-          item_name COLLATE utf8mb4_unicode_ci LIKE ? OR
-          part_numbers COLLATE utf8mb4_unicode_ci LIKE ? OR
-          applicable_equipments COLLATE utf8mb4_unicode_ci LIKE ?`;
-                    countParams.push(`%${universal}%`, `%${universal}%`, `%${universal}%`, `%${universal}%`);
-                }
-                countQuery += `)`;
-            }
-            if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
-                countQuery = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), countQuery, countParams);
-            }
-            if (partNumber && partNumber.toString().trim() !== '') {
-                countQuery += ` AND ${useSpareCompatibility ? 'sd.part_numbers' : 'part_numbers'} LIKE ?`;
-                countParams.push(`%${partNumber}%`);
-            }
-            const [countResult] = await pool.execute<CountResult[]>(countQuery, countParams);
-            totalCount = (countResult as any)[0]?.total || 0;
+            );
         }
-        catch (countError) {
-            logEvents(`Count query failed: ${JSON.stringify(countError)}`, "searchLog.log");
-            const hasFilters =
-                Boolean(universal && universal.toString().trim()) ||
-                Boolean(equipmentNumber && equipmentNumber.toString().trim()) ||
-                Boolean(partNumber && partNumber.toString().trim());
-            if (!hasFilters && useSpareCompatibility) {
-                try {
-                    const [simpleCount] = await pool.execute<CountResult[]>(buildFamilyGroupedStockCountSql());
-                    totalCount = (simpleCount as CountResult[])[0]?.total || 0;
-                }
-                catch {
-                    totalCount = results.length;
-                }
-            }
+        if (equipmentNumber && equipmentNumber.toString().trim() !== '') {
+            countQuery = appendEquipmentFilter('sd', useSpareCompatibility, String(equipmentNumber), countQuery, countParams);
         }
+        if (partNumber && partNumber.toString().trim() !== '') {
+            countQuery = appendPartNumberFilter(countQuery, 'sd.part_numbers', String(partNumber), countParams);
+        }
+        const [countResult] = await pool.execute<CountResult[]>(countQuery, countParams);
+        totalCount = (countResult as CountResult[])[0]?.total || 0;
+
         if (results.length > 0) {
             await enrichEquipmentDisplays(results);
-            if (useSpareCompatibility) {
-                await attachFamilyDetails(results);
+            await attachFamilyDetails(results);
+            if (hasSearchConditions) {
+                const rankQuery = universalTerm || String(partNumber || '').trim() || String(equipmentNumber || '').trim();
+                results = rankByRelevance(results, rankQuery, (row) => [
+                    row.nacCode,
+                    row.itemName,
+                    row.partNumber,
+                    row.equipmentNumber,
+                    row.equipmentDisplay,
+                ]);
             }
         }
-        if (results.length === 0) {
-            logEvents(`No results found${hasSearchConditions ? ' for search parameters' : ''}`, "searchLog.log");
-            res.json({
-                data: [],
-                pagination: {
-                    currentPage,
-                    pageSize: limit,
-                    totalCount,
-                    totalPages: Math.ceil(totalCount / limit)
-                }
-            });
-        }
-        else {
-            logEvents(`Successfully found ${results.length} results${hasSearchConditions ? ' for search parameters' : ''}`, "searchLog.log");
-            res.json({
-                data: results,
-                pagination: {
-                    currentPage,
-                    pageSize: limit,
-                    totalCount,
-                    totalPages: Math.ceil(totalCount / limit)
-                }
-            });
-        }
+
+        res.json({
+            data: results,
+            pagination: {
+                currentPage,
+                pageSize: limit,
+                totalCount,
+                totalPages: Math.ceil(totalCount / limit),
+            },
+        });
     }
     catch (error) {
         const searchError = error as SearchError;

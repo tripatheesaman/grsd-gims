@@ -11,7 +11,7 @@ export const REQUEST_STOCK_JOIN = `
 `;
 
 export const REQUEST_ITEM_NAME_SQL = `
-    COALESCE(NULLIF(TRIM(SUBSTRING_INDEX(sd.item_name, ',', 1)), ''), rd.item_name)
+    COALESCE(NULLIF(TRIM(SUBSTRING_INDEX(sd.item_name, ',', 1)), ''), rd.item_name) COLLATE utf8mb4_unicode_ci
 `;
 
 export type RequestItemInput = {

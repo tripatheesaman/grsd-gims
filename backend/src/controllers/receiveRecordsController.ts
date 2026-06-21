@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
+import {
+    appendPartNumberFilter,
+    appendRecordsReceiveUniversalFilter,
+} from '../services/searchSqlBuilder';
+import { rankByRelevance } from '../services/searchRelevanceService';
 const updateStockBalance = async (connection: any, nacCode: string, quantityChange: number, operation: 'add' | 'subtract'): Promise<boolean> => {
     try {
         const [currentStock] = await connection.execute('SELECT current_balance FROM stock_details WHERE nac_code = ?', [nacCode]) as [
@@ -94,39 +99,28 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
     try {
         const { universal, equipmentNumber, partNumber, status, receivedBy, page = 1, pageSize = 20 } = req.query;
         const offset = (Number(page) - 1) * Number(pageSize);
-        let whereConditions = [];
-        let queryParams: any[] = [];
+        let whereClause = 'WHERE 1=1';
+        const queryParams: unknown[] = [];
         if (universal) {
-            whereConditions.push(`(rd.nac_code LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR req.request_number LIKE ? OR rd.tender_reference_number LIKE ?)`);
-            const searchParam = `%${universal}%`;
-            queryParams.push(searchParam, searchParam, searchParam, searchParam, searchParam);
+            whereClause = appendRecordsReceiveUniversalFilter(whereClause, String(universal), queryParams);
         }
         if (equipmentNumber) {
-            whereConditions.push(`(COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) LIKE ? OR a.name LIKE ?)`);
+            whereClause += ` AND (COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) LIKE ? OR a.name LIKE ?)`;
             queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
-            whereConditions.push(`rd.part_number LIKE ?`);
-            queryParams.push(`%${partNumber}%`);
+            whereClause = appendPartNumberFilter(whereClause, 'rd.part_number', String(partNumber), queryParams);
         }
         if (status && status !== 'all') {
-            whereConditions.push(`rd.approval_status = ?`);
+            whereClause += ` AND rd.approval_status = ?`;
             queryParams.push(status);
         }
         if (receivedBy && receivedBy !== 'all') {
-            whereConditions.push(`rd.received_by LIKE ?`);
+            whereClause += ` AND rd.received_by LIKE ?`;
             queryParams.push(`%${receivedBy}%`);
         }
-        let whereClause = '';
-        if (whereConditions.length > 0) {
-            let whereClauseWithValues = whereConditions.join(' AND ');
-            queryParams.forEach((param, index) => {
-                whereClauseWithValues = whereClauseWithValues.replace('?', `'${param}'`);
-            });
-            whereClause = `WHERE ${whereClauseWithValues}`;
-        }
         const countQuery = `SELECT COUNT(*) as total FROM receive_details rd LEFT JOIN request_details req ON rd.request_fk = req.id LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = COALESCE(NULLIF(rd.equipment_number, ''), COALESCE(req.equipment_number, '')) COLLATE utf8mb4_unicode_ci ${whereClause}`;
-        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery);
+        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, queryParams);
         const totalCount = countResult[0].total;
         const totalPages = Math.ceil(totalCount / Number(pageSize));
         const dataQuery = `
@@ -156,7 +150,7 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
       ORDER BY rd.created_at DESC
       LIMIT ${Number(pageSize)} OFFSET ${offset}
     `;
-        const [rows] = await connection.execute<RowDataPacket[]>(dataQuery);
+        const [rows] = await connection.execute<RowDataPacket[]>(dataQuery, queryParams);
         const data = (rows as RowDataPacket[]).map(row => ({
             ...row,
             prediction_summary: row.predicted_days !== null && row.predicted_days !== undefined ? {
@@ -168,8 +162,19 @@ export const getAllReceiveRecords = async (req: Request, res: Response): Promise
                 calculated_at: row.predicted_calculated_at ?? null
             } : null
         }));
+        let rankedData = data;
+        if (universal) {
+            rankedData = rankByRelevance(data, String(universal), (row: RowDataPacket) => [
+                String(row.nac_code ?? ''),
+                String(row.item_name ?? ''),
+                String(row.part_number ?? ''),
+                String(row.request_number ?? ''),
+                String(row.tender_reference_number ?? ''),
+                String(row.equipment_number ?? ''),
+            ]);
+        }
         const response: ReceiveRecordsResponse = {
-            data: data as ReceiveRecord[],
+            data: rankedData as ReceiveRecord[],
             totalCount,
             totalPages,
             currentPage: Number(page),

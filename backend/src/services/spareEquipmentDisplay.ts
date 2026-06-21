@@ -168,7 +168,7 @@ export const expandEquipmentTokens = (input: string): string[] => {
     return out;
 };
 
-const equipmentNameExistsSql = (stockAlias: string, param: string) => `
+export const equipmentNameExistsSql = (stockAlias: string, param: string) => `
   EXISTS (
     SELECT 1
     FROM spare_compatibility sc_n
@@ -176,26 +176,6 @@ const equipmentNameExistsSql = (stockAlias: string, param: string) => `
       ON a_n.equipment_code = sc_n.equipment_code COLLATE ${COLLATE}
     WHERE sc_n.nac_code = ${stockAlias}.nac_code COLLATE ${COLLATE}
       AND a_n.name LIKE ${param}
-  )`;
-
-/** Match spares by linked asset name even when spare_compatibility is not populated.
- *  Uses a simpler LIKE on applicable_equipments with the equipment_code from assets. */
-const applicableAssetNameExistsSql = (stockAlias: string, param: string) => `
-  EXISTS (
-    SELECT 1
-    FROM assets a_eq
-    WHERE a_eq.name COLLATE ${COLLATE} LIKE ${param}
-      AND ${stockAlias}.applicable_equipments COLLATE ${COLLATE} LIKE CONCAT('%', a_eq.equipment_code, '%')
-  )`;
-
-const familyApplicableAssetNameExistsSql = (familyKeyOuter: string, param: string) => `
-  EXISTS (
-    SELECT 1
-    FROM stock_details sd_f
-    INNER JOIN assets a_f
-      ON a_f.name COLLATE ${COLLATE} LIKE ${param}
-    WHERE ${sqlFamilyKeyExpression('sd_f')} = ${familyKeyOuter}
-      AND sd_f.applicable_equipments COLLATE ${COLLATE} LIKE CONCAT('%', a_f.equipment_code, '%')
   )`;
 
 /** Family-level equipment match: any variant in the family matches the filter. */
@@ -213,31 +193,38 @@ export const appendFamilyEquipmentFilter = (
     const tokens = expandEquipmentTokens(term);
     const numericTokens = tokens.filter((t) => /^\d+$/.test(t));
 
-    let clause = ` AND EXISTS (
-    SELECT 1
-    FROM stock_details sd_f
-    LEFT JOIN spare_compatibility sc_f
-      ON sc_f.nac_code = sd_f.nac_code COLLATE ${COLLATE}
-    LEFT JOIN assets a_f
-      ON a_f.equipment_code = sc_f.equipment_code COLLATE ${COLLATE}
-    WHERE ${sqlFamilyKeyExpression('sd_f')} = ${familyKeyOuterSql}
-      AND (
-        sd_f.applicable_equipments LIKE ?
-        OR a_f.name LIKE ?
-        OR sc_f.equipment_code LIKE ?
-        OR ${familyApplicableAssetNameExistsSql(familyKeyOuterSql, '?')}`;
+    let familyMatchSql = `
+    SELECT DISTINCT ${sqlFamilyKeyExpression('sd_ef')}
+    FROM stock_details sd_ef
+    LEFT JOIN spare_compatibility sc_ef
+      ON sc_ef.nac_code = sd_ef.nac_code COLLATE ${COLLATE}
+    LEFT JOIN assets a_ef
+      ON a_ef.equipment_code = sc_ef.equipment_code COLLATE ${COLLATE}
+    WHERE (
+      sd_ef.applicable_equipments LIKE ?
+      OR a_ef.name LIKE ?
+      OR sc_ef.equipment_code LIKE ?`;
 
-    params.push(likeTerm, likeTerm, likeTerm, likeTerm);
+    params.push(likeTerm, likeTerm, likeTerm);
 
     if (numericTokens.length > 0) {
-        clause += ` OR sc_f.equipment_code IN (?)`;
-        params.push(numericTokens);
+        familyMatchSql += ` OR sc_ef.equipment_code IN (${numericTokens.map(() => '?').join(', ')})`;
+        params.push(...numericTokens);
     }
 
-    clause += `
+    familyMatchSql += `
+      OR EXISTS (
+        SELECT 1
+        FROM assets a_name
+        WHERE a_name.name COLLATE ${COLLATE} LIKE ?
+          AND sd_ef.applicable_equipments COLLATE ${COLLATE}
+            LIKE CONCAT('%', a_name.equipment_code, '%')
       )
-  )`;
-    return query + clause;
+    )`;
+
+    params.push(likeTerm);
+
+    return `${query} AND ${familyKeyOuterSql} IN (${familyMatchSql})`;
 };
 
 /** Append AND clause for equipment filter (code, range, or asset name). */

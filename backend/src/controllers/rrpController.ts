@@ -12,6 +12,14 @@ import {
     isLocalOrForeignRrpNumber,
     sqlRrpBaseMatchClause,
 } from '../utils/rrpNumberUtils';
+import {
+    appendFuzzyOrClause,
+    appendPartNumberFilter,
+    appendRecordsReceiveUniversalFilter,
+    buildRrpCapitalSearchFilter,
+    buildRrpSpareSearchFilter,
+} from '../services/searchSqlBuilder';
+import { rankByRelevance } from '../services/searchRelevanceService';
 interface ConfigRow extends RowDataPacket {
     config_name: string;
     config_value: string;
@@ -1090,40 +1098,39 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
         let capitalFilter = '';
 
         if (universal && universal !== '') {
-            const u = `%${universal}%`;
-            spareFilter +=
-                ' AND (rrp.rrp_number LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR COALESCE(rqd.equipment_number, \'\') LIKE ? OR rd.tender_reference_number LIKE ?)';
-            spareParams.push(u, u, u, u, u);
-            capitalFilter +=
-                ` AND (
-                    rrp.rrp_number LIKE ?
-                    OR ar.model_name LIKE ?
-                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_name')) LIKE ?
-                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) LIKE ?
-                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) LIKE ?
-                    OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number')) LIKE ?
-                )`;
-            capitalParams.push(u, u, u, u, u, u);
+            spareFilter += buildRrpSpareSearchFilter(String(universal), spareParams);
+            capitalFilter += buildRrpCapitalSearchFilter(String(universal), capitalParams);
         }
         if (equipmentNumber && equipmentNumber !== '') {
-            const e = `%${equipmentNumber}%`;
-            spareFilter += " AND COALESCE(rqd.equipment_number, '') LIKE ?";
-            spareParams.push(e);
-            capitalFilter += ` AND (
-                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code')) LIKE ?
-                OR ar.model_name LIKE ?
-            )`;
-            capitalParams.push(e, e);
+            const eqTerm = String(equipmentNumber);
+            spareFilter += appendFuzzyOrClause(
+                'WHERE 1=1',
+                [{ expr: "COALESCE(rqd.equipment_number, '')" }],
+                eqTerm,
+                spareParams
+            ).replace(/^WHERE 1=1/, '');
+            capitalFilter += appendFuzzyOrClause(
+                'WHERE 1=1',
+                [
+                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.equipment_code'))" },
+                    { expr: 'ar.model_name', soundex: true },
+                ],
+                eqTerm,
+                capitalParams
+            ).replace(/^WHERE 1=1/, '');
         }
         if (partNumber && partNumber !== '') {
-            const p = `%${partNumber}%`;
-            spareFilter += ' AND rd.part_number LIKE ?';
-            spareParams.push(p);
-            capitalFilter += ` AND (
-                JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number')) LIKE ?
-                OR JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number')) LIKE ?
-            )`;
-            capitalParams.push(p, p);
+            const partTerm = String(partNumber);
+            spareFilter += appendPartNumberFilter('WHERE 1=1', 'rd.part_number', partTerm, spareParams).replace(/^WHERE 1=1/, '');
+            capitalFilter += appendFuzzyOrClause(
+                'WHERE 1=1',
+                [
+                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.model_number'))" },
+                    { expr: "JSON_UNQUOTE(JSON_EXTRACT(rrp.capital_item_data, '$.serial_number'))" },
+                ],
+                partTerm,
+                capitalParams
+            ).replace(/^WHERE 1=1/, '');
         }
         if (referenceStatus === 'uploaded') {
             spareFilter += ' AND rrp.reference_doc IS NOT NULL AND rrp.reference_doc <> \'\'';
@@ -1312,9 +1319,26 @@ export const searchRRP = async (req: Request, res: Response): Promise<void> => {
             });
         }
 
-        const orderedData = pageNumbers
+        let orderedData = pageNumbers
             .map((n) => groupedResults[n])
             .filter(Boolean);
+
+        const rankTerm = universal ? String(universal).trim() : '';
+        if (rankTerm) {
+            orderedData = rankByRelevance(orderedData, rankTerm, (group: Record<string, unknown>) => {
+                const items = (group.items as Record<string, unknown>[]) || [];
+                return [
+                    String(group.rrpNumber ?? ''),
+                    String(group.supplierName ?? ''),
+                    ...items.flatMap((item) => [
+                        String(item.itemName ?? ''),
+                        String(item.partNumber ?? ''),
+                        String(item.equipmentNumber ?? ''),
+                        String(item.tenderReferenceNumber ?? ''),
+                    ]),
+                ];
+            });
+        }
 
         res.json({
             data: orderedData,
