@@ -8,7 +8,9 @@ const pool = createPool({
     database: process.env.DB_NAME || "inventory_system",
     port: parseInt(process.env.DB_PORT || "3306"),
     waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
+    connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || "25"),
+    queueLimit: parseInt(process.env.DB_QUEUE_LIMIT || "50"),
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
 });
 export default pool;

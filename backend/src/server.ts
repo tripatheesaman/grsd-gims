@@ -169,13 +169,13 @@ const startServer = async () => {
     try {
         await pool.query("SELECT 1");
         logEvents("Connected to MySQL", "serverLog.log");
-        await ensureAssetSpareSchema().catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            logEvents(`Schema migration warning: ${message}`, "serverLog.log");
-        });
         app.listen(PORT, () => {
             logEvents(`Server running on port ${PORT}`, "serverLog.log");
             startRequestReminderWorker();
+        });
+        void ensureAssetSpareSchema().catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            logEvents(`Schema migration warning: ${message}`, "serverLog.log");
         });
     }
     catch (err) {
