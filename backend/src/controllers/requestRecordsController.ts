@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
+import {
+    appendPartNumberFilter,
+    appendRecordsRequestUniversalFilter,
+} from '../services/searchSqlBuilder';
+import { rankByRelevance } from '../services/searchRelevanceService';
 interface RequestRecord extends RowDataPacket {
     id: number;
     request_number: string;
@@ -58,39 +63,28 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
     try {
         const { universal, equipmentNumber, partNumber, status, requestedBy, page = 1, pageSize = 20 } = req.query;
         const offset = (Number(page) - 1) * Number(pageSize);
-        let whereConditions = [];
-        let queryParams: any[] = [];
+        let whereClause = 'WHERE 1=1';
+        const queryParams: unknown[] = [];
         if (universal) {
-            whereConditions.push(`(rd.request_number LIKE ? OR rd.nac_code LIKE ? OR rd.item_name LIKE ? OR rd.part_number LIKE ? OR rd.equipment_number LIKE ? OR a.name LIKE ?)`);
-            const searchParam = `%${universal}%`;
-            queryParams.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
+            whereClause = appendRecordsRequestUniversalFilter(whereClause, String(universal), queryParams);
         }
         if (equipmentNumber) {
-            whereConditions.push(`(rd.equipment_number LIKE ? OR a.name LIKE ?)`);
+            whereClause += ` AND (rd.equipment_number LIKE ? OR a.name LIKE ?)`;
             queryParams.push(`%${equipmentNumber}%`, `%${equipmentNumber}%`);
         }
         if (partNumber) {
-            whereConditions.push(`rd.part_number LIKE ?`);
-            queryParams.push(`%${partNumber}%`);
+            whereClause = appendPartNumberFilter(whereClause, 'rd.part_number', String(partNumber), queryParams);
         }
         if (status && status !== 'all') {
-            whereConditions.push(`rd.approval_status = ?`);
+            whereClause += ` AND rd.approval_status = ?`;
             queryParams.push(status);
         }
         if (requestedBy && requestedBy !== 'all') {
-            whereConditions.push(`rd.requested_by LIKE ?`);
+            whereClause += ` AND rd.requested_by LIKE ?`;
             queryParams.push(`%${requestedBy}%`);
         }
-        let whereClause = '';
-        if (whereConditions.length > 0) {
-            let whereClauseWithValues = whereConditions.join(' AND ');
-            queryParams.forEach((param, index) => {
-                whereClauseWithValues = whereClauseWithValues.replace('?', `'${param}'`);
-            });
-            whereClause = `WHERE ${whereClauseWithValues}`;
-        }
         const countQuery = `SELECT COUNT(*) as total FROM request_details rd LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = rd.equipment_number COLLATE utf8mb4_unicode_ci ${whereClause}`;
-        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery);
+        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, queryParams);
         const totalCount = countResult[0].total;
         const totalPages = Math.ceil(totalCount / Number(pageSize));
         const dataQuery = `
@@ -125,7 +119,7 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
       ORDER BY rd.created_at DESC
       LIMIT ${Number(pageSize)} OFFSET ${offset}
     `;
-        const [rows] = await connection.execute<any[]>(dataQuery);
+        const [rows] = await connection.execute<any[]>(dataQuery, queryParams);
         const data = rows.map((r: any) => ({
             ...r,
             prediction_summary: r.predicted_days !== null && r.predicted_days !== undefined ? {
@@ -140,8 +134,18 @@ export const getAllRequestRecords = async (req: Request, res: Response): Promise
                 ? 'Not Received'
                 : (Number(r.total_approved) < Number(r.requested_quantity) ? 'Partially Received' : 'Received')
         }));
+        let rankedData = data;
+        if (universal) {
+            rankedData = rankByRelevance(data, String(universal), (row) => [
+                row.request_number,
+                row.nac_code,
+                row.item_name,
+                row.part_number,
+                row.equipment_number,
+            ]);
+        }
         const response: RequestRecordsResponse = {
-            data,
+            data: rankedData,
             totalCount,
             totalPages,
             currentPage: Number(page),

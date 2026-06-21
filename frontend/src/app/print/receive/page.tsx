@@ -45,7 +45,7 @@ export default function PrintReceivePage() {
     const { showErrorToast } = useCustomToast();
     const searchReceives = useCallback(async (params: ReceiveSearchParams) => {
         try {
-            const response = await API.get('/api/receive/search', { params });
+            const response = await API.get('/api/receive/search/receivables', { params });
             setResults(response.data);
         }
         catch (error) {

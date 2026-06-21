@@ -15,6 +15,7 @@ import {
     previewReceiveTarget,
     syncFamilyLocation,
 } from '../services/inventoryVariantService';
+import { buildStockSearchKey } from '../services/searchRelevanceService';
 import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 
@@ -242,6 +243,13 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         }
         await connection.beginTransaction();
         started = true;
+        const processedName = processItemName(itemName);
+        const searchKey = buildStockSearchKey({
+            nac_code: nacCode,
+            part_numbers: partNumber.trim(),
+            item_name: processedName,
+            applicable_equipments: equipmentNumber,
+        });
         const [result] = await connection.execute(`INSERT INTO stock_details (
         nac_code,
         base_nac_code,
@@ -251,17 +259,19 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         current_balance, 
         location, 
         open_quantity,
-        open_amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        open_amount,
+        search_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
             nacCode,
             baseNacCode,
-            processItemName(itemName),
+            processedName,
             partNumber.trim(),
             equipmentNumber,
             currentBalance,
             location,
             Number(openQuantity) || 0,
             Number(openAmount) || 0,
+            searchKey,
         ]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await connection.commit();
@@ -343,6 +353,14 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         await connection.beginTransaction();
         started = true;
         const baseNacCode = stripSuffixFromNac(nacCode);
+        const processedName = processItemName(itemName);
+        const trimmedPart = partNumber.trim();
+        const searchKey = buildStockSearchKey({
+            nac_code: nacCode,
+            part_numbers: trimmedPart,
+            item_name: processedName,
+            applicable_equipments: equipmentNumber,
+        });
         await connection.execute(`UPDATE stock_details SET 
         nac_code = ?, 
         base_nac_code = ?,
@@ -352,17 +370,19 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         current_balance = ?, 
         open_quantity = ?,
         open_amount = ?,
-        location = ?
+        location = ?,
+        search_key = ?
       WHERE id = ?`, [
             nacCode,
             baseNacCode,
-            processItemName(itemName),
-            partNumber.trim(),
+            processedName,
+            trimmedPart,
             equipmentNumber,
             currentBalance,
             Number(openQuantity) || 0,
             Number(openAmount) || 0,
             location,
+            searchKey,
             id,
         ]);
         await syncFamilyLocation(connection, baseNacCode, location);
