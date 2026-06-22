@@ -80,6 +80,10 @@ function hasPermission(req: Request, permission: string): boolean {
     return Boolean(req.permissions?.includes(permission));
 }
 
+function canBypassAcknowledgements(req: Request): boolean {
+    return hasPermission(req, 'can_bypass_acknowledgements');
+}
+
 async function fetchThreadSummary(threadId: number, userId?: number): Promise<ThreadRow | null> {
     const [rows] = await pool.query<ThreadRow[]>(
         `SELECT t.*,
@@ -197,6 +201,8 @@ export const getUnacknowledgedThreads = async (req: Request, res: Response): Pro
             [userId, userId]
         );
 
+        const initialAlerts = canBypassAcknowledgements(req) ? [] : initialRows;
+
         const [replyRows] = await pool.query<ThreadRow[]>(
             `SELECT t.*,
                     CONCAT(c.first_name, ' ', c.last_name) AS creator_name,
@@ -291,7 +297,7 @@ export const getUnacknowledgedThreads = async (req: Request, res: Response): Pro
         };
 
         res.status(200).json([
-            ...initialRows.map(mapAlertRow),
+            ...initialAlerts.map(mapAlertRow),
             ...mentionRows.map(mapAlertRow),
             ...replyRows.map(mapAlertRow),
         ]);
@@ -313,9 +319,52 @@ export const listCommunicationThreads = async (req: Request, res: Response): Pro
         }
 
         const status = String(req.query.status || 'all');
+        const searchQuery = String(req.query.q || '').trim();
+        const ackFilter = String(req.query.ack || 'all');
+        const assignedToMe =
+            req.query.assignedToMe === '1' || String(req.query.assignedToMe).toLowerCase() === 'true';
+
         let where = '1=1';
+        const filterParams: unknown[] = [];
+
         if (status !== 'all') {
             where += ' AND t.status = ?';
+            filterParams.push(status);
+        }
+
+        if (assignedToMe) {
+            where += ' AND t.assigned_to = ?';
+            filterParams.push(userId);
+        }
+
+        if (ackFilter === 'pending') {
+            where += ` AND NOT EXISTS (
+                SELECT 1 FROM communication_acknowledgements ack
+                WHERE ack.thread_id = t.id AND ack.user_id = ?
+            )`;
+            filterParams.push(userId);
+        } else if (ackFilter === 'acknowledged') {
+            where += ` AND EXISTS (
+                SELECT 1 FROM communication_acknowledgements ack
+                WHERE ack.thread_id = t.id AND ack.user_id = ?
+            )`;
+            filterParams.push(userId);
+        }
+
+        if (searchQuery) {
+            const like = `%${searchQuery}%`;
+            where += ` AND (
+                t.title LIKE ?
+                OR CONCAT(c.first_name, ' ', c.last_name) LIKE ?
+                OR c.username LIKE ?
+                OR CONCAT(IFNULL(a.first_name, ''), ' ', IFNULL(a.last_name, '')) LIKE ?
+                OR IFNULL(a.username, '') LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM communication_messages m
+                    WHERE m.thread_id = t.id AND m.body LIKE ?
+                )
+            )`;
+            filterParams.push(like, like, like, like, like, like);
         }
 
         const [rows] = await pool.query<ThreadRow[]>(
@@ -333,7 +382,7 @@ export const listCommunicationThreads = async (req: Request, res: Response): Pro
              WHERE ${where}
              ORDER BY t.updated_at DESC, t.id DESC
              LIMIT 200`,
-            [userId, ...(status !== 'all' ? [status] : [])]
+            [userId, ...filterParams]
         );
 
         res.status(200).json(rows.map(mapThread));
@@ -387,7 +436,10 @@ export const getCommunicationThread = async (req: Request, res: Response): Promi
                 acknowledgedAt: row.acknowledged_at,
             })),
             userHasAcknowledgedMention,
-            userCanReply: mappedThread.userHasAcknowledged || userHasAcknowledgedMention,
+            userCanReply:
+                canBypassAcknowledgements(req)
+                || mappedThread.userHasAcknowledged
+                || userHasAcknowledgedMention,
         });
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -607,7 +659,7 @@ export const replyToCommunicationThread = async (req: Request, res: Response): P
             res.status(409).json({ error: 'Conflict', message: 'Cannot reply to a closed matter' });
             return;
         }
-        if (Number(thread.user_has_acknowledged || 0) === 0) {
+        if (!canBypassAcknowledgements(req) && Number(thread.user_has_acknowledged || 0) === 0) {
             const hasMentionAck = await userHasAcknowledgedMentionOnThread(threadId, userId);
             if (!hasMentionAck) {
                 res.status(403).json({
@@ -892,5 +944,82 @@ export const listMentionableUsers = async (req: Request, res: Response): Promise
         const message = error instanceof Error ? error.message : 'Unknown error';
         logEvents(`listMentionableUsers error: ${message}`, 'communicationsLog.log');
         res.status(500).json({ error: 'Internal Server Error', message });
+    }
+};
+
+export const deleteCommunicationThread = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        await ensureCommunicationsSchema();
+        await ensureReplyAlertsTable();
+        await ensureMentionsTable();
+        await ensureMentionAlertsTable();
+
+        const threadId = Number(req.params.id);
+        if (!threadId) {
+            res.status(400).json({ error: 'Bad Request', message: 'Invalid thread id' });
+            return;
+        }
+        if (!hasPermission(req, 'can_delete_conversations')) {
+            res.status(403).json({
+                error: 'Forbidden',
+                message: 'You do not have permission to delete conversations',
+            });
+            return;
+        }
+
+        const thread = await fetchThreadSummary(threadId);
+        if (!thread) {
+            res.status(404).json({ error: 'Not Found', message: 'Thread not found' });
+            return;
+        }
+
+        await connection.beginTransaction();
+
+        await connection.execute(
+            `DELETE FROM notifications
+             WHERE reference_type = 'communication' AND reference_id = ?`,
+            [String(threadId)]
+        );
+        await connection.execute(
+            `DELETE FROM communication_mention_alerts WHERE thread_id = ?`,
+            [threadId]
+        );
+        await connection.execute(
+            `DELETE FROM communication_reply_alerts WHERE thread_id = ?`,
+            [threadId]
+        );
+        await connection.execute(
+            `DELETE cm FROM communication_mentions cm
+             INNER JOIN communication_messages m ON m.id = cm.message_id
+             WHERE m.thread_id = ?`,
+            [threadId]
+        );
+        await connection.execute(`DELETE FROM communication_acknowledgements WHERE thread_id = ?`, [threadId]);
+        await connection.execute(`DELETE FROM communication_messages WHERE thread_id = ?`, [threadId]);
+        const [result] = await connection.execute<ResultSetHeader>(
+            `DELETE FROM communication_threads WHERE id = ?`,
+            [threadId]
+        );
+
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            res.status(404).json({ error: 'Not Found', message: 'Thread not found' });
+            return;
+        }
+
+        await connection.commit();
+        logEvents(
+            `Communication thread ${threadId} deleted by user ${req.userId ?? 'unknown'}`,
+            'communicationsLog.log'
+        );
+        res.status(200).json({ message: 'Conversation deleted', threadId });
+    } catch (error) {
+        await connection.rollback();
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        logEvents(`deleteCommunicationThread error: ${message}`, 'communicationsLog.log');
+        res.status(500).json({ error: 'Internal Server Error', message });
+    } finally {
+        connection.release();
     }
 };

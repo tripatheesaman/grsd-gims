@@ -71,6 +71,8 @@ export const COMMUNICATIONS_PERMISSIONS = [
     'can_send_communications',
     'can_assign_tasks',
     'can_close_all_messages',
+    'can_delete_conversations',
+    'can_bypass_acknowledgements',
 ] as const;
 
 export function hasAnyPermission(

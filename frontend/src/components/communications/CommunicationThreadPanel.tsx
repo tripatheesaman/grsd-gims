@@ -1,9 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Send, UserPlus } from 'lucide-react';
+import { CheckCircle2, Send, Trash2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import {
     Select,
     SelectContent,
@@ -15,6 +23,7 @@ import { useApiPost } from '@/hooks/api/useApiMutation';
 import { useApiQuery } from '@/hooks/api/useApiQuery';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { getErrorMessage } from '@/lib/errorHandling';
+import { API } from '@/lib/api';
 import { useAuthContext } from '@/context/AuthContext';
 import {
     CommunicationAssignee,
@@ -34,13 +43,19 @@ import { MentionTextarea } from '@/components/communications/MentionTextarea';
 interface CommunicationThreadPanelProps {
     threadId: number | null;
     canAssignTasks: boolean;
+    canDeleteConversations: boolean;
+    canBypassAcknowledgements?: boolean;
     onUpdated: () => void;
+    onDeleted?: () => void;
 }
 
 export function CommunicationThreadPanel({
     threadId,
     canAssignTasks,
+    canDeleteConversations,
+    canBypassAcknowledgements = false,
     onUpdated,
+    onDeleted,
 }: CommunicationThreadPanelProps) {
     const { user, permissions } = useAuthContext();
     const userId = user?.UserInfo?.id;
@@ -50,6 +65,8 @@ export function CommunicationThreadPanel({
     const [replyAttachment, setReplyAttachment] = useState<File | null>(null);
     const [assigneeId, setAssigneeId] = useState<string>('');
     const [submitting, setSubmitting] = useState(false);
+    const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const { data: detailResponse, isLoading, refetch } = useApiQuery<CommunicationThreadDetail>(
         ['communications', 'thread', threadId],
@@ -78,7 +95,11 @@ export function CommunicationThreadPanel({
     const acknowledgements = detail?.acknowledgements ?? [];
     const assignees = assigneesResponse?.data ?? [];
     const userHasAcknowledgedMention = detail?.userHasAcknowledgedMention ?? false;
-    const userCanReply = detail?.userCanReply ?? thread?.userHasAcknowledged ?? false;
+    const userCanReply =
+        canBypassAcknowledgements
+        || detail?.userCanReply
+        || thread?.userHasAcknowledged
+        || false;
 
     useEffect(() => {
         setReplyBody('');
@@ -204,7 +225,34 @@ export function CommunicationThreadPanel({
         }
     };
 
+    const handleDelete = async () => {
+        if (!threadId) {
+            return;
+        }
+        setIsDeleting(true);
+        try {
+            await API.delete(`/api/communications/${threadId}`);
+            setIsDeleteOpen(false);
+            showSuccessToast({
+                title: 'Deleted',
+                message: 'The conversation has been permanently deleted.',
+                duration: 3000,
+            });
+            onDeleted?.();
+            onUpdated();
+        } catch (error) {
+            showErrorToast({
+                title: 'Error',
+                message: getErrorMessage(error, 'Failed to delete conversation'),
+                duration: 5000,
+            });
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     return (
+        <>
         <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-5 py-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -214,9 +262,24 @@ export function CommunicationThreadPanel({
                             By {thread.creatorName} · {formatCommunicationDate(thread.createdAt)}
                         </p>
                     </div>
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${communicationStatusClass(thread.status)}`}>
-                        {communicationStatusLabel(thread.status)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        {canDeleteConversations && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                onClick={() => setIsDeleteOpen(true)}
+                                disabled={submitting || isDeleting}
+                            >
+                                <Trash2 size={14} className="mr-1.5" />
+                                Delete
+                            </Button>
+                        )}
+                        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${communicationStatusClass(thread.status)}`}>
+                            {communicationStatusLabel(thread.status)}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600">
@@ -227,7 +290,7 @@ export function CommunicationThreadPanel({
                     )}
                 </div>
 
-                {isActive && !thread.userHasAcknowledged && !userHasAcknowledgedMention && (
+                {isActive && !canBypassAcknowledgements && !thread.userHasAcknowledged && !userHasAcknowledgedMention && (
                     <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
                         <p className="text-sm text-amber-900">You have not acknowledged this communication yet.</p>
                         <Button type="button" size="sm" className="mt-2" onClick={handleAcknowledge} disabled={submitting}>
@@ -291,7 +354,7 @@ export function CommunicationThreadPanel({
                         </div>
                     )}
 
-                    {canAssignTasks && thread.userHasAcknowledged && (
+                    {canAssignTasks && (thread.userHasAcknowledged || canBypassAcknowledgements) && (
                         <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
                             <label className="text-sm font-medium text-blue-900">Assign to user</label>
                             <div className="flex flex-wrap gap-2">
@@ -335,5 +398,36 @@ export function CommunicationThreadPanel({
                 </div>
             )}
         </div>
+
+        <Dialog open={isDeleteOpen} onOpenChange={(open) => !isDeleting && setIsDeleteOpen(open)}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Delete conversation?</DialogTitle>
+                    <DialogDescription>
+                        This permanently removes &quot;{thread.title}&quot;, all replies, acknowledgements,
+                        and related alerts. This action cannot be undone.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setIsDeleteOpen(false)}
+                        disabled={isDeleting}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="destructive"
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                    >
+                        {isDeleting ? 'Deleting…' : 'Delete conversation'}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        </>
     );
 }
