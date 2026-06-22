@@ -12,6 +12,7 @@ import {
     listCommunicationAssignees,
     getActiveThreadCount,
     listMentionableUsers,
+    deleteCommunicationThread,
 } from '../controllers/communicationsController';
 
 const router = express.Router();
@@ -27,5 +28,6 @@ router.post('/:id/acknowledge', verifyJWT, acknowledgeCommunicationThread);
 router.post('/:id/reply', verifyJWT, replyToCommunicationThread);
 router.post('/:id/conclude', verifyJWT, concludeCommunicationThread);
 router.post('/:id/assign', verifyJWT, assignCommunicationThread);
+router.delete('/:id', verifyJWT, deleteCommunicationThread);
 
 export default router;

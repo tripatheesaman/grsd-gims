@@ -13,6 +13,112 @@ export interface FuelHistoryRow {
     issue_quantity: number;
     kilometers: number;
     is_kilometer_reset: number | boolean;
+    issue_id?: number;
+}
+
+export interface FuelConsumptionRebuildSummary {
+    equipmentFamilies: number;
+    withEnoughHistory: number;
+    totalApprovedIssues: number;
+    cacheRowsWritten: number;
+}
+
+const sortFuelHistoryChronologically = (history: FuelHistoryRow[]): FuelHistoryRow[] =>
+    [...history].sort((left, right) => {
+        const leftTime = new Date(left.issue_date).getTime();
+        const rightTime = new Date(right.issue_date).getTime();
+        if (leftTime !== rightTime) {
+            return leftTime - rightTime;
+        }
+        return Number(left.issue_id || 0) - Number(right.issue_id || 0);
+    });
+
+let cacheTableEnsured = false;
+
+export const ensureFuelConsumptionCacheTable = async (connection: PoolConnection): Promise<void> => {
+    if (cacheTableEnsured) {
+        return;
+    }
+    await connection.query(`
+        CREATE TABLE IF NOT EXISTS fuel_equipment_consumption_cache (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            nac_code VARCHAR(32) NOT NULL,
+            equipment_key VARCHAR(64) NOT NULL,
+            sample_equipment VARCHAR(64) NOT NULL,
+            avg_km_per_liter DECIMAL(14, 4) NOT NULL DEFAULT 0,
+            avg_liters_per_km DECIMAL(14, 6) NOT NULL DEFAULT 0,
+            valid_trip_count INT NOT NULL DEFAULT 0,
+            total_km DECIMAL(14, 2) NOT NULL DEFAULT 0,
+            total_liters DECIMAL(14, 2) NOT NULL DEFAULT 0,
+            history_issue_count INT NOT NULL DEFAULT 0,
+            computed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_fuel_equip_consumption (nac_code, equipment_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    cacheTableEnsured = true;
+};
+
+const mapCachedStatsRow = (row: RowDataPacket): FuelConsumptionStats => ({
+    avgKmPerLiter: Number(row.avg_km_per_liter),
+    avgLitersPerKm: Number(row.avg_liters_per_km),
+    validTripCount: Number(row.valid_trip_count),
+    totalKm: Number(row.total_km),
+    totalLiters: Number(row.total_liters),
+});
+
+async function loadCachedConsumptionStatsMap(
+    connection: PoolConnection,
+    keys: string[]
+): Promise<Map<string, FuelConsumptionStats>> {
+    const map = new Map<string, FuelConsumptionStats>();
+    if (keys.length === 0) {
+        return map;
+    }
+
+    await ensureFuelConsumptionCacheTable(connection);
+
+    const tuples = keys
+        .map((key) => {
+            const separator = key.indexOf('|');
+            if (separator <= 0) {
+                return null;
+            }
+            return {
+                key,
+                nacCode: compactNacCode(key.slice(0, separator)),
+                equipmentKey: key.slice(separator + 1),
+            };
+        })
+        .filter((entry): entry is { key: string; nacCode: string; equipmentKey: string } => Boolean(entry));
+
+    if (tuples.length === 0) {
+        return map;
+    }
+
+    const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT nac_code, equipment_key, avg_km_per_liter, avg_liters_per_km,
+                valid_trip_count, total_km, total_liters
+         FROM fuel_equipment_consumption_cache
+         WHERE (nac_code, equipment_key) IN (${tuples.map(() => '(?, ?)').join(', ')})`,
+        tuples.flatMap((entry) => [entry.nacCode, entry.equipmentKey])
+    );
+
+    for (const row of rows) {
+        const key = `${String(row.nac_code).trim()}|${String(row.equipment_key).trim()}`;
+        map.set(key, mapCachedStatsRow(row));
+    }
+
+    return map;
+}
+
+async function getCachedConsumptionStats(
+    connection: PoolConnection,
+    nacCode: string,
+    equipment: string
+): Promise<FuelConsumptionStats | null> {
+    const key = consumptionStatsKey(nacCode, equipment);
+    const cached = await loadCachedConsumptionStatsMap(connection, [key]);
+    return cached.get(key) ?? null;
 }
 
 export interface FuelConsumptionStats {
@@ -58,7 +164,7 @@ export const equipmentConsumptionKey = (equipment: string): string => {
 };
 
 export const consumptionStatsKey = (nacCode: string, equipment: string): string =>
-    `${String(nacCode || '').trim()}|${equipmentConsumptionKey(equipment)}`;
+    `${compactNacCode(nacCode)}|${equipmentConsumptionKey(equipment)}`;
 
 const nacMatchSql = (alias: string): string =>
     `REPLACE(TRIM(${alias}.nac_code), ' ', '') = ?`;
@@ -148,7 +254,7 @@ export async function getApprovedFuelHistory(
     }
 
     const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT i.issue_date, i.issue_quantity, f.kilometers, f.is_kilometer_reset
+        `SELECT i.id AS issue_id, i.issue_date, i.issue_quantity, f.kilometers, f.is_kilometer_reset
          FROM issue_details i
          INNER JOIN fuel_records f ON f.issue_fk = i.id
          WHERE i.approval_status = 'APPROVED'
@@ -160,6 +266,7 @@ export async function getApprovedFuelHistory(
     );
 
     return rows.map((row) => ({
+        issue_id: Number(row.issue_id),
         issue_date: row.issue_date,
         issue_quantity: Number(row.issue_quantity),
         kilometers: Number(row.kilometers),
@@ -272,31 +379,44 @@ export async function loadConsumptionStatsMap(
         return map;
     }
 
-    const nacCodes = [...new Set([...unique.values()].map((entry) => compactNacCode(entry.nacCode)))];
-    const equipmentList = [...unique.values()].map((entry) => entry.equipment);
+    const allKeys = [...unique.keys()];
+    const cachedStats = await loadCachedConsumptionStatsMap(connection, allKeys);
+    for (const [key, stats] of cachedStats.entries()) {
+        map.set(key, stats);
+    }
+
+    const uncached = [...unique.entries()].filter(([key]) => !map.has(key));
+    if (uncached.length === 0) {
+        return map;
+    }
+
+    const nacCodes = [...new Set(uncached.map(([, entry]) => compactNacCode(entry.nacCode)))];
+    const equipmentList = uncached.map(([, entry]) => entry.equipment);
     const equipmentMatch = buildMultipleEquipmentMatchClause(equipmentList);
 
     const [rows] = await connection.query<RowDataPacket[]>(
-        `SELECT i.nac_code, i.issued_for, i.issue_date, i.issue_quantity, f.kilometers, f.is_kilometer_reset
+        `SELECT i.id AS issue_id, i.nac_code, i.issued_for, i.issue_date, i.issue_quantity, f.kilometers, f.is_kilometer_reset
          FROM issue_details i
          INNER JOIN fuel_records f ON f.issue_fk = i.id
          WHERE i.approval_status = 'APPROVED'
            AND REPLACE(TRIM(i.nac_code), ' ', '') IN (${nacCodes.map(() => '?').join(',')})
            AND ${equipmentMatch.sql}
-         ORDER BY i.nac_code, LOWER(TRIM(i.issued_for)), i.issue_date ASC, i.id ASC`,
+         ORDER BY i.issue_date ASC, i.id ASC`,
         [...nacCodes, ...equipmentMatch.params]
     );
 
+    const uncachedKeys = new Set(uncached.map(([key]) => key));
     const grouped = new Map<string, FuelHistoryRow[]>();
     for (const row of rows) {
         const key = consumptionStatsKey(String(row.nac_code), String(row.issued_for));
-        if (!unique.has(key)) {
+        if (!uncachedKeys.has(key)) {
             continue;
         }
         if (!grouped.has(key)) {
             grouped.set(key, []);
         }
         grouped.get(key)!.push({
+            issue_id: Number(row.issue_id),
             issue_date: row.issue_date,
             issue_quantity: Number(row.issue_quantity),
             kilometers: Number(row.kilometers),
@@ -304,8 +424,9 @@ export async function loadConsumptionStatsMap(
         });
     }
 
-    for (const key of unique.keys()) {
-        map.set(key, computeConsumptionStats(grouped.get(key) || []));
+    for (const [key] of uncached) {
+        const history = sortFuelHistoryChronologically(grouped.get(key) || []);
+        map.set(key, computeConsumptionStats(history));
     }
 
     return map;
@@ -334,7 +455,11 @@ export async function analyzeFuelConsumption(
             : await getLatestOdometerReading(connection, nacCode, equipment, opts.beforeIssueDate);
 
     const history = await getApprovedFuelHistory(connection, nacCode, equipment, opts.excludeIssueId);
-    const stats = computeConsumptionStats(history);
+    const stats =
+        opts.excludeIssueId
+            ? computeConsumptionStats(history)
+            : (await getCachedConsumptionStats(connection, nacCode, equipment))
+                ?? computeConsumptionStats(history);
     return buildConsumptionAnalysis(stats, {
         equipment,
         nacCode,
@@ -393,4 +518,82 @@ export async function analyzeFuelConsumptionBatch(
         });
     }
     return results;
+}
+
+export async function rebuildFuelEquipmentConsumptionCache(
+    connection: PoolConnection
+): Promise<FuelConsumptionRebuildSummary> {
+    await ensureFuelConsumptionCacheTable(connection);
+
+    const [pairRows] = await connection.query<RowDataPacket[]>(
+        `SELECT DISTINCT i.nac_code, i.issued_for
+         FROM issue_details i
+         INNER JOIN fuel_records f ON f.issue_fk = i.id
+         WHERE i.approval_status = 'APPROVED'
+           AND LOWER(TRIM(i.issued_for)) <> 'cleaning'
+         ORDER BY i.nac_code, i.issued_for`
+    );
+
+    const families = new Map<string, { nacCode: string; equipment: string }>();
+    let totalApprovedIssues = 0;
+
+    for (const row of pairRows) {
+        const equipment = String(row.issued_for || '').trim();
+        const nacCode = String(row.nac_code || '').trim();
+        if (!equipment || !nacCode) {
+            continue;
+        }
+        const key = consumptionStatsKey(nacCode, equipment);
+        if (!families.has(key)) {
+            families.set(key, { nacCode, equipment });
+        }
+    }
+
+    const [issueCountRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total
+         FROM issue_details i
+         INNER JOIN fuel_records f ON f.issue_fk = i.id
+         WHERE i.approval_status = 'APPROVED'
+           AND LOWER(TRIM(i.issued_for)) <> 'cleaning'`
+    );
+    totalApprovedIssues = Number(issueCountRows[0]?.total || 0);
+
+    await connection.query('DELETE FROM fuel_equipment_consumption_cache');
+
+    let withEnoughHistory = 0;
+    let cacheRowsWritten = 0;
+
+    for (const entry of families.values()) {
+        const history = await getApprovedFuelHistory(connection, entry.nacCode, entry.equipment);
+        const stats = computeConsumptionStats(history);
+        if (stats.validTripCount >= MIN_VALID_TRIPS) {
+            withEnoughHistory += 1;
+        }
+
+        await connection.execute(
+            `INSERT INTO fuel_equipment_consumption_cache
+             (nac_code, equipment_key, sample_equipment, avg_km_per_liter, avg_liters_per_km,
+              valid_trip_count, total_km, total_liters, history_issue_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                compactNacCode(entry.nacCode),
+                equipmentConsumptionKey(entry.equipment),
+                entry.equipment,
+                stats.avgKmPerLiter,
+                stats.avgLitersPerKm,
+                stats.validTripCount,
+                stats.totalKm,
+                stats.totalLiters,
+                history.length,
+            ]
+        );
+        cacheRowsWritten += 1;
+    }
+
+    return {
+        equipmentFamilies: families.size,
+        withEnoughHistory,
+        totalApprovedIssues,
+        cacheRowsWritten,
+    };
 }

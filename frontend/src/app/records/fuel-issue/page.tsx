@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Edit, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Edit, Gauge, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { FiscalYearFilterSelect } from '@/components/fiscal-year/FiscalYearFilterSelect';
 import { useFiscalYear } from '@/hooks/useFiscalYear';
 import { useAuthContext } from '@/context/AuthContext';
@@ -98,6 +98,7 @@ export default function FuelIssueRecordsPage() {
     const canCreate = permissions.includes('can_add_fuel_issue_item');
     const canEdit = permissions.includes('can_edit_fuel_issue_item');
     const canDelete = permissions.includes('can_delete_fuel_issue_item');
+    const isSuperAdmin = user?.UserInfo?.role?.toLowerCase() === 'superadmin';
 
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const latestRequestRef = useRef(0);
@@ -144,6 +145,8 @@ export default function FuelIssueRecordsPage() {
     const [formData, setFormData] = useState<FuelIssueFormData>(EMPTY_FORM);
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState(false);
+    const [showRebuildModal, setShowRebuildModal] = useState(false);
+    const [rebuildingAverages, setRebuildingAverages] = useState(false);
 
     useEffect(() => {
         if (currentFiscalYear && !fiscalYearFilter) {
@@ -343,6 +346,33 @@ export default function FuelIssueRecordsPage() {
         }
     };
 
+    const handleRebuildConsumptionAverages = async () => {
+        setRebuildingAverages(true);
+        try {
+            const { data } = await API.post('/api/fuel-issue-records/rebuild-consumption-averages');
+            showSuccessToast({
+                title: 'Consumption averages rebuilt',
+                message:
+                    `${data.equipmentFamilies ?? 0} equipment families processed. ` +
+                    `${data.withEnoughHistory ?? 0} have enough history for comparison ` +
+                    `(${data.totalApprovedIssues ?? 0} approved fuel issues scanned).`,
+                duration: 12000,
+            });
+            setShowRebuildModal(false);
+        } catch (err: unknown) {
+            const message =
+                err && typeof err === 'object' && 'response' in err
+                    ? String(
+                          (err as { response?: { data?: { message?: string } } }).response?.data?.message
+                          || 'Failed to rebuild consumption averages'
+                      )
+                    : 'Failed to rebuild consumption averages';
+            showErrorToast({ title: 'Rebuild failed', message, duration: 6000 });
+        } finally {
+            setRebuildingAverages(false);
+        }
+    };
+
     const openCreateModal = () => {
         resetForm();
         setFormData({
@@ -387,6 +417,17 @@ export default function FuelIssueRecordsPage() {
             description="Manage diesel and petrol issue records"
             actions={
                 <div className="flex flex-wrap items-center gap-2">
+                    {isSuperAdmin && (
+                        <button
+                            type="button"
+                            onClick={() => setShowRebuildModal(true)}
+                            disabled={rebuildingAverages}
+                            className={`${recordsTheme.outlineBtn} border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100`}
+                        >
+                            <Gauge className="h-4 w-4" />
+                            Rebuild fuel averages
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => fetchData()}
@@ -710,6 +751,31 @@ export default function FuelIssueRecordsPage() {
                     <p className="text-sm text-slate-600">
                         Delete fuel issue for <strong>{deletingRecord.issued_for}</strong> on{' '}
                         <strong>{formatDate(deletingRecord.issue_date)}</strong>? This cannot be undone.
+                    </p>
+                </RecordsModal>
+            )}
+
+            {showRebuildModal && (
+                <RecordsModal
+                    open={showRebuildModal}
+                    title="Rebuild fuel consumption averages"
+                    onClose={() => !rebuildingAverages && setShowRebuildModal(false)}
+                    size="md"
+                    submitting={rebuildingAverages}
+                    footer={
+                        <RecordsModalActions
+                            onCancel={() => setShowRebuildModal(false)}
+                            onSubmit={handleRebuildConsumptionAverages}
+                            submitLabel="Rebuild averages"
+                            submitting={rebuildingAverages}
+                        />
+                    }
+                >
+                    <p className="text-sm text-slate-600">
+                        Recalculate average fuel consumption history for every equipment family
+                        (including variants like 344, 344T, and 344T14) using all approved fuel
+                        issue records. This merges historical trips in chronological order and
+                        refreshes the consumption cache used during fuel issuance.
                     </p>
                 </RecordsModal>
             )}
