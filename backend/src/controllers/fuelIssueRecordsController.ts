@@ -4,6 +4,7 @@ import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
 import { validateIssuedFor } from '../services/issueValidationService';
+import { rebuildFuelEquipmentConsumptionCache } from '../services/fuelConsumptionService';
 interface FuelIssueRecord {
     id: number;
     issue_slip_number: string;
@@ -557,6 +558,31 @@ export const getNacCodes = async (req: Request, res: Response): Promise<void> =>
         });
     }
     finally {
+        connection.release();
+    }
+};
+
+export const rebuildFuelConsumptionAverages = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const summary = await rebuildFuelEquipmentConsumptionCache(connection);
+        logEvents(
+            `Fuel consumption averages rebuilt: ${summary.equipmentFamilies} families, ` +
+            `${summary.withEnoughHistory} with enough history, ${summary.cacheRowsWritten} cache rows`,
+            'fuelIssueRecordsLog.log'
+        );
+        res.status(200).json({
+            message: 'Fuel consumption averages recalculated for all equipment families.',
+            ...summary,
+        });
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error rebuilding fuel consumption averages: ${errorMessage}`, 'fuelIssueRecordsLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: error instanceof Error ? error.message : 'Failed to rebuild fuel consumption averages',
+        });
+    } finally {
         connection.release();
     }
 };

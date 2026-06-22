@@ -43,6 +43,10 @@ export default function CommunicationsPage() {
     const { showSuccessToast, showErrorToast } = useCustomToast();
 
     const [statusFilter, setStatusFilter] = useState('all');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [ackFilter, setAckFilter] = useState('all');
+    const [assignedToMe, setAssignedToMe] = useState(false);
     const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
     const [createOpen, setCreateOpen] = useState(false);
     const [title, setTitle] = useState('');
@@ -51,6 +55,13 @@ export default function CommunicationsPage() {
     const [submitting, setSubmitting] = useState(false);
 
     const canAssignTasks = permissions.includes('can_assign_tasks');
+    const canDeleteConversations = permissions.includes('can_delete_conversations');
+    const canBypassAcknowledgements = permissions.includes('can_bypass_acknowledgements');
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+        return () => window.clearTimeout(timer);
+    }, [searchQuery]);
 
     useEffect(() => {
         if (!user) {
@@ -58,10 +69,24 @@ export default function CommunicationsPage() {
         }
     }, [user, router]);
 
+    const listParams = useMemo(() => {
+        const params: Record<string, string> = { status: statusFilter };
+        if (debouncedSearch) {
+            params.q = debouncedSearch;
+        }
+        if (ackFilter !== 'all') {
+            params.ack = ackFilter;
+        }
+        if (assignedToMe) {
+            params.assignedToMe = '1';
+        }
+        return params;
+    }, [statusFilter, debouncedSearch, ackFilter, assignedToMe]);
+
     const { data: threadsResponse, isLoading, refetch } = useApiQuery<CommunicationThread[]>(
-        ['communications', 'threads', statusFilter],
+        ['communications', 'threads', listParams],
         '/api/communications',
-        { status: statusFilter },
+        listParams,
         { enabled: !!user }
     );
 
@@ -172,7 +197,12 @@ export default function CommunicationsPage() {
 
             <div className="grid gap-6 lg:grid-cols-[minmax(280px,360px)_1fr]">
                 <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-                    <div className="border-b border-slate-200 px-4 py-3">
+                    <div className="space-y-3 border-b border-slate-200 px-4 py-3">
+                        <Input
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            placeholder="Search title, message, or people..."
+                        />
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
                             <SelectTrigger className="w-full">
                                 <SelectValue placeholder="Filter by status" />
@@ -185,6 +215,25 @@ export default function CommunicationsPage() {
                                 <SelectItem value="closed">Closed</SelectItem>
                             </SelectContent>
                         </Select>
+                        <Select value={ackFilter} onValueChange={setAckFilter}>
+                            <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Acknowledgement" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All acknowledgements</SelectItem>
+                                <SelectItem value="pending">Pending my acknowledgement</SelectItem>
+                                <SelectItem value="acknowledged">Acknowledged by me</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={assignedToMe}
+                                onChange={(event) => setAssignedToMe(event.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300"
+                            />
+                            Assigned to me
+                        </label>
                     </div>
 
                     <div className="max-h-[calc(100vh-16rem)] overflow-y-auto">
@@ -204,7 +253,9 @@ export default function CommunicationsPage() {
                                 >
                                     <div className="flex items-start justify-between gap-2">
                                         <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">{thread.title}</h3>
-                                        {!thread.userHasAcknowledged && (thread.status === 'open' || thread.status === 'in_progress') && (
+                                        {!canBypassAcknowledgements
+                                            && !thread.userHasAcknowledged
+                                            && (thread.status === 'open' || thread.status === 'in_progress') && (
                                             <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
                                                 Pending
                                             </span>
@@ -229,7 +280,10 @@ export default function CommunicationsPage() {
                 <CommunicationThreadPanel
                     threadId={selectedThreadId}
                     canAssignTasks={canAssignTasks}
+                    canDeleteConversations={canDeleteConversations}
+                    canBypassAcknowledgements={canBypassAcknowledgements}
                     onUpdated={handleRefresh}
+                    onDeleted={() => setSelectedThreadId(null)}
                 />
             </div>
 

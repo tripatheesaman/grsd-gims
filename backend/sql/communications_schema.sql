@@ -116,6 +116,8 @@ SELECT * FROM (
     UNION ALL SELECT 9102, 'can_send_communications', 'Send Communications', 'communications', ''
     UNION ALL SELECT 9103, 'can_assign_tasks', 'Assign Communication Tasks', 'communications', ''
     UNION ALL SELECT 9104, 'can_close_all_messages', 'Close Any Communication', 'communications', ''
+    UNION ALL SELECT 9105, 'can_delete_conversations', 'Delete Communications', 'communications', ''
+    UNION ALL SELECT 9106, 'can_bypass_acknowledgements', 'Bypass Communication Acknowledgements', 'communications', ''
 ) AS seed
 WHERE NOT EXISTS (
     SELECT 1 FROM user_permissions up WHERE up.permission_name = seed.permission_name
@@ -132,7 +134,9 @@ WHERE dst.permission_name IN (
     'can_access_communications',
     'can_send_communications',
     'can_assign_tasks',
-    'can_close_all_messages'
+    'can_close_all_messages',
+    'can_delete_conversations',
+    'can_bypass_acknowledgements'
 );
 
 -- Optional: grant access + send to all active users

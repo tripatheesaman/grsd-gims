@@ -94,6 +94,8 @@ export const ensureCommunicationsSchema = async (): Promise<void> => {
         { name: 'can_send_communications', readable: 'Send Communications', type: 'communications' },
         { name: 'can_assign_tasks', readable: 'Assign Communication Tasks', type: 'communications' },
         { name: 'can_close_all_messages', readable: 'Close Any Communication', type: 'communications' },
+        { name: 'can_delete_conversations', readable: 'Delete Communications', type: 'communications' },
+        { name: 'can_bypass_acknowledgements', readable: 'Bypass Communication Acknowledgements', type: 'communications' },
     ];
 
     const [permRows] = await pool.query<any[]>(
