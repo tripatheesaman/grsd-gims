@@ -30,6 +30,7 @@ import {
 } from '@/components/approvals';
 import type { ApprovalTableColumn } from '@/components/approvals';
 import type { PersonDetails } from '@/types/personDetails';
+import { isFuelNacCode } from '@/lib/fuelNac';
 
 interface PendingIssue {
     id: number;
@@ -48,7 +49,7 @@ interface PendingIssue {
 }
 
 function groupPendingIssues(issues: PendingIssue[]): PendingIssue[] {
-    const nonFuelIssues = issues.filter((issue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000');
+    const nonFuelIssues = issues.filter((issue) => !isFuelNacCode(issue.nac_code));
     const groupedIssues = nonFuelIssues.reduce((acc: Record<string, PendingIssue[]>, curr) => {
         if (!acc[curr.issue_slip_number]) {
             acc[curr.issue_slip_number] = [];

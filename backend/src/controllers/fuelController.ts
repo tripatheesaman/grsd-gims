@@ -11,6 +11,7 @@ import {
     analyzeFuelConsumptionBatch,
     fuelTypeToNacCode,
 } from '../services/fuelConsumptionService';
+import { equipmentCodesEquivalent } from '../services/spareEquipmentDisplay';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -537,7 +538,9 @@ export const getFuelConfig = async (req: Request, res: Response): Promise<void> 
         logEvents(`Kilometers query took ${queryTime}ms for ${equipmentList.length} equipment (${batches.length} batches)`, "fuelLog.log");
 
         equipmentKilometers = equipmentList.reduce((acc: { [key: string]: number }, equipment: string) => {
-          const record = allKilometerResults.find(r => r.issued_for === equipment);
+          const record = allKilometerResults.find((r) =>
+              equipmentCodesEquivalent(String(r.issued_for), equipment)
+          );
           acc[equipment] = record && !record.is_kilometer_reset ? record.kilometers : 0;
           return acc;
         }, {});

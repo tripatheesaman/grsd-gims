@@ -8,6 +8,24 @@ import { getNacCodeValidationError, stripSuffixFromNac } from '../utils/nacCodeU
 
 export const FUEL_NAC_CODES = new Set(['GT 07986', 'GT 00000']);
 
+const FUEL_NAC_COMPACT = new Set(['GT07986', 'GT00000']);
+
+/** NAC without spaces — matches DB values stored as `GT 07986` or `GT07986`. */
+export const compactNacCode = (nac: string): string => String(nac || '').trim().replace(/\s+/g, '');
+
+export const isFuelNacCode = (nac: string): boolean => {
+    const trimmed = String(nac || '').trim();
+    return FUEL_NAC_CODES.has(trimmed) || FUEL_NAC_COMPACT.has(compactNacCode(nac));
+};
+
+/** SQL predicate: spare / non-fuel issue rows only. */
+export const sqlExcludeFuelNac = (alias = 'i'): string =>
+    `REPLACE(TRIM(${alias}.nac_code), ' ', '') NOT IN ('GT07986', 'GT00000')`;
+
+/** SQL predicate: fuel issue rows only. */
+export const sqlIncludeFuelNacOnly = (alias = 'i'): string =>
+    `REPLACE(TRIM(${alias}.nac_code), ' ', '') IN ('GT07986', 'GT00000')`;
+
 const INTERNAL_ISSUED_FOR_PREFIXES = ['code_transfer_to_'];
 
 export interface IssueValidationCaches {

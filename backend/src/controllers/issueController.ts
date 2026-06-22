@@ -12,7 +12,13 @@ import {
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { enrichIssuedByPerson } from '../services/personDetailsService';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
-import { validateIssuedFor, assessIssuedForApplicableExtension, type IssueValidationCaches } from '../services/issueValidationService';
+import {
+    validateIssuedFor,
+    assessIssuedForApplicableExtension,
+    sqlExcludeFuelNac,
+    sqlIncludeFuelNacOnly,
+    type IssueValidationCaches,
+} from '../services/issueValidationService';
 import {
     mergeFamilyEquipments,
     syncFamilySpareCompatibilityFromEquipment,
@@ -435,6 +441,7 @@ export const getPendingIssues = async (req: Request, res: Response): Promise<voi
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.approval_status = 'PENDING'
+      AND ${sqlExcludeFuelNac('i')}
       ORDER BY i.issue_date DESC`);
         const formattedIssues = await Promise.all(
             issues.map(async (issue) => ({
@@ -501,7 +508,7 @@ export const getPendingFuelIssues = async (req: Request, res: Response): Promise
       FROM issue_details i
       LEFT JOIN fuel_records f ON i.id = f.issue_fk
       WHERE i.approval_status = 'PENDING'
-      AND (i.nac_code = 'GT 07986' OR i.nac_code = 'GT 00000')
+      AND ${sqlIncludeFuelNacOnly('i')}
       ORDER BY i.issue_date ASC`);
         const consumptionStatsMap = await loadConsumptionStatsMap(
             connection,
