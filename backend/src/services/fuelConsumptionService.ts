@@ -1,4 +1,6 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { getEquipmentNumericBase } from './spareEquipmentDisplay';
+import { compactNacCode } from './issueValidationService';
 
 const MIN_VALID_TRIPS = 2;
 const FUEL_NAC_BY_TYPE: Record<string, string> = {
@@ -45,6 +47,58 @@ export const fuelTypeToNacCode = (fuelType: string): string => {
     return nac;
 };
 
+/** Canonical key for grouping fuel history (344, 344T, 344T14 → "344"). */
+export const equipmentConsumptionKey = (equipment: string): string => {
+    const trimmed = String(equipment || '').trim().toLowerCase();
+    if (!trimmed || trimmed === 'cleaning') {
+        return trimmed;
+    }
+    const base = getEquipmentNumericBase(trimmed);
+    return base ? base.toLowerCase() : trimmed;
+};
+
+export const consumptionStatsKey = (nacCode: string, equipment: string): string =>
+    `${String(nacCode || '').trim()}|${equipmentConsumptionKey(equipment)}`;
+
+const nacMatchSql = (alias: string): string =>
+    `REPLACE(TRIM(${alias}.nac_code), ' ', '') = ?`;
+
+const buildEquipmentMatchClause = (
+    equipment: string,
+    column = 'i.issued_for'
+): { sql: string; params: string[] } => {
+    const trimmed = String(equipment || '').trim();
+    const base = getEquipmentNumericBase(trimmed);
+    if (base) {
+        return {
+            sql: `(LOWER(TRIM(${column})) = LOWER(?) OR LOWER(TRIM(${column})) REGEXP ?)`,
+            params: [trimmed, `^${base}(t.*)?$`],
+        };
+    }
+    return {
+        sql: `LOWER(TRIM(${column})) = LOWER(?)`,
+        params: [trimmed],
+    };
+};
+
+const buildMultipleEquipmentMatchClause = (
+    equipments: string[],
+    column = 'i.issued_for'
+): { sql: string; params: string[] } => {
+    const unique = [...new Set(equipments.map((e) => String(e || '').trim()).filter(Boolean))];
+    if (unique.length === 0) {
+        return { sql: '1=0', params: [] };
+    }
+    const parts: string[] = [];
+    const params: string[] = [];
+    for (const equipment of unique) {
+        const match = buildEquipmentMatchClause(equipment, column);
+        parts.push(`(${match.sql})`);
+        params.push(...match.params);
+    }
+    return { sql: `(${parts.join(' OR ')})`, params };
+};
+
 export const computeConsumptionStats = (history: FuelHistoryRow[]): FuelConsumptionStats => {
     let totalKm = 0;
     let totalLiters = 0;
@@ -85,7 +139,8 @@ export async function getApprovedFuelHistory(
     equipment: string,
     excludeIssueId?: number
 ): Promise<FuelHistoryRow[]> {
-    const params: Array<string | number> = [nacCode, equipment.trim()];
+    const equipmentMatch = buildEquipmentMatchClause(equipment);
+    const params: Array<string | number> = [compactNacCode(nacCode), ...equipmentMatch.params];
     let excludeClause = '';
     if (excludeIssueId) {
         excludeClause = ' AND i.id <> ?';
@@ -97,8 +152,8 @@ export async function getApprovedFuelHistory(
          FROM issue_details i
          INNER JOIN fuel_records f ON f.issue_fk = i.id
          WHERE i.approval_status = 'APPROVED'
-           AND i.nac_code = ?
-           AND LOWER(TRIM(i.issued_for)) = LOWER(TRIM(?))
+           AND ${nacMatchSql('i')}
+           AND ${equipmentMatch.sql}
            ${excludeClause}
          ORDER BY i.issue_date ASC, i.id ASC`,
         params
@@ -118,7 +173,8 @@ export async function getLatestOdometerReading(
     equipment: string,
     beforeIssueDate?: string
 ): Promise<number> {
-    const params: Array<string> = [nacCode, equipment.trim()];
+    const equipmentMatch = buildEquipmentMatchClause(equipment);
+    const params: Array<string> = [compactNacCode(nacCode), ...equipmentMatch.params];
     let dateClause = '';
     if (beforeIssueDate) {
         dateClause = ' AND i.issue_date < ?';
@@ -129,8 +185,8 @@ export async function getLatestOdometerReading(
         `SELECT f.kilometers, f.is_kilometer_reset
          FROM fuel_records f
          INNER JOIN issue_details i ON f.issue_fk = i.id
-         WHERE i.nac_code = ?
-           AND LOWER(TRIM(i.issued_for)) = LOWER(TRIM(?))
+         WHERE ${nacMatchSql('i')}
+           AND ${equipmentMatch.sql}
            ${dateClause}
          ORDER BY i.issue_date DESC, f.id DESC
          LIMIT 1`,
@@ -146,9 +202,6 @@ export async function getLatestOdometerReading(
     }
     return Number(row.kilometers) || 0;
 }
-
-export const consumptionStatsKey = (nacCode: string, equipment: string): string =>
-    `${nacCode}|${String(equipment || '').trim().toLowerCase()}`;
 
 export function buildConsumptionAnalysis(
     stats: FuelConsumptionStats,
@@ -219,18 +272,19 @@ export async function loadConsumptionStatsMap(
         return map;
     }
 
-    const nacCodes = [...new Set([...unique.values()].map((entry) => entry.nacCode))];
-    const equipmentList = [...new Set([...unique.values()].map((entry) => entry.equipment.toLowerCase()))];
+    const nacCodes = [...new Set([...unique.values()].map((entry) => compactNacCode(entry.nacCode)))];
+    const equipmentList = [...unique.values()].map((entry) => entry.equipment);
+    const equipmentMatch = buildMultipleEquipmentMatchClause(equipmentList);
 
     const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT i.nac_code, i.issued_for, i.issue_date, i.issue_quantity, f.kilometers, f.is_kilometer_reset
          FROM issue_details i
          INNER JOIN fuel_records f ON f.issue_fk = i.id
          WHERE i.approval_status = 'APPROVED'
-           AND i.nac_code IN (${nacCodes.map(() => '?').join(',')})
-           AND LOWER(TRIM(i.issued_for)) IN (${equipmentList.map(() => '?').join(',')})
+           AND REPLACE(TRIM(i.nac_code), ' ', '') IN (${nacCodes.map(() => '?').join(',')})
+           AND ${equipmentMatch.sql}
          ORDER BY i.nac_code, LOWER(TRIM(i.issued_for)), i.issue_date ASC, i.id ASC`,
-        [...nacCodes, ...equipmentList]
+        [...nacCodes, ...equipmentMatch.params]
     );
 
     const grouped = new Map<string, FuelHistoryRow[]>();

@@ -14,7 +14,9 @@ import {
     getFamilyVariants,
     previewReceiveTarget,
     syncFamilyLocation,
+    compactFamilySuffixesAfterDelete,
 } from '../services/inventoryVariantService';
+import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { buildStockSearchKey } from '../services/searchRelevanceService';
 import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
@@ -411,26 +413,54 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
 export const deleteStockItem = async (req: Request, res: Response): Promise<void> => {
     const { id } = req.params;
     const connection = await pool.getConnection();
+    let started = false;
     try {
-        const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id FROM stock_details WHERE id = ?', [id]);
+        await connection.beginTransaction();
+        started = true;
+        await ensureAssetSpareSchema();
+
+        const [existingItem] = await connection.execute<RowDataPacket[]>(
+            'SELECT id, nac_code FROM stock_details WHERE id = ? FOR UPDATE',
+            [id]
+        );
         if (existingItem.length === 0) {
+            await connection.rollback();
+            started = false;
             res.status(404).json({
                 error: 'Not Found',
-                message: 'Stock item not found'
+                message: 'Stock item not found',
             });
             return;
         }
+
+        const row = existingItem[0];
         await connection.execute('DELETE FROM stock_details WHERE id = ?', [id]);
+
+        const affectedNacs = await compactFamilySuffixesAfterDelete(connection, {
+            id: Number(row.id),
+            nac_code: String(row.nac_code),
+        });
+
+        for (const nacCode of affectedNacs) {
+            await rebuildNacInventoryState(connection, nacCode);
+        }
+
+        await connection.commit();
+        started = false;
         res.status(200).json({
-            message: 'Stock item deleted successfully'
+            message: 'Stock item deleted successfully',
+            renumberedNacCodes: affectedNacs,
         });
     }
     catch (error) {
+        if (started) {
+            await connection.rollback();
+        }
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         logEvents(`Error in deleteStockItem: ${errorMessage}`, "stockLog.log");
         res.status(500).json({
             error: 'Internal Server Error',
-            message: errorMessage
+            message: errorMessage,
         });
     }
     finally {

@@ -5,18 +5,24 @@ import { formatDate, formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import {
+    allocateQuantityAcrossFamilyVariants,
     getVariantBalances,
+    mergeFamilyEquipments,
     resolveAndPersistTransactionVariant,
     resolveTransactionVariantTarget,
+    syncFamilySpareCompatibilityFromEquipment,
 } from '../services/inventoryVariantService';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { enrichIssuedByPerson } from '../services/personDetailsService';
 import { resolveCurrentFiscalYear } from '../services/fiscalYearService';
-import { validateIssuedFor, assessIssuedForApplicableExtension, type IssueValidationCaches } from '../services/issueValidationService';
 import {
-    mergeFamilyEquipments,
-    syncFamilySpareCompatibilityFromEquipment,
-} from '../services/inventoryVariantService';
+    validateIssuedFor,
+    assessIssuedForApplicableExtension,
+    sqlExcludeFuelNac,
+    sqlIncludeFuelNacOnly,
+    isFuelNacCode,
+    type IssueValidationCaches,
+} from '../services/issueValidationService';
 import { expandEquipmentTokensToSet } from '../services/spareEquipmentDisplay';
 import { stripSuffixFromNac } from '../utils/nacCodeUtils';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
@@ -69,11 +75,70 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
 
         const validationCaches: IssueValidationCaches = {};
         const resolvedItems: Array<
-            IssueItem & { resolvedNac: string; resolvedPart: string; extendsApplicableEquipment: boolean }
+            IssueItem & {
+                resolvedNac: string;
+                resolvedPart: string;
+                extendsApplicableEquipment: boolean;
+                originalIndex: number;
+            }
         > = [];
 
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
+            const originalIndex = item.originalIndex ?? i;
+
+            if (isFuelNacCode(item.nacCode)) {
+                const issuedForCheck = await validateIssuedFor(
+                    connection,
+                    item.nacCode,
+                    item.equipmentNumber,
+                    validationCaches
+                );
+                if (!issuedForCheck.valid) {
+                    validationErrors.push({
+                        nacCode: item.nacCode,
+                        message: issuedForCheck.message || `Invalid equipment ${item.equipmentNumber}`,
+                        originalIndex,
+                    });
+                    continue;
+                }
+
+                const extendsApplicableEquipment = await assessIssuedForApplicableExtension(
+                    connection,
+                    item.nacCode,
+                    item.equipmentNumber,
+                    validationCaches
+                );
+
+                try {
+                    const allocations = await allocateQuantityAcrossFamilyVariants(
+                        connection,
+                        item.nacCode,
+                        item.quantity
+                    );
+                    for (const allocation of allocations) {
+                        resolvedItems.push({
+                            ...item,
+                            quantity: allocation.quantity,
+                            resolvedNac: allocation.nacCode,
+                            resolvedPart: allocation.partNumber || item.partNumber,
+                            extendsApplicableEquipment,
+                            originalIndex,
+                        });
+                    }
+                } catch (allocationError) {
+                    validationErrors.push({
+                        nacCode: item.nacCode,
+                        message:
+                            allocationError instanceof Error
+                                ? allocationError.message
+                                : `Insufficient stock for ${item.nacCode}`,
+                        originalIndex,
+                    });
+                }
+                continue;
+            }
+
             const resolved = await resolveTransactionVariantTarget(connection, {
                 nacCode: item.nacCode,
                 partNumber: item.partNumber,
@@ -91,7 +156,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 validationErrors.push({
                     nacCode: item.nacCode,
                     message: issuedForCheck.message || `Invalid equipment ${item.equipmentNumber}`,
-                    originalIndex: i
+                    originalIndex,
                 });
                 continue;
             }
@@ -108,7 +173,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 validationErrors.push({
                     nacCode: item.nacCode,
                     message: `Item with NAC code ${item.nacCode} not found`,
-                    originalIndex: i
+                    originalIndex,
                 });
                 continue;
             }
@@ -116,7 +181,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 validationErrors.push({
                     nacCode: item.nacCode,
                     message: `Insufficient stock. Requested: ${item.quantity}, Available: ${balances.trueBalance}`,
-                    originalIndex: i
+                    originalIndex,
                 });
                 continue;
             }
@@ -125,6 +190,7 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 resolvedNac: nacCode,
                 resolvedPart: resolved.partNumber || item.partNumber,
                 extendsApplicableEquipment,
+                originalIndex,
             });
         }
         if (validationErrors.length > 0) {
@@ -198,7 +264,8 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
             message: 'Issue created successfully',
             issueDate: formatDate(issueDate),
             issueSlipNumber,
-            issueIds: sortedIssueIds
+            issueIds: sortedIssueIds,
+            issueEntries: issueIds,
         });
     }
     catch (error) {
@@ -435,6 +502,7 @@ export const getPendingIssues = async (req: Request, res: Response): Promise<voi
       FROM issue_details i
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.approval_status = 'PENDING'
+      AND ${sqlExcludeFuelNac('i')}
       ORDER BY i.issue_date DESC`);
         const formattedIssues = await Promise.all(
             issues.map(async (issue) => ({
@@ -501,7 +569,7 @@ export const getPendingFuelIssues = async (req: Request, res: Response): Promise
       FROM issue_details i
       LEFT JOIN fuel_records f ON i.id = f.issue_fk
       WHERE i.approval_status = 'PENDING'
-      AND (i.nac_code = 'GT 07986' OR i.nac_code = 'GT 00000')
+      AND ${sqlIncludeFuelNacOnly('i')}
       ORDER BY i.issue_date ASC`);
         const consumptionStatsMap = await loadConsumptionStatsMap(
             connection,

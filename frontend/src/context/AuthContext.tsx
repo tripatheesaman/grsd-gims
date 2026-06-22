@@ -43,20 +43,6 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
         }
     };
 
-    const syncPermissionsFromApi = useCallback(async () => {
-        try {
-            const response = await API.get<string[]>("/api/auth/permissions");
-            if (Array.isArray(response.data) && response.data.length > 0) {
-                setPermissions(response.data);
-                return response.data;
-            }
-        }
-        catch {
-            // fall back to JWT permissions
-        }
-        return null;
-    }, []);
-
     const applySession = useCallback((accessToken: string) => {
         localStorage.setItem("token", accessToken);
         setAuthHeader(accessToken);
@@ -83,6 +69,39 @@ export const AuthContextProvider: React.FC<AuthContextProviderProps> = ({ childr
             return false;
         }
     }, [applySession, setAuthHeader]);
+
+    const syncPermissionsFromApi = useCallback(async () => {
+        try {
+            const response = await API.get<string[]>("/api/auth/permissions");
+            if (Array.isArray(response.data)) {
+                const serverPermissions = response.data;
+                const token = localStorage.getItem("token");
+                const tokenPermissions = token
+                    ? (jwtDecode<User>(token).UserInfo?.permissions ?? [])
+                    : [];
+
+                const normalizedServer = [...serverPermissions].sort();
+                const normalizedToken = [...tokenPermissions].sort();
+                const permissionsChanged =
+                    normalizedServer.length !== normalizedToken.length ||
+                    normalizedServer.some((permission, index) => permission !== normalizedToken[index]);
+
+                if (permissionsChanged) {
+                    const refreshed = await refreshSession();
+                    if (refreshed) {
+                        return serverPermissions;
+                    }
+                }
+
+                setPermissions(serverPermissions);
+                return serverPermissions;
+            }
+        }
+        catch {
+            // fall back to JWT permissions
+        }
+        return null;
+    }, [refreshSession]);
 
     const initializeAuth = useCallback(async () => {
         const token = localStorage.getItem("token");

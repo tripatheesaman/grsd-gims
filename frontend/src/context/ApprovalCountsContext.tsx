@@ -6,6 +6,7 @@ import { PENDING_APPROVAL_QUERY_OPTIONS } from '@/hooks/api/usePendingApprovals'
 import { invalidatePendingApprovals } from '@/lib/invalidatePendingApprovals';
 import { queryKeys } from '@/lib/queryKeys';
 import { useAuthContext } from '@/context/AuthContext';
+import { isFuelNacCode } from '@/lib/fuelNac';
 
 interface ApprovalCounts {
     requests: number | null;
@@ -225,7 +226,7 @@ export const ApprovalCountsProvider = ({ children }: {
                 : [];
             const grouped = new Map<string, true>();
             issues
-                .filter((issue) => issue.nac_code !== 'GT 07986' && issue.nac_code !== 'GT 00000')
+                .filter((issue) => !isFuelNacCode(issue.nac_code ?? ''))
                 .forEach((issue) => {
                     if (issue.issue_slip_number) {
                         grouped.set(issue.issue_slip_number, true);

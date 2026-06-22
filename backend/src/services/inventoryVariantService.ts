@@ -5,6 +5,7 @@ import {
     normalizePartNumber,
     parseNacCode,
     stripSuffixFromNac,
+    type ParsedNacCode,
 } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 import { VARIANT_TRUE_BALANCE_SQL, VARIANT_VIRTUAL_BALANCE_SQL, expandEquipmentTokens } from './spareEquipmentDisplay';
@@ -864,6 +865,198 @@ export async function syncFamilySpareCompatibilityFromEquipment(
 
 /** @deprecated Use previewReceiveTarget */
 export const resolveReceiveTarget = previewReceiveTarget;
+
+/** Sort key for FIFO: base family code first, then A, B, C… */
+export function variantSuffixRank(nacCode: string): number {
+    const parsed = parseNacCode(nacCode);
+    if (!parsed) {
+        return Number.MAX_SAFE_INTEGER;
+    }
+    if (!parsed.isSubCode || !parsed.suffix) {
+        return 0;
+    }
+    return parsed.suffix.charCodeAt(0) - 64;
+}
+
+export function sortVariantsBySuffix(variants: StockVariantRow[]): StockVariantRow[] {
+    return [...variants].sort((left, right) => {
+        const rankDiff = variantSuffixRank(left.nac_code) - variantSuffixRank(right.nac_code);
+        if (rankDiff !== 0) {
+            return rankDiff;
+        }
+        return String(left.nac_code).localeCompare(String(right.nac_code));
+    });
+}
+
+export type VariantQuantityAllocation = {
+    nacCode: string;
+    partNumber: string;
+    quantity: number;
+};
+
+export async function getFamilyTotalTrueBalance(
+    connection: PoolConnection,
+    nacOrBase: string
+): Promise<number> {
+    const base = stripSuffixFromNac(nacOrBase);
+    const variants = await getFamilyVariants(connection, base);
+    if (!variants.length) {
+        const balances = await getVariantBalances(connection, base);
+        return balances?.trueBalance ?? 0;
+    }
+
+    let total = 0;
+    for (const variant of variants) {
+        const balances = await getVariantBalances(connection, variant.nac_code);
+        total += balances?.trueBalance ?? 0;
+    }
+    return total;
+}
+
+/** Consume quantity from earliest sub-codes with available true balance (FIFO). */
+export async function allocateQuantityAcrossFamilyVariants(
+    connection: PoolConnection,
+    nacOrBase: string,
+    quantity: number
+): Promise<VariantQuantityAllocation[]> {
+    const requested = Number(quantity);
+    if (!Number.isFinite(requested) || requested <= 0) {
+        return [];
+    }
+
+    const base = stripSuffixFromNac(nacOrBase);
+    const variants = sortVariantsBySuffix(await getFamilyVariants(connection, base));
+    const allocations: VariantQuantityAllocation[] = [];
+    let remaining = requested;
+
+    for (const variant of variants) {
+        if (remaining <= 0) {
+            break;
+        }
+        const balances = await getVariantBalances(connection, variant.nac_code);
+        const available = balances?.trueBalance ?? 0;
+        if (available <= 0) {
+            continue;
+        }
+        const take = Math.min(remaining, available);
+        allocations.push({
+            nacCode: variant.nac_code,
+            partNumber: normalizePartNumber(variant.part_numbers),
+            quantity: take,
+        });
+        remaining -= take;
+    }
+
+    if (remaining > 0) {
+        const available = await getFamilyTotalTrueBalance(connection, base);
+        throw new Error(
+            `Insufficient stock. Requested: ${requested}, Available: ${available}`
+        );
+    }
+
+    return allocations;
+}
+
+export async function renameStockVariantNac(
+    connection: PoolConnection,
+    oldNacCode: string,
+    newNacCode: string
+): Promise<void> {
+    if (oldNacCode === newNacCode) {
+        return;
+    }
+    await remapNacCodeReferences(connection, oldNacCode, newNacCode);
+    await connection.execute(`UPDATE stock_details SET nac_code = ? WHERE nac_code = ?`, [
+        newNacCode,
+        oldNacCode,
+    ]);
+}
+
+/**
+ * After deleting a sub-code (e.g. GT 12345A), shift later letters down (B→A, C→B).
+ */
+export async function compactFamilySuffixesAfterDelete(
+    connection: PoolConnection,
+    deletedRow: Pick<StockVariantRow, 'id' | 'nac_code'>
+): Promise<string[]> {
+    const parsed = parseNacCode(String(deletedRow.nac_code || ''));
+    if (!parsed?.isSubCode || !parsed.suffix) {
+        return [];
+    }
+
+    const base = parsed.baseNacCode;
+    const deletedSuffixCode = parsed.suffix.charCodeAt(0);
+    const variants = await getFamilyVariants(connection, base);
+    const usedLetters = new Set(
+        variants
+            .filter((variant) => variant.id !== deletedRow.id)
+            .map((variant) => parseNacCode(variant.nac_code)?.suffix)
+            .filter((suffix): suffix is string => Boolean(suffix))
+    );
+
+    const toRenumber = variants
+        .filter((variant) => variant.id !== deletedRow.id)
+        .map((variant) => ({
+            variant,
+            parsed: parseNacCode(variant.nac_code),
+        }))
+        .filter(
+            (
+                entry
+            ): entry is {
+                variant: StockVariantRow;
+                parsed: ParsedNacCode & { isSubCode: true; suffix: string };
+            } =>
+                Boolean(
+                    entry.parsed?.isSubCode &&
+                        entry.parsed.suffix &&
+                        entry.parsed.suffix.charCodeAt(0) > deletedSuffixCode
+                )
+        )
+        .sort(
+            (left, right) =>
+                right.parsed.suffix.charCodeAt(0) - left.parsed.suffix.charCodeAt(0)
+        );
+
+    if (!toRenumber.length) {
+        return [];
+    }
+
+    const tempLetters: string[] = [];
+    for (let index = 25; index >= 0 && tempLetters.length < toRenumber.length; index -= 1) {
+        const letter = letterForIndex(index);
+        if (!usedLetters.has(letter)) {
+            tempLetters.push(letter);
+        }
+    }
+    if (tempLetters.length < toRenumber.length) {
+        throw new Error('Unable to renumber sub-codes after delete — no temporary suffix letters available');
+    }
+
+    const steps = toRenumber.map((entry, index) => {
+        const oldIndex = entry.parsed.suffix.charCodeAt(0) - 65;
+        const newIndex = oldIndex - 1;
+        return {
+            oldNac: entry.variant.nac_code,
+            tempNac: buildSubNacCode(base, tempLetters[index]),
+            finalNac: buildSubNacCode(base, letterForIndex(newIndex)),
+        };
+    });
+
+    const affected = new Set<string>();
+    for (const step of steps) {
+        await renameStockVariantNac(connection, step.oldNac, step.tempNac);
+        affected.add(step.oldNac);
+        affected.add(step.tempNac);
+    }
+    for (const step of steps) {
+        await renameStockVariantNac(connection, step.tempNac, step.finalNac);
+        affected.add(step.tempNac);
+        affected.add(step.finalNac);
+    }
+
+    return [...affected];
+}
 
 export async function ensureBaseNacCodeOnRow(
     connection: PoolConnection,
