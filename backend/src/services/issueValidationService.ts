@@ -355,14 +355,15 @@ export const validateIssuedFor = async (
     }
     const sectionCodes = caches.sectionCodes;
 
-    if (FUEL_NAC_CODES.has(normalizedNac)) {
+    if (isFuelNacCode(normalizedNac)) {
+        const fuelBase = stripSuffixFromNac(normalizedNac);
         if (!caches.fuelEquipmentByNac) {
             caches.fuelEquipmentByNac = new Map();
         }
-        let fuelSet = caches.fuelEquipmentByNac.get(normalizedNac);
+        let fuelSet = caches.fuelEquipmentByNac.get(fuelBase);
         if (!fuelSet) {
-            fuelSet = await loadFuelValidEquipment(connection, normalizedNac);
-            caches.fuelEquipmentByNac.set(normalizedNac, fuelSet);
+            fuelSet = await loadFuelValidEquipment(connection, fuelBase);
+            caches.fuelEquipmentByNac.set(fuelBase, fuelSet);
         }
 
         const assetCodes = await loadAssetEquipmentCodes(connection, tokens, caches);
@@ -405,7 +406,7 @@ export const assessIssuedForApplicableExtension = async (
     caches: IssueValidationCaches = {}
 ): Promise<boolean> => {
     const normalizedNac = normalizeCode(nacCode);
-    if (FUEL_NAC_CODES.has(normalizedNac)) {
+    if (isFuelNacCode(normalizedNac)) {
         return false;
     }
 

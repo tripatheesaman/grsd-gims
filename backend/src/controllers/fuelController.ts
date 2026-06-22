@@ -12,6 +12,7 @@ import {
     fuelTypeToNacCode,
 } from '../services/fuelConsumptionService';
 import { equipmentCodesEquivalent } from '../services/spareEquipmentDisplay';
+import { getFamilyTotalTrueBalance } from '../services/inventoryVariantService';
 
 interface FuelRecordResult {
   issue_id: number;
@@ -143,35 +144,13 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
     for (const record of payload.records) {
       totalFuelNeeded += record.quantity;
     }
-    
-    for (const record of payload.records) {
-      const nacCode = getNacCode(payload.fuel_type);
-      
-      const [stockResults] = await connection.query<RowDataPacket[]>(
-        'SELECT id, nac_code, current_balance FROM stock_details WHERE nac_code = ? COLLATE utf8mb4_unicode_ci',
-        [nacCode]
-      );
 
-      if (stockResults.length === 0) {
-        const [insertResult] = await connection.query(
-          `INSERT INTO stock_details 
-          (nac_code, item_name, part_numbers, applicable_equipments, current_balance, unit) 
-          VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            nacCode,
-            `${payload.fuel_type.charAt(0).toUpperCase() + payload.fuel_type.slice(1)} Fuel`,
-            'N/A',
-            record.equipment_number,
-            0,
-            'Liters'
-          ]
-        );
-      } else {
-        const currentBalance = stockResults[0].current_balance;
-        if (currentBalance < totalFuelNeeded) {
-          throw new Error(`Insufficient ${payload.fuel_type} fuel. Total requested: ${totalFuelNeeded}L, Available: ${currentBalance}L`);
-        }
-      }
+    const baseFuelNac = getNacCode(payload.fuel_type);
+    const familyBalance = await getFamilyTotalTrueBalance(connection, baseFuelNac);
+    if (familyBalance < totalFuelNeeded) {
+      throw new Error(
+        `Insufficient ${payload.fuel_type} fuel. Total requested: ${totalFuelNeeded}L, Available: ${familyBalance}L`
+      );
     }
 
     const issueReq = {
@@ -191,18 +170,30 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       }
     } as Request;
 
-    let issueIds: number[] = [];
+    let issueEntries: Array<{ id: number; originalIndex: number }> = [];
     let issueErrorMessage: string | null = null;
 
     const issueRes = {
       status: (code: number) => ({
-        json: (data: { issueIds?: number[]; message?: string; error?: string; validationErrors?: Array<{ message?: string }> }) => {
+        json: (data: {
+          issueIds?: number[];
+          issueEntries?: Array<{ id: number; originalIndex: number }>;
+          message?: string;
+          error?: string;
+          validationErrors?: Array<{ message?: string }>;
+        }) => {
           logEvents(`CreateIssue response data: ${JSON.stringify(data)}`, "fuelLog.log");
 
           if (code === 201) {
-            if (data.issueIds && Array.isArray(data.issueIds)) {
-              issueIds = data.issueIds;
-              logEvents(`Issue records created successfully with IDs: ${issueIds.join(', ')}`, "fuelLog.log");
+            if (data.issueEntries && Array.isArray(data.issueEntries)) {
+              issueEntries = data.issueEntries;
+              logEvents(
+                `Issue records created successfully with IDs: ${issueEntries.map((entry) => entry.id).join(', ')}`,
+                "fuelLog.log"
+              );
+            } else if (data.issueIds && Array.isArray(data.issueIds)) {
+              issueEntries = data.issueIds.map((id, index) => ({ id, originalIndex: index }));
+              logEvents(`Issue records created successfully with IDs: ${data.issueIds.join(', ')}`, "fuelLog.log");
             } else {
               issueErrorMessage = 'Failed to create issue record - No issue IDs returned';
               logEvents(`Failed to find issue IDs in response: ${JSON.stringify(data)}`, "fuelLog.log");
@@ -220,7 +211,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       logEvents(`Sending createIssue request: ${JSON.stringify(issueReq.body)}`, "fuelLog.log");
       await createIssue(issueReq, issueRes);
 
-      if (issueIds.length === 0) {
+      if (issueEntries.length === 0) {
         throw new Error(issueErrorMessage || 'Failed to create issue record - No issue IDs returned');
       }
     } catch (error) {
@@ -229,24 +220,37 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
       throw new Error(message);
     }
 
+    const issueIdsByRecord = new Map<number, number[]>();
+    for (const entry of issueEntries) {
+      const existing = issueIdsByRecord.get(entry.originalIndex) ?? [];
+      existing.push(entry.id);
+      issueIdsByRecord.set(entry.originalIndex, existing);
+    }
+
     for (let i = 0; i < payload.records.length; i++) {
       const record = payload.records[i];
-      const issueId = issueIds[i];
+      const linkedIssueIds = issueIdsByRecord.get(i) ?? [];
+      const issueId = linkedIssueIds[0];
+      if (!issueId) {
+        throw new Error(`Failed to link fuel record to issue for line ${i + 1}`);
+      }
       
       let fuelPrice = payload.price;
       if (payload.fuel_type.toLowerCase() === 'diesel') {
+        const placeholders = linkedIssueIds.map(() => '?').join(', ');
         const [issueDetails] = await connection.query<RowDataPacket[]>(
-          `SELECT issue_cost, issue_quantity FROM issue_details WHERE id = ?`,
-          [issueId]
+          `SELECT issue_cost, issue_quantity FROM issue_details WHERE id IN (${placeholders})`,
+          linkedIssueIds
         );
         
-        if (issueDetails.length > 0 && issueDetails[0].issue_cost && issueDetails[0].issue_quantity) {
-          const issueCost = Number(issueDetails[0].issue_cost);
-          const issueQuantity = Number(issueDetails[0].issue_quantity);
-          if (issueQuantity > 0) {
-            fuelPrice = issueCost / issueQuantity;
-            logEvents(`Calculated diesel fuel_price from FIFO: ${fuelPrice} (cost: ${issueCost}, qty: ${issueQuantity})`, "fuelLog.log");
-          }
+        const totalCost = issueDetails.reduce((sum, row) => sum + Number(row.issue_cost || 0), 0);
+        const totalQuantity = issueDetails.reduce((sum, row) => sum + Number(row.issue_quantity || 0), 0);
+        if (totalQuantity > 0) {
+          fuelPrice = totalCost / totalQuantity;
+          logEvents(
+            `Calculated diesel fuel_price from FIFO across ${linkedIssueIds.length} allocation(s): ${fuelPrice}`,
+            "fuelLog.log"
+          );
         }
       }
       
@@ -277,7 +281,7 @@ export const createFuelRecord = async (req: Request, res: Response): Promise<voi
 
     res.status(201).json({
       message: 'Fuel records created successfully',
-      issue_ids: issueIds
+      issue_ids: [...issueIdsByRecord.values()].flat(),
     });
   } catch (error) {
     await connection.rollback();

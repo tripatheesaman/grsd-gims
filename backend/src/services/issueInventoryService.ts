@@ -1,6 +1,6 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { logEvents } from '../middlewares/logger';
-const FUEL_NAC_CODES = new Set(['GT 07986', 'GT 00000']);
+import { isFuelNacCode } from './issueValidationService';
 interface ReceiveLot {
     id: number;
     totalQuantity: number;
@@ -105,7 +105,7 @@ export const rebuildNacInventoryState = async (connection: PoolConnection, nacCo
     const activeReceiveLots: ReceiveLot[] = [];
     let runningBalance = openingRemaining;
     const issueUpdates: IssueUpdate[] = [];
-    const isFuelNac = FUEL_NAC_CODES.has(nacCode);
+    const isFuelNac = isFuelNacCode(nacCode);
     for (const event of timeline) {
         if (event.type === 'receive') {
             activeReceiveLots.push(event.lot);
