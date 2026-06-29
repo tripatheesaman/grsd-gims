@@ -209,10 +209,10 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
             newErrors.quantity = 'Quantity must be greater than 0';
         }
         const variantBalance = selectedVariant
-            ? Number(selectedVariant.trueBalance)
-            : Number(item.trueBalance ?? 0);
+            ? Number(selectedVariant.virtualBalance)
+            : Number(item.virtualBalance ?? 0);
         if (quantityNum > variantBalance) {
-            newErrors.quantity = 'Quantity cannot exceed true balance (RRP completed stock)';
+            newErrors.quantity = 'Quantity cannot exceed available virtual balance';
         }
         if (!selectedEquipment) {
             newErrors.equipment = 'Please select an equipment';
@@ -236,7 +236,7 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
             itemName: item.itemName,
             quantity: parseFloat(quantity),
             equipmentNumber: item.equipmentNumber,
-            currentBalance: selectedVariant ? Number(selectedVariant.trueBalance) : Number(item.trueBalance ?? 0),
+            currentBalance: selectedVariant ? Number(selectedVariant.virtualBalance) : Number(item.virtualBalance ?? 0),
             partNumber: selectedPartNumber,
             selectedEquipment,
             issueQuantity: parseFloat(quantity),
@@ -379,10 +379,10 @@ export function IssueItemForm({ isOpen, onClose, item, onSubmit }: IssueItemForm
                 onChange={(e) => setQuantity(e.target.value)}
                 className={cn(errors.quantity ? 'border-red-500' : 'border-[#002a6e]/10')}
                 placeholder="Enter quantity"
-                max={selectedVariant ? selectedVariant.trueBalance : item.trueBalance}
+                max={selectedVariant ? selectedVariant.virtualBalance : item.virtualBalance}
               />
               <p className="text-xs text-gray-500">
-                Max (true balance): {selectedVariant?.trueBalance ?? item.trueBalance ?? '—'}
+                Max (virtual balance): {selectedVariant?.virtualBalance ?? item.virtualBalance ?? '—'}
               </p>
               {errors.quantity && (
                 <p className="text-sm text-red-500 flex items-center gap-1">

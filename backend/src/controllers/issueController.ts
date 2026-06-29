@@ -177,10 +177,10 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
                 });
                 continue;
             }
-            if (item.quantity > balances.trueBalance) {
+            if (item.quantity > balances.virtualBalance) {
                 validationErrors.push({
                     nacCode: item.nacCode,
-                    message: `Insufficient stock. Requested: ${item.quantity}, Available: ${balances.trueBalance}`,
+                    message: `Insufficient stock. Requested: ${item.quantity}, Available: ${balances.virtualBalance}`,
                     originalIndex,
                 });
                 continue;

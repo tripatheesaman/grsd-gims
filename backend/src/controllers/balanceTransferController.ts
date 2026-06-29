@@ -4,6 +4,7 @@ import pool from '../config/db';
 import { formatDateForDB } from '../utils/dateUtils';
 import { logEvents } from '../middlewares/logger';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import { stripSuffixFromNac } from '../utils/nacCodeUtils';
 interface TransferrableItem extends RowDataPacket {
     id: number;
     nac_code: string;
@@ -63,7 +64,9 @@ export const getTransferrableItems = async (req: Request, res: Response): Promis
 export const getExistingNacCodes = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        const [results] = await connection.query<RowDataPacket[]>('SELECT DISTINCT nac_code FROM stock_details ORDER BY nac_code');
+        const [results] = await connection.query<RowDataPacket[]>(
+            'SELECT DISTINCT nac_code FROM stock_details ORDER BY nac_code'
+        );
         const nacCodes = results.map(row => row.nac_code);
         res.status(200).json(nacCodes);
     }
@@ -79,6 +82,81 @@ export const getExistingNacCodes = async (req: Request, res: Response): Promise<
         connection.release();
     }
 };
+
+export const searchDestinationNacCodes = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    try {
+        const { search, excludeNac, page = 1, pageSize = 25 } = req.query;
+        const rawSearch = String(search || '').trim();
+        const exclude = String(excludeNac || '').trim();
+        const limit = Math.min(Math.max(parseInt(String(pageSize)) || 25, 1), 50);
+        const offset = ((Math.max(parseInt(String(page)) || 1, 1) - 1) * limit);
+
+        if (rawSearch.length > 0 && rawSearch.length < 2) {
+            res.status(200).json({ data: [], pagination: { currentPage: 1, pageSize: limit, totalCount: 0, totalPages: 0 } });
+            return;
+        }
+
+        let where = `WHERE sd.nac_code IS NOT NULL AND sd.nac_code != ''`;
+        const params: string[] = [];
+        if (exclude) {
+            where += ` AND sd.nac_code != ?`;
+            params.push(exclude);
+        }
+        if (rawSearch.length >= 2) {
+            const normalizedSearch = rawSearch.replace(/\s+/g, '');
+            where += ` AND (
+                sd.nac_code LIKE ?
+                OR sd.item_name LIKE ?
+                OR sd.part_numbers LIKE ?
+                OR REPLACE(sd.nac_code, ' ', '') LIKE ?
+            )`;
+            params.push(`%${rawSearch}%`, `%${rawSearch}%`, `%${rawSearch}%`, `%${normalizedSearch}%`);
+        }
+
+        const [countRows] = await connection.query<RowDataPacket[]>(
+            `SELECT COUNT(*) as total FROM stock_details sd ${where}`,
+            params
+        );
+        const totalCount = Number(countRows[0]?.total || 0);
+
+        const [results] = await connection.query<RowDataPacket[]>(
+            `SELECT sd.nac_code, sd.item_name, sd.part_numbers as part_number
+             FROM stock_details sd
+             ${where}
+             ORDER BY sd.nac_code ASC
+             LIMIT ${limit} OFFSET ${offset}`,
+            params
+        );
+
+        res.status(200).json({
+            data: results.map(row => ({
+                nacCode: row.nac_code,
+                itemName: row.item_name,
+                partNumber: row.part_number,
+                baseNacCode: stripSuffixFromNac(String(row.nac_code || '')),
+            })),
+            pagination: {
+                currentPage: Math.max(parseInt(String(page)) || 1, 1),
+                pageSize: limit,
+                totalCount,
+                totalPages: Math.ceil(totalCount / limit) || 0,
+            },
+        });
+    }
+    catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in searchDestinationNacCodes: ${errorMessage}`, "balanceTransferLog.log");
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage
+        });
+    }
+    finally {
+        connection.release();
+    }
+};
+
 export const getAllBalanceTransfers = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
@@ -92,7 +170,6 @@ export const getAllBalanceTransfers = async (req: Request, res: Response): Promi
         rd.received_quantity as transfer_quantity,
         rd.part_number,
         COALESCE(rd.item_name, sd.item_name, 'N/A') as item_name,
-        -- Get the source NAC code from the issue record that matches the transfer
         COALESCE(
           id_issue.nac_code,
           (SELECT id2.nac_code
@@ -114,7 +191,7 @@ export const getAllBalanceTransfers = async (req: Request, res: Response): Promi
         AND COALESCE(id_issue.part_number, '') = COALESCE(rd.part_number, '')
       WHERE rrp.rrp_number = 'Code Transfer'
       ORDER BY rrp.date DESC`);
-        const processedResults = results.map((row: any) => {
+        const processedResults = results.map((row: RowDataPacket) => {
             const fromNacCode = row.from_nac_code || 'Unknown';
             return {
                 id: row.id,
@@ -122,7 +199,7 @@ export const getAllBalanceTransfers = async (req: Request, res: Response): Promi
                 transferDate: row.transfer_date,
                 transferAmount: row.transfer_amount,
                 transferredBy: row.transferred_by,
-                fromNacCode: fromNacCode,
+                fromNacCode,
                 toNacCode: row.to_nac_code,
                 transferQuantity: row.transfer_quantity,
                 partNumber: row.part_number,
@@ -144,6 +221,7 @@ export const getAllBalanceTransfers = async (req: Request, res: Response): Promi
         connection.release();
     }
 };
+
 export const exportBalanceTransfers = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
@@ -389,19 +467,22 @@ export const transferBalance = async (req: Request, res: Response): Promise<void
         await connection.execute('UPDATE receive_details SET rrp_fk = ? WHERE id = ?', [rrpId, receiveId]);
         await connection.execute('UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?', [transferQuantity, toNacCode]);
         await connection.execute('UPDATE receive_details SET transferred_quantity = COALESCE(transferred_quantity, 0) + ? WHERE id = ?', [transferQuantity, sourceItem.receive_id]);
-        await connection.execute(`UPDATE issue_details 
+        const sameFamily = stripSuffixFromNac(fromNacCode) === stripSuffixFromNac(toNacCode);
+        if (!sameFamily) {
+            await connection.execute(`UPDATE issue_details 
        SET nac_code = ?, part_number = ?
        WHERE nac_code = ? 
          AND part_number = ? 
          AND DATE(issue_date) >= ?
          AND id != ?`, [
-            toNacCode,
-            sourceItem.part_number,
-            fromNacCode,
-            sourceItem.part_number,
-            formattedTransferDate,
-            issueId
-        ]);
+                toNacCode,
+                sourceItem.part_number,
+                fromNacCode,
+                sourceItem.part_number,
+                formattedTransferDate,
+                issueId
+            ]);
+        }
         await rebuildNacInventoryState(connection, fromNacCode);
         await rebuildNacInventoryState(connection, toNacCode);
         await connection.commit();
@@ -474,19 +555,22 @@ export const revertBalanceTransfer = async (req: Request, res: Response): Promis
         await connection.query('DELETE FROM issue_details WHERE issued_for = ? AND DATE(issue_date) = DATE(?) AND issue_quantity = ?', [`code_transfer_to_${toNacCode}`, transfer.date, quantity]);
         await connection.query('UPDATE stock_details SET current_balance = current_balance - ? WHERE nac_code = ?', [quantity, toNacCode]);
         await connection.query('UPDATE stock_details SET current_balance = current_balance + ? WHERE nac_code = ?', [quantity, fromNacCode]);
-        await connection.query(`UPDATE issue_details 
+        const sameFamily = stripSuffixFromNac(fromNacCode) === stripSuffixFromNac(toNacCode);
+        if (!sameFamily) {
+            await connection.query(`UPDATE issue_details 
        SET nac_code = ?, part_number = ?
        WHERE nac_code = ? 
          AND part_number = ? 
          AND DATE(issue_date) >= ?
          AND issued_for != ?`, [
-            fromNacCode,
-            transfer.part_number,
-            toNacCode,
-            transfer.part_number,
-            transfer.date,
-            `code_transfer_to_${toNacCode}`
-        ]);
+                fromNacCode,
+                transfer.part_number,
+                toNacCode,
+                transfer.part_number,
+                transfer.date,
+                `code_transfer_to_${toNacCode}`
+            ]);
+        }
         const [sourceRRP] = await connection.query<RowDataPacket[]>(`SELECT rd.id, rd.transferred_quantity
        FROM receive_details rd
        JOIN rrp_details rrp ON rd.rrp_fk = rrp.id

@@ -22,6 +22,7 @@ import { API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { resolveImageUrl } from '@/lib/urls';
 import { getNacCodeValidationError, stripSuffixFromNac } from '@/utils/nacCodeUtils';
+import { isAbsentPartNumber, resolveReceivePartNumber } from '@/utils/partNumberUtils';
 import { processItemName } from '@/utils/utils';
 import imageCompression from 'browser-image-compression';
 
@@ -131,7 +132,16 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
     }, []);
 
     const resolveVariantPreview = useCallback(async (nacCode: string, partNumber: string) => {
-        if (!nacCode || nacCode === 'N/A' || !partNumber.trim()) {
+        if (!nacCode || nacCode === 'N/A') {
+            setResolvedNacCode(null);
+            return;
+        }
+        if (isAbsentPartNumber(partNumber)) {
+            setResolvedNacCode(stripSuffixFromNac(nacCode));
+            setRequiresNewPhoto(false);
+            return;
+        }
+        if (!partNumber.trim()) {
             setResolvedNacCode(null);
             return;
         }
@@ -178,7 +188,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         setFormData({
             id: item.id.toString(),
             nacCode: item.nacCode,
-            partNumber: item.partNumber || '',
+            partNumber: isAbsentPartNumber(item.partNumber) ? 'N/A' : (item.partNumber || ''),
             itemName: item.itemName,
             receiveQuantity: remaining,
             requestedQuantity: item.requestedQuantity,
@@ -193,7 +203,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
             isLocationChanged: false,
             requestNumber: item.requestNumber,
         });
-        setIsCustomPartNumber(!item.partNumber || item.partNumber === 'N/A');
+        setIsCustomPartNumber(isAbsentPartNumber(item.partNumber));
         setInitialLocation(item.location || '');
         setResolvedNacCode(null);
         setRequiresNewPhoto(false);
@@ -209,7 +219,17 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
     }, [item?.nacCode, isOpen, loadFamilyVariants]);
 
     useEffect(() => {
-        if (!formData.nacCode || formData.nacCode === 'N/A' || !formData.partNumber.trim()) {
+        if (!formData.nacCode || formData.nacCode === 'N/A') {
+            return;
+        }
+        if (isAbsentPartNumber(formData.partNumber)) {
+            const baseNac = stripSuffixFromNac(formData.nacCode);
+            setResolvedNacCode(baseNac);
+            setRequiresNewPhoto(false);
+            void fetchPreviousImage(baseNac, 'N/A');
+            return;
+        }
+        if (!formData.partNumber.trim()) {
             return;
         }
         void resolveVariantPreview(formData.nacCode, formData.partNumber);
@@ -277,11 +297,24 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
         }
     };
 
+    const selectablePartNumbers = useMemo(
+        () =>
+            partNumberList
+                .split(',')
+                .map((part) => part.trim())
+                .filter((part) => part && !isAbsentPartNumber(part)),
+        [partNumberList]
+    );
+
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
         const maxQty = remainingQuantity || formData.requestedQuantity;
 
-        if (!formData.partNumber.trim()) newErrors.partNumber = 'Part number is required';
+        if (selectablePartNumbers.length > 0 && !formData.partNumber.trim()) {
+            newErrors.partNumber = 'Part number is required';
+        } else if (!isAbsentPartNumber(formData.partNumber) && !formData.partNumber.trim()) {
+            newErrors.partNumber = 'Part number is required';
+        }
         if (!formData.location.trim()) {
             newErrors.location = 'Location is required';
         } else if (!isValidLocation(formData.location)) {
@@ -341,6 +374,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
             }
             await onSubmit({
                 ...formData,
+                partNumber: resolveReceivePartNumber(formData.partNumber),
                 resolvedNacCode: resolvedNacCode || undefined,
                 requiresNewPhoto,
                 remainingQuantity,
@@ -472,7 +506,7 @@ export const ReceiveItemForm = ({ isOpen, onClose, item, onSubmit }: ReceiveItem
                                                 }))
                                             }
                                             className={errors.partNumber ? 'border-red-500' : 'border-[#002a6e]/15'}
-                                            placeholder="Enter part number"
+                                            placeholder="N/A if not applicable"
                                         />
                                     )}
                                     <Button

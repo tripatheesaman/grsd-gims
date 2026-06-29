@@ -15,6 +15,7 @@ import {
     previewReceiveTarget,
     syncFamilyLocation,
     compactFamilySuffixesAfterDelete,
+    purgeStockNacAuxiliaryData,
 } from '../services/inventoryVariantService';
 import { rebuildNacInventoryState } from '../services/issueInventoryService';
 import { buildStockSearchKey } from '../services/searchRelevanceService';
@@ -531,7 +532,11 @@ export const deleteStockItem = async (req: Request, res: Response): Promise<void
         }
 
         const row = existingItem[0];
+        const deletedNacCode = String(row.nac_code || '').trim();
         await connection.execute('DELETE FROM stock_details WHERE id = ?', [id]);
+        if (deletedNacCode) {
+            await purgeStockNacAuxiliaryData(connection, deletedNacCode);
+        }
 
         const affectedNacs = await compactFamilySuffixesAfterDelete(connection, {
             id: Number(row.id),

@@ -15,7 +15,13 @@ import {
 } from '../services/inventoryVariantService';
 import { validateReceiveTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
-import { normalizePartNumber, stripSuffixFromNac, getNacCodeValidationError } from '../utils/nacCodeUtils';
+import {
+    isAbsentPartNumber,
+    normalizePartNumber,
+    resolveReceivePartNumber,
+    stripSuffixFromNac,
+    getNacCodeValidationError,
+} from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 import { PoolConnection } from 'mysql2/promise';
 import { resolveRequestRequester, resolveActorPerson } from '../services/personDetailsService';
@@ -318,10 +324,7 @@ export const createReceive = async (req: Request, res: Response): Promise<void> 
             }
 
             const baseNacCode = stripSuffixFromNac(finalNacCode);
-            const partNumber = normalizePartNumber(item.partNumber || '');
-            if (!partNumber || partNumber === 'NA' || partNumber === 'N/A') {
-                throw new Error(`Part number is required for item: ${item.itemName}`);
-            }
+            const partNumber = resolveReceivePartNumber(item.partNumber);
 
             const resolved = await previewReceiveTarget(connection, {
                 baseNacCode,
@@ -596,7 +599,16 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
             });
             return;
         }
-        if (!receivedPartNumber || typeof receivedPartNumber !== 'string' || receivedPartNumber.trim() === '') {
+        if (typeof receivedPartNumber !== 'string') {
+            logEvents(`Failed to update receive - Invalid part number: ${receivedPartNumber} for ID: ${receiveId}`, "receiveLog.log");
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Valid received part number is required'
+            });
+            return;
+        }
+        const normalizedReceivedPart = resolveReceivePartNumber(receivedPartNumber);
+        if (!isAbsentPartNumber(normalizedReceivedPart) && !normalizePartNumber(receivedPartNumber)) {
             logEvents(`Failed to update receive - Invalid part number: ${receivedPartNumber} for ID: ${receiveId}`, "receiveLog.log");
             res.status(400).json({
                 error: 'Bad Request',
@@ -637,7 +649,7 @@ export const updateReceive = async (req: Request, res: Response): Promise<void> 
         ];
         const updateValues: (number | string | null)[] = [
             receivedQuantity,
-            receivedPartNumber
+            normalizedReceivedPart
         ];
         let requestNacCode = '';
         if (requestFk && requestFk > 0) {

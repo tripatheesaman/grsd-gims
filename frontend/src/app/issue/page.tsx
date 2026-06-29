@@ -30,7 +30,7 @@ export default function IssuePage() {
         originalIndex: number;
     }[]>([]);
     const { results, isLoading, error, handleSearch, searchParams } = useSearch();
-    const adjustTrueBalance = (searchResults: SearchResult[] | null) => {
+    const adjustVirtualBalance = (searchResults: SearchResult[] | null) => {
         if (!searchResults)
             return null;
         return searchResults.map(result => {
@@ -42,13 +42,13 @@ export default function IssuePage() {
             if (cartItems.length > 0) {
                 return {
                     ...result,
-                    trueBalance: Number(result.trueBalance ?? 0) - totalCartQuantity,
+                    virtualBalance: Number(result.virtualBalance ?? 0) - totalCartQuantity,
                 };
             }
             return result;
         });
     };
-    const adjustedResults = results ? adjustTrueBalance(results) : null;
+    const adjustedResults = results ? adjustVirtualBalance(results) : null;
     const handleRowDoubleClick = (item: SearchResult) => {
         const partHint =
             searchParams.partNumber.trim() ||
@@ -60,7 +60,7 @@ export default function IssuePage() {
         const issueCartItem: IssueCartItem = {
             ...item,
             id: String(item.id),
-            currentBalance: Number(item.trueBalance ?? 0),
+            currentBalance: Number(item.virtualBalance ?? 0),
             selectedEquipment: '',
             issueQuantity: 1,
             quantity: 1,

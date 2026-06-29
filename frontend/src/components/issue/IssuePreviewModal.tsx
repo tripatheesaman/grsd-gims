@@ -170,8 +170,8 @@ function PreviewItemCard({
                     )}
                 </div>
                 <div>
-                    <p className="text-xs font-medium text-gray-500 mb-1">True balance (ref.)</p>
-                    <p className="font-medium text-emerald-700">{item.currentBalance}</p>
+                    <p className="text-xs font-medium text-gray-500 mb-1">Virtual balance (ref.)</p>
+                    <p className="font-medium text-sky-700">{item.currentBalance}</p>
                 </div>
             </div>
         </div>
