@@ -238,15 +238,20 @@ export default function StockRecordsPage() {
             await API.delete(`/api/stock/delete/${deletingItem.id}`);
             setShowDeleteModal(false);
             setDeletingItem(null);
+            setError(null);
+            showSuccessToast({
+                title: 'Deleted',
+                message: `Stock item ${deletingItem.nacCode} was removed.`,
+                duration: 3000,
+            });
             fetchData();
         }
         catch (error: unknown) {
-            if (error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'status' in error.response && error.response.status === 400) {
-                setError('Cannot delete item that is referenced in other tables');
-            }
-            else {
-                setError('Failed to delete item');
-            }
+            const errorMessage = error && typeof error === 'object' && 'response' in error
+                ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to delete item')
+                : 'Failed to delete item';
+            setError(errorMessage);
+            showErrorToast({ title: 'Delete failed', message: errorMessage, duration: 6000 });
         }
         finally {
             setSubmitting(false);

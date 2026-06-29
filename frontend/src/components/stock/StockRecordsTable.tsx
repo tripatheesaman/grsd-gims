@@ -249,7 +249,7 @@ export function StockRecordsTable({
                                                             <Pencil className="h-4 w-4" />
                                                         </Button>
                                                     )}
-                                                    {canDelete && (
+                                                    {canDelete && !hasVariants && (
                                                         <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-red-600 hover:bg-red-50" onClick={() => onDelete(r)}>
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>

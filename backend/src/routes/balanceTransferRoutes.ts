@@ -1,9 +1,10 @@
 import express from 'express';
-import { getTransferrableItems, getExistingNacCodes, transferBalance, getAllBalanceTransfers, exportBalanceTransfers, revertBalanceTransfer } from '../controllers/balanceTransferController';
+import { getTransferrableItems, getExistingNacCodes, searchDestinationNacCodes, transferBalance, getAllBalanceTransfers, exportBalanceTransfers, revertBalanceTransfer } from '../controllers/balanceTransferController';
 import verifyJWT from '../middlewares/verifyJWT';
 const router = express.Router();
 router.get('/transferrable-items', verifyJWT, getTransferrableItems);
 router.get('/existing-nac-codes', verifyJWT, getExistingNacCodes);
+router.get('/destination-codes/search', verifyJWT, searchDestinationNacCodes);
 router.post('/transfer', verifyJWT, transferBalance);
 router.get('/records', verifyJWT, getAllBalanceTransfers);
 router.post('/export', verifyJWT, exportBalanceTransfers);

@@ -1,6 +1,7 @@
 import { RowDataPacket, PoolConnection } from 'mysql2/promise';
 import {
     buildSubNacCode,
+    isAbsentPartNumber,
     letterForIndex,
     normalizePartNumber,
     parseNacCode,
@@ -582,6 +583,69 @@ export function nextAvailableLetter(variants: StockVariantRow[]): string {
     throw new Error('Maximum part variants (26) reached for this family');
 }
 
+export async function purgeStockNacAuxiliaryData(
+    connection: PoolConnection,
+    nacCode: string
+): Promise<void> {
+    const nac = String(nacCode || '').trim();
+    if (!nac) {
+        return;
+    }
+    await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [nac]);
+    await connection.execute(
+        `DELETE FROM prediction_metrics WHERE nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci`,
+        [nac]
+    );
+    await connection.execute(`DELETE FROM nac_units WHERE nac_code = ?`, [nac]);
+    await connection.execute(`DELETE FROM unit_conversions WHERE nac_code = ?`, [nac]);
+    try {
+        await connection.execute(`DELETE FROM fuel_equipment_consumption_cache WHERE nac_code = ?`, [nac]);
+    } catch {
+        // cache table may not exist yet in older databases
+    }
+}
+
+const clearRemapCollisions = async (
+    connection: PoolConnection,
+    table: string,
+    oldNacCode: string,
+    newNacCode: string
+): Promise<void> => {
+    if (table === 'spare_compatibility') {
+        await connection.execute(
+            `DELETE FROM spare_compatibility
+             WHERE nac_code = ?
+               AND equipment_code IN (
+                   SELECT equipment_code FROM (
+                       SELECT equipment_code FROM spare_compatibility WHERE nac_code = ?
+                   ) AS collision_check
+               )`,
+            [newNacCode, oldNacCode]
+        );
+        return;
+    }
+    if (table === 'prediction_metrics') {
+        await connection.execute(
+            `DELETE FROM prediction_metrics
+             WHERE nac_code COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci`,
+            [newNacCode]
+        );
+        return;
+    }
+    if (table === 'fuel_equipment_consumption_cache') {
+        await connection.execute(
+            `DELETE FROM fuel_equipment_consumption_cache
+             WHERE nac_code = ?
+               AND equipment_key IN (
+                   SELECT equipment_key FROM (
+                       SELECT equipment_key FROM fuel_equipment_consumption_cache WHERE nac_code = ?
+                   ) AS collision_check
+               )`,
+            [newNacCode, oldNacCode]
+        );
+    }
+};
+
 export async function remapNacCodeReferences(
     connection: PoolConnection,
     oldNacCode: string,
@@ -606,11 +670,22 @@ export async function remapNacCodeReferences(
                 );
             }
         } else if (!pn) {
+            await clearRemapCollisions(connection, table, oldNacCode, newNacCode);
             await connection.execute(
                 `UPDATE ${table} SET nac_code = ? WHERE nac_code = ?`,
                 [newNacCode, oldNacCode]
             );
         }
+    }
+
+    try {
+        await clearRemapCollisions(connection, 'fuel_equipment_consumption_cache', oldNacCode, newNacCode);
+        await connection.execute(
+            `UPDATE fuel_equipment_consumption_cache SET nac_code = ? WHERE nac_code = ?`,
+            [newNacCode, oldNacCode]
+        );
+    } catch {
+        // cache table may not exist yet in older databases
     }
 }
 
@@ -718,8 +793,17 @@ export async function previewReceiveTarget(
 ): Promise<ResolveReceiveTargetResult> {
     const base = stripSuffixFromNac(opts.baseNacCode);
     const partNumber = normalizePartNumber(opts.partNumber);
-    if (!partNumber || partNumber === 'NA' || partNumber === 'N/A') {
-        throw new Error('Part number is required to resolve receive target');
+    if (isAbsentPartNumber(partNumber)) {
+        const variants = await getFamilyVariants(connection, base);
+        const naVariant = variants.find((v) => isAbsentPartNumber(v.part_numbers));
+        const nacCode = naVariant?.nac_code ?? (variants.length === 1 ? variants[0].nac_code : base);
+        return {
+            nacCode,
+            baseNacCode: base,
+            isNewVariant: false,
+            requiresNewPhoto: false,
+            promoted: false,
+        };
     }
 
     const variants = await getFamilyVariants(connection, base);
@@ -894,6 +978,25 @@ export type VariantQuantityAllocation = {
     quantity: number;
 };
 
+export async function getFamilyTotalVirtualBalance(
+    connection: PoolConnection,
+    nacOrBase: string
+): Promise<number> {
+    const base = stripSuffixFromNac(nacOrBase);
+    const variants = await getFamilyVariants(connection, base);
+    if (!variants.length) {
+        const balances = await getVariantBalances(connection, base);
+        return balances?.virtualBalance ?? 0;
+    }
+
+    let total = 0;
+    for (const variant of variants) {
+        const balances = await getVariantBalances(connection, variant.nac_code);
+        total += balances?.virtualBalance ?? 0;
+    }
+    return total;
+}
+
 export async function getFamilyTotalTrueBalance(
     connection: PoolConnection,
     nacOrBase: string
@@ -913,7 +1016,7 @@ export async function getFamilyTotalTrueBalance(
     return total;
 }
 
-/** Consume quantity from earliest sub-codes with available true balance (FIFO). */
+/** Consume quantity from earliest sub-codes with available virtual balance (FIFO). */
 export async function allocateQuantityAcrossFamilyVariants(
     connection: PoolConnection,
     nacOrBase: string,
@@ -934,7 +1037,7 @@ export async function allocateQuantityAcrossFamilyVariants(
             break;
         }
         const balances = await getVariantBalances(connection, variant.nac_code);
-        const available = balances?.trueBalance ?? 0;
+        const available = balances?.virtualBalance ?? 0;
         if (available <= 0) {
             continue;
         }
@@ -948,7 +1051,7 @@ export async function allocateQuantityAcrossFamilyVariants(
     }
 
     if (remaining > 0) {
-        const available = await getFamilyTotalTrueBalance(connection, base);
+        const available = await getFamilyTotalVirtualBalance(connection, base);
         throw new Error(
             `Insufficient stock. Requested: ${requested}, Available: ${available}`
         );

@@ -8,10 +8,11 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format } from 'date-fns';
-import { CalendarIcon, Loader2, ArrowRight, RefreshCw, Search, X, ChevronsUpDown, Check } from 'lucide-react';
+import { CalendarIcon, Loader2, ArrowRight, RefreshCw, Search, X } from 'lucide-react';
 import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { DestinationNacCodeSearch, type DestinationNacOption } from '@/components/balance-transfer/DestinationNacCodeSearch';
 interface TransferrableItem {
     id: number;
     nac_code: string;
@@ -39,7 +40,7 @@ export default function BalanceTransferPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [transferrableItems, setTransferrableItems] = useState<TransferrableItem[]>([]);
     const [filteredItems, setFilteredItems] = useState<TransferrableItem[]>([]);
-    const [existingNacCodes, setExistingNacCodes] = useState<string[]>([]);
+    const [selectedDestination, setSelectedDestination] = useState<DestinationNacOption | null>(null);
     const [selectedItem, setSelectedItem] = useState<TransferrableItem | null>(null);
     const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
     const [isTransferring, setIsTransferring] = useState(false);
@@ -59,9 +60,6 @@ export default function BalanceTransferPage() {
         transferDate: null
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-    const [nacCodeDropdownOpen, setNacCodeDropdownOpen] = useState(false);
-    const [nacCodeSearchValue, setNacCodeSearchValue] = useState('');
-    const [filteredNacCodes, setFilteredNacCodes] = useState<string[]>([]);
     const fetchingRef = useRef<boolean>(false);
     useEffect(() => {
         return () => {
@@ -75,9 +73,7 @@ export default function BalanceTransferPage() {
                 transferDate: null
             });
             setFormErrors({});
-            setNacCodeDropdownOpen(false);
-            setNacCodeSearchValue('');
-            setFilteredNacCodes([]);
+            setSelectedDestination(null);
         };
     }, []);
     const fetchData = useCallback(async () => {
@@ -86,15 +82,9 @@ export default function BalanceTransferPage() {
         fetchingRef.current = true;
         try {
             setIsLoading(true);
-            const [transferrableResponse, nacCodesResponse] = await Promise.all([
-                API.get('/api/balance-transfer/transferrable-items'),
-                API.get('/api/balance-transfer/existing-nac-codes')
-            ]);
+            const transferrableResponse = await API.get('/api/balance-transfer/transferrable-items');
             if (transferrableResponse.status === 200) {
                 setTransferrableItems(transferrableResponse.data);
-            }
-            if (nacCodesResponse.status === 200) {
-                setExistingNacCodes(nacCodesResponse.data);
             }
         }
         catch {
@@ -161,6 +151,7 @@ export default function BalanceTransferPage() {
             transferDate: null
         });
         setFormErrors({});
+        setSelectedDestination(null);
         setIsTransferModalOpen(true);
     }, []);
     const handleModalClose = useCallback(() => {
@@ -173,16 +164,21 @@ export default function BalanceTransferPage() {
             transferDate: null
         });
         setFormErrors({});
+        setSelectedDestination(null);
     }, []);
+    const handleDestinationChange = useCallback((option: DestinationNacOption | null) => {
+        setSelectedDestination(option);
+        setFormData(prev => ({ ...prev, toNacCode: option?.nacCode || '' }));
+        if (formErrors.toNacCode) {
+            setFormErrors(prev => ({ ...prev, toNacCode: '' }));
+        }
+    }, [formErrors.toNacCode]);
     const handleFormChange = useCallback((field: keyof TransferFormData, value: string | number | Date | null) => {
         setFormData(prev => ({ ...prev, [field]: value }));
         if (formErrors[field]) {
             setFormErrors(prev => ({ ...prev, [field]: '' }));
         }
     }, [formErrors]);
-    const availableNacCodes = useMemo(() => {
-        return existingNacCodes.filter(code => code !== formData.fromNacCode);
-    }, [existingNacCodes, formData.fromNacCode]);
     const validateForm = useCallback((): boolean => {
         const errors: Record<string, string> = {};
         if (!formData.toNacCode) {
@@ -253,63 +249,12 @@ export default function BalanceTransferPage() {
     const handlePageChange = useCallback((page: number) => {
         setCurrentPage(page);
     }, []);
-    const filterNacCodes = useCallback((search: string) => {
-        setNacCodeSearchValue(search);
-        if (!search.trim()) {
-            setFilteredNacCodes(availableNacCodes);
-        }
-        else {
-            setFilteredNacCodes(availableNacCodes.filter(code => code.toLowerCase().includes(search.toLowerCase())));
-        }
-    }, [availableNacCodes]);
-    useEffect(() => {
-        if (availableNacCodes.length > 0) {
-            setFilteredNacCodes(availableNacCodes);
-        }
-    }, [availableNacCodes]);
-    const handleNacCodeSelect = useCallback((code: string) => {
-        setFormData(prev => ({ ...prev, toNacCode: code }));
-        setNacCodeDropdownOpen(false);
-        setNacCodeSearchValue('');
-        setFilteredNacCodes(availableNacCodes);
-    }, [availableNacCodes]);
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            const target = event.target as Element;
-            if (!target.closest('.nac-code-dropdown')) {
-                setNacCodeDropdownOpen(false);
-                setNacCodeSearchValue('');
-                setFilteredNacCodes(availableNacCodes);
-            }
-        };
-        if (nacCodeDropdownOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [nacCodeDropdownOpen, availableNacCodes]);
     if (isLoading) {
         return (<div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-[#003594] mx-auto mb-4"/>
           <p className="text-[#003594] font-medium">Loading Balance Transfer data...</p>
-          <p className="text-sm text-gray-600 mt-2">Loading transferrable items and NAC codes</p>
-        </div>
-      </div>);
-    }
-    if (existingNacCodes.length === 0) {
-        return (<div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="text-red-500 mb-4">
-            <X className="h-12 w-12 mx-auto"/>
-          </div>
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Failed to load NAC codes</h2>
-          <p className="text-gray-600 mb-4">Unable to load the list of available NAC codes.</p>
-          <Button onClick={fetchData} className="bg-[#003594] hover:bg-[#002a6e] text-white">
-            <RefreshCw className="h-4 w-4 mr-2"/>
-            Retry
-          </Button>
+          <p className="text-sm text-gray-600 mt-2">Loading transferrable items</p>
         </div>
       </div>);
     }
@@ -493,32 +438,14 @@ export default function BalanceTransferPage() {
                   <Input value={selectedItem.nac_code} disabled className="bg-gray-100"/>
                 </div>
 
-                <div>
-                  <Label className="text-sm font-medium">To NAC Code *</Label>
-                  <div className="relative nac-code-dropdown">
-                    <Button type="button" variant="outline" role="combobox" aria-expanded={false} className="w-full justify-between border-[#002a6e]/10 focus:border-[#003594] focus:ring-[#003594]/20 disabled:opacity-50 disabled:cursor-not-allowed" onClick={() => setNacCodeDropdownOpen(!nacCodeDropdownOpen)} disabled={isTransferring}>
-                      {formData.toNacCode || "Select destination NAC code..."}
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50"/>
-                    </Button>
-                    {nacCodeDropdownOpen && (<div className="absolute w-full z-[9999] bg-white rounded-md border shadow-md mt-1">
-                        <div className="w-full">
-                          <div className="flex w-full items-center border-b px-3">
-                            <Search className="h-4 w-4 text-gray-400 mr-2"/>
-                            <input className="flex h-9 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50" placeholder="Search NAC codes..." value={nacCodeSearchValue} onChange={(e) => filterNacCodes(e.target.value)}/>
-                          </div>
-                          {filteredNacCodes.length === 0 ? (<p className="p-4 text-sm text-center text-muted-foreground">
-                              No NAC codes found.
-                            </p>) : (<div className="max-h-[200px] overflow-y-auto">
-                              {filteredNacCodes.map((code) => (<div key={code} onClick={() => handleNacCodeSelect(code)} className={cn("relative flex w-full cursor-pointer select-none items-center rounded-sm px-3 py-2 text-sm outline-none", "hover:bg-accent hover:text-accent-foreground", formData.toNacCode === code && "bg-accent text-accent-foreground")}>
-                                  <Check className={cn("mr-2 h-4 w-4 flex-shrink-0", formData.toNacCode === code ? "opacity-100" : "opacity-0")}/>
-                                  {code}
-                                </div>))}
-                            </div>)}
-                        </div>
-                      </div>)}
-                  </div>
-                  {formErrors.toNacCode && (<p className="text-red-500 text-sm mt-1">{formErrors.toNacCode}</p>)}
-                </div>
+                <DestinationNacCodeSearch
+                  excludeNacCode={formData.fromNacCode}
+                  value={formData.toNacCode}
+                  selected={selectedDestination}
+                  onChange={handleDestinationChange}
+                  disabled={isTransferring}
+                  error={formErrors.toNacCode}
+                />
 
                 <div>
                   <Label className="text-sm font-medium">Transfer Quantity *</Label>

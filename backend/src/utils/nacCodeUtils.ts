@@ -70,6 +70,20 @@ export function normalizePartNumber(partNumber: string): string {
     return String(partNumber || '').trim().toUpperCase();
 }
 
+export const ABSENT_PART_NUMBER = 'N/A';
+
+export function isAbsentPartNumber(partNumber: string | null | undefined): boolean {
+    const normalized = normalizePartNumber(String(partNumber ?? ''));
+    return !normalized || normalized === 'NA' || normalized === 'N/A';
+}
+
+export function resolveReceivePartNumber(partNumber: string | null | undefined): string {
+    if (isAbsentPartNumber(partNumber)) {
+        return ABSENT_PART_NUMBER;
+    }
+    return normalizePartNumber(String(partNumber ?? ''));
+}
+
 export function splitPartNumbers(partNumbers: string): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
