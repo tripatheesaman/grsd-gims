@@ -3,7 +3,7 @@ import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 import { logEvents } from '../middlewares/logger';
 import { resolveCurrentFiscalYear, resolveFilterFiscalYear } from '../services/fiscalYearService';
-import { validateIssuedFor } from '../services/issueValidationService';
+import { validateIssuedFor, sqlIncludeFuelNacOnly } from '../services/issueValidationService';
 import { rebuildFuelEquipmentConsumptionCache } from '../services/fuelConsumptionService';
 interface FuelIssueRecord {
     id: number;
@@ -49,7 +49,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
         const validSortBy = validSortFields.includes(sortBy as string) ? sortBy as string : 'issue_date';
         const validSortOrder = ['ASC', 'DESC'].includes((sortOrder as string).toUpperCase()) ? (sortOrder as string).toUpperCase() : 'DESC';
         let searchConditions = '';
-        const queryParams: any[] = ['GT 07986', 'GT 00000'];
+        const queryParams: any[] = [];
         if (issueSlipNumber) {
             searchConditions += ' AND i.issue_slip_number LIKE ?';
             queryParams.push(`%${issueSlipNumber}%`);
@@ -120,7 +120,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
       JOIN issue_details i ON f.issue_fk = i.id
       LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
-      WHERE i.nac_code IN (?, ?)
+      WHERE ${sqlIncludeFuelNacOnly('i')}
       ${searchConditions}
     `;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, queryParams);
@@ -149,7 +149,7 @@ export const getAllFuelIssueRecords = async (req: Request, res: Response): Promi
       JOIN issue_details i ON f.issue_fk = i.id
       LEFT JOIN assets a ON a.equipment_code COLLATE utf8mb4_unicode_ci = i.issued_for COLLATE utf8mb4_unicode_ci
       LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
-      WHERE i.nac_code IN (?, ?)
+      WHERE ${sqlIncludeFuelNacOnly('i')}
       ${searchConditions}
       ORDER BY i.${validSortBy} ${validSortOrder}
       LIMIT ? OFFSET ?
@@ -545,7 +545,13 @@ export const getFuelTypes = async (req: Request, res: Response): Promise<void> =
 export const getNacCodes = async (req: Request, res: Response): Promise<void> => {
     const connection = await pool.getConnection();
     try {
-        const [rows] = await connection.execute<RowDataPacket[]>('SELECT DISTINCT nac_code FROM issue_details WHERE nac_code IN (?, ?) ORDER BY nac_code', ['GT 07986', 'GT 00000']);
+        const [rows] = await connection.execute<RowDataPacket[]>(
+            `SELECT DISTINCT i.nac_code
+             FROM issue_details i
+             INNER JOIN fuel_records f ON f.issue_fk = i.id
+             WHERE ${sqlIncludeFuelNacOnly('i')}
+             ORDER BY i.nac_code`
+        );
         const nacCodes = rows.map(row => row.nac_code);
         res.status(200).json({ nacCodes });
     }

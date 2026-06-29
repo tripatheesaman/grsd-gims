@@ -39,6 +39,8 @@ import {
 import { canCloseCommunication } from '@/lib/communicationMentions';
 import { CommunicationMessageBubble } from '@/components/communications/CommunicationMessageBubble';
 import { MentionTextarea } from '@/components/communications/MentionTextarea';
+import { useCommunicationsContextOptional } from '@/context/CommunicationsContext';
+import { useNotification } from '@/context/NotificationContext';
 
 interface CommunicationThreadPanelProps {
     threadId: number | null;
@@ -59,6 +61,8 @@ export function CommunicationThreadPanel({
 }: CommunicationThreadPanelProps) {
     const { user, permissions } = useAuthContext();
     const userId = user?.UserInfo?.id;
+    const communicationsContext = useCommunicationsContextOptional();
+    const { fetchNotifications } = useNotification();
     const { showSuccessToast, showErrorToast } = useCustomToast();
     const [replyBody, setReplyBody] = useState('');
     const [conclusionBody, setConclusionBody] = useState('');
@@ -233,6 +237,10 @@ export function CommunicationThreadPanel({
         try {
             await API.delete(`/api/communications/${threadId}`);
             setIsDeleteOpen(false);
+            await Promise.all([
+                communicationsContext?.refreshUnacknowledged(),
+                fetchNotifications(),
+            ]);
             showSuccessToast({
                 title: 'Deleted',
                 message: 'The conversation has been permanently deleted.',
@@ -405,7 +413,7 @@ export function CommunicationThreadPanel({
                     <DialogTitle>Delete conversation?</DialogTitle>
                     <DialogDescription>
                         This permanently removes &quot;{thread.title}&quot;, all replies, acknowledgements,
-                        and related alerts. This action cannot be undone.
+                        mention/reply alerts, and related notifications. This action cannot be undone.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter className="gap-2">

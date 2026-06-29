@@ -260,6 +260,45 @@ export const appendFamilyEquipmentFilter = (
   )`;
 };
 
+/** Append AND clause: keep only stock rows whose nac_code matches equipment filter (variant-level). */
+export const appendVariantEquipmentFilter = (
+    stockAlias: string,
+    equipmentNumber: string,
+    query: string,
+    params: unknown[],
+    resolvedCodes: string[] = []
+): string => {
+    const term = String(equipmentNumber).trim();
+    if (!term) {
+        return query;
+    }
+    const likeTerm = `%${term}%`;
+    const codes = resolvedCodes.length > 0 ? resolvedCodes : expandEquipmentTokens(term);
+
+    const branches: string[] = ['sd_ef.applicable_equipments LIKE ?'];
+    params.push(likeTerm);
+
+    if (codes.length > 0) {
+        branches.push(`sc_ef.equipment_code IN (${codes.map(() => '?').join(', ')})`);
+        params.push(...codes);
+    } else {
+        branches.push(`sc_ef.equipment_code LIKE ?`);
+        params.push(likeTerm);
+        branches.push(`sc_ef.equipment_code IN (
+            SELECT equipment_code FROM assets WHERE name LIKE ? LIMIT 40
+        )`);
+        params.push(likeTerm);
+    }
+
+    return `${query} AND ${stockAlias}.nac_code IN (
+    SELECT DISTINCT sd_ef.nac_code
+    FROM stock_details sd_ef
+    LEFT JOIN spare_compatibility sc_ef
+      ON sc_ef.nac_code = sd_ef.nac_code COLLATE ${COLLATE}
+    WHERE (${branches.join(' OR ')})
+  )`;
+};
+
 /** Append AND clause for equipment filter (code, range, or asset name). */
 export const appendEquipmentFilter = (
     stockAlias: string,

@@ -26,6 +26,7 @@ import {
     MENTION_ALERT_PENDING_SQL,
 } from '../services/communicationMentionService';
 import { ACTIVE_USER_STATUS_SQL } from '../utils/userStatus';
+import { purgeCommunicationThread } from '../services/communicationCleanupService';
 
 interface ThreadRow extends RowDataPacket {
     id: number;
@@ -976,27 +977,7 @@ export const deleteCommunicationThread = async (req: Request, res: Response): Pr
 
         await connection.beginTransaction();
 
-        await connection.execute(
-            `DELETE FROM notifications
-             WHERE reference_type = 'communication' AND reference_id = ?`,
-            [String(threadId)]
-        );
-        await connection.execute(
-            `DELETE FROM communication_mention_alerts WHERE thread_id = ?`,
-            [threadId]
-        );
-        await connection.execute(
-            `DELETE FROM communication_reply_alerts WHERE thread_id = ?`,
-            [threadId]
-        );
-        await connection.execute(
-            `DELETE cm FROM communication_mentions cm
-             INNER JOIN communication_messages m ON m.id = cm.message_id
-             WHERE m.thread_id = ?`,
-            [threadId]
-        );
-        await connection.execute(`DELETE FROM communication_acknowledgements WHERE thread_id = ?`, [threadId]);
-        await connection.execute(`DELETE FROM communication_messages WHERE thread_id = ?`, [threadId]);
+        const purgeResult = await purgeCommunicationThread(connection, threadId);
         const [result] = await connection.execute<ResultSetHeader>(
             `DELETE FROM communication_threads WHERE id = ?`,
             [threadId]
@@ -1010,10 +991,16 @@ export const deleteCommunicationThread = async (req: Request, res: Response): Pr
 
         await connection.commit();
         logEvents(
-            `Communication thread ${threadId} deleted by user ${req.userId ?? 'unknown'}`,
+            `Communication thread ${threadId} deleted by user ${req.userId ?? 'unknown'} ` +
+            `(notifications=${purgeResult.notificationsDeleted}, mentionAlerts=${purgeResult.mentionAlertsDeleted}, ` +
+            `replyAlerts=${purgeResult.replyAlertsDeleted})`,
             'communicationsLog.log'
         );
-        res.status(200).json({ message: 'Conversation deleted', threadId });
+        res.status(200).json({
+            message: 'Conversation deleted',
+            threadId,
+            purge: purgeResult,
+        });
     } catch (error) {
         await connection.rollback();
         const message = error instanceof Error ? error.message : 'Unknown error';

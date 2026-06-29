@@ -134,40 +134,54 @@ export function stripSuffixFromNac(nac: string): string {
 export function sqlFamilyKeyExpression(alias = 'sd'): string {
     const nac = `${alias}.nac_code`;
     const base = `${alias}.base_nac_code`;
-    return `COALESCE(
-        NULLIF(${base}, ''),
-        CASE WHEN ${nac} REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
-             THEN LEFT(${nac}, 8)
-             ELSE ${nac}
-        END
-    )`;
+    return `(
+        COALESCE(
+            NULLIF(${base}, ''),
+            CASE WHEN ${nac} REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
+                 THEN LEFT(${nac}, 8)
+                 ELSE ${nac}
+            END
+        )
+    ) COLLATE utf8mb4_unicode_ci`;
 }
 
 /** Family key from nac_code only (tables without base_nac_code, e.g. receive_details). */
 export function sqlFamilyKeyFromNacOnlyExpression(alias = 't'): string {
     const nac = `${alias}.nac_code`;
-    return `CASE WHEN ${nac} REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
+    return `(
+        CASE WHEN ${nac} REGEXP '^(GT|TW|GS) [0-9]{5}[A-Z]$'
              THEN LEFT(${nac}, 8)
              ELSE ${nac}
-        END`;
+        END
+    ) COLLATE utf8mb4_unicode_ci`;
 }
 
 /** Match a transaction row to an inventory family key passed as a query parameter. */
 export function sqlTransactionMatchesFamilyKey(alias: string, familyKeyParam = '?'): string {
+    return sqlTransactionMatchesFamilyKeyRef(alias, `${familyKeyParam} COLLATE utf8mb4_unicode_ci`);
+}
+
+/** Match a transaction row to a family key column from an outer query (e.g. f.family_key). */
+export function sqlTransactionMatchesFamilyKeyRef(alias: string, familyKeyRefSql: string): string {
     const familyFromNac = sqlFamilyKeyFromNacOnlyExpression(alias);
     return `(
-        ${alias}.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
-        OR ${familyFromNac} COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+        ${alias}.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyRefSql}
+        OR ${familyFromNac} = ${familyKeyRefSql}
         OR EXISTS (
             SELECT 1
             FROM stock_details sd_match
             WHERE sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${alias}.nac_code COLLATE utf8mb4_unicode_ci
               AND (
-                  sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
-                  OR sd_match.base_nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
-                  OR ${sqlFamilyKeyExpression('sd_match')} COLLATE utf8mb4_unicode_ci = ${familyKeyParam} COLLATE utf8mb4_unicode_ci
+                  sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyRefSql}
+                  OR sd_match.base_nac_code COLLATE utf8mb4_unicode_ci = ${familyKeyRefSql}
+                  OR ${sqlFamilyKeyExpression('sd_match')} = ${familyKeyRefSql}
               )
             LIMIT 1
         )
     )`;
+}
+
+/** Match a transaction row to an exact NAC code column from an outer query (e.g. f.nac_code). */
+export function sqlTransactionMatchesNacCodeRef(alias: string, nacCodeRefSql: string): string {
+    return `${alias}.nac_code COLLATE utf8mb4_unicode_ci = ${nacCodeRefSql} COLLATE utf8mb4_unicode_ci`;
 }

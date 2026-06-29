@@ -85,7 +85,7 @@ export const routes: RouteConfig[] = [
         path: '/reports/daily',
         requiresAuth: true,
         title: 'Daily Reports',
-        permissions: ['view_daily_reports'],
+        permissions: ['view_daily_reports', 'can_view_dashboard'],
     },
     {
         path: '/reports/weekly',

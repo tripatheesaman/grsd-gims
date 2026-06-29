@@ -26,10 +26,15 @@ interface StockFormData {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
-    currentBalance: number;
+    trueBalance: number;
     openQuantity: number;
     openAmount: number;
     location: string;
+}
+
+interface EditBaseline {
+    trueBalance: number;
+    openQuantity: number;
 }
 export default function StockRecordsPage() {
     const { user, permissions } = useAuthContext();
@@ -64,13 +69,14 @@ export default function StockRecordsPage() {
     const [showEditModal, setShowEditModal] = useState<boolean>(false);
     const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
     const [editingItem, setEditingItem] = useState<StockRow | null>(null);
+    const [editBaseline, setEditBaseline] = useState<EditBaseline | null>(null);
     const [deletingItem, setDeletingItem] = useState<StockRow | null>(null);
     const [formData, setFormData] = useState<StockFormData>({
         nacCode: '',
         itemName: '',
         partNumber: '',
         equipmentNumber: '',
-        currentBalance: 0,
+        trueBalance: 0,
         openQuantity: 0,
         openAmount: 0,
         location: ''
@@ -114,7 +120,7 @@ export default function StockRecordsPage() {
             itemName: '',
             partNumber: '',
             equipmentNumber: '',
-            currentBalance: 0,
+            trueBalance: 0,
             openQuantity: 0,
             openAmount: 0,
             location: ''
@@ -146,8 +152,8 @@ export default function StockRecordsPage() {
         if (!formData.equipmentNumber.trim()) {
             errors.equipmentNumber = 'Equipment Number is required';
         }
-        if (formData.currentBalance < 0) {
-            errors.currentBalance = 'Current Balance cannot be negative';
+        if (formData.trueBalance < 0) {
+            errors.trueBalance = 'True balance cannot be negative';
         }
         if (formData.openQuantity < 0) {
             errors.openQuantity = 'Open Quantity cannot be negative';
@@ -166,10 +172,14 @@ export default function StockRecordsPage() {
             return;
         setSubmitting(true);
         try {
-            await API.post('/api/stock/create', formData);
+            await API.post('/api/stock/create', {
+                ...formData,
+                currentBalance: formData.trueBalance,
+            });
             setShowCreateModal(false);
             resetForm();
             fetchData();
+            showSuccessToast({ title: 'Created', message: 'Stock item created successfully.', duration: 3000 });
         }
         catch (error: unknown) {
             if (error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'status' in error.response && error.response.status === 409) {
@@ -185,23 +195,35 @@ export default function StockRecordsPage() {
         }
     };
     const handleEdit = async () => {
-        if (!editingItem || !validateForm())
+        if (!editingItem || !validateForm() || !editBaseline)
             return;
         setSubmitting(true);
+        const openQuantityDelta = formData.openQuantity - editBaseline.openQuantity;
+        const effectiveTrueBalance = formData.trueBalance + openQuantityDelta;
         try {
-            await API.put(`/api/stock/update/${editingItem.id}`, formData);
+            await API.put(`/api/stock/update/${editingItem.id}`, {
+                ...formData,
+                trueBalance: effectiveTrueBalance,
+                currentBalance: effectiveTrueBalance,
+            });
             setShowEditModal(false);
             setEditingItem(null);
+            setEditBaseline(null);
             resetForm();
             fetchData();
+            showSuccessToast({ title: 'Updated', message: 'Stock item updated successfully.', duration: 3000 });
         }
         catch (error: unknown) {
             if (error && typeof error === 'object' && 'response' in error && error.response && typeof error.response === 'object' && 'status' in error.response && error.response.status === 409) {
                 setFormErrors({ nacCode: 'NAC Code already exists' });
             }
             else {
-                const errorMessage = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Unknown error';
-                setError(`Failed to update item: ${errorMessage}`);
+                const errorMessage = error && typeof error === 'object' && 'response' in error
+                    ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to update item')
+                    : error && typeof error === 'object' && 'message' in error
+                        ? String(error.message)
+                        : 'Failed to update item';
+                showErrorToast({ title: 'Update failed', message: errorMessage, duration: 6000 });
             }
         }
         finally {
@@ -231,17 +253,21 @@ export default function StockRecordsPage() {
         }
     };
     const openEditModal = (item: StockRow) => {
+        const trueBalance = Number(item.trueBalance ?? item.currentBalance) || 0;
+        const openQuantity = Number(item.openQuantity) || 0;
         setEditingItem(item);
+        setEditBaseline({ trueBalance, openQuantity });
         setFormData({
             nacCode: item.nacCode,
             itemName: item.itemName,
             partNumber: item.partNumber,
             equipmentNumber: item.equipmentNumber,
-            currentBalance: Number(item.currentBalance) || 0,
-            openQuantity: Number(item.openQuantity) || 0,
+            trueBalance,
+            openQuantity,
             openAmount: Number(item.openAmount) || 0,
             location: item.location
         });
+        setFormErrors({});
         setShowEditModal(true);
         setError(null);
     };
@@ -401,9 +427,9 @@ export default function StockRecordsPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">Current Balance *</label>
-                <input type="number" value={formData.currentBalance} onChange={(e) => setFormData({ ...formData, currentBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.currentBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Current Balance" min="0"/>
-                {formErrors.currentBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.currentBalance}</p>)}
+                <label className="block text-sm font-medium mb-1">True balance *</label>
+                <input type="number" value={formData.trueBalance} onChange={(e) => setFormData({ ...formData, trueBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.trueBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter true balance" min="0" step="any"/>
+                {formErrors.trueBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.trueBalance}</p>)}
               </div>
               
               <div>
@@ -470,9 +496,9 @@ export default function StockRecordsPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">Current Balance *</label>
-                <input type="number" value={formData.currentBalance} onChange={(e) => setFormData({ ...formData, currentBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.currentBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Current Balance" min="0"/>
-                {formErrors.currentBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.currentBalance}</p>)}
+                <label className="block text-sm font-medium mb-1">True balance *</label>
+                <input type="number" value={formData.trueBalance} onChange={(e) => setFormData({ ...formData, trueBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.trueBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter true balance" min="0" step="any"/>
+                {formErrors.trueBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.trueBalance}</p>)}
               </div>
               
               <div>
@@ -498,7 +524,7 @@ export default function StockRecordsPage() {
             
             <div className="p-6 border-t border-gray-200">
               <div className="flex gap-3">
-                <button onClick={() => { setShowEditModal(false); setEditingItem(null); }} className="flex-1 px-4 py-2 border border-[#002a6e]/20 rounded-md hover:bg-[#003594]/5" disabled={submitting}>
+                <button onClick={() => { setShowEditModal(false); setEditingItem(null); setEditBaseline(null); }} className="flex-1 px-4 py-2 border border-[#002a6e]/20 rounded-md hover:bg-[#003594]/5" disabled={submitting}>
                   Cancel
                 </button>
                 <button onClick={handleEdit} disabled={submitting} className="flex-1 bg-[#003594] text-white px-4 py-2 rounded-md hover:bg-[#002a6e] transition-colors disabled:opacity-50">

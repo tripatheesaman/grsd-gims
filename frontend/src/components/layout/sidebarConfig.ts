@@ -249,7 +249,7 @@ export const sidebarLinks: SidebarLink[] = [
             {
                 label: "Daily",
                 href: "/reports/daily",
-                permission: 'view_daily_reports',
+                permissionsAny: ['view_daily_reports', 'can_view_dashboard'],
                 icon: 'calendar'
             },
             {
