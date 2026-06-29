@@ -14,8 +14,8 @@ import ExcelJS from 'exceljs';
 import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpReport';
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
-import { appendFamilyEquipmentFilter } from '../services/spareEquipmentDisplay';
-import { sqlFamilyKeyExpression, sqlFamilyKeyFromNacOnlyExpression, sqlTransactionMatchesFamilyKey } from '../utils/nacCodeUtils';
+import { appendVariantEquipmentFilter } from '../services/spareEquipmentDisplay';
+import { sqlFamilyKeyExpression, sqlTransactionMatchesFamilyKey, sqlTransactionMatchesNacCodeRef } from '../utils/nacCodeUtils';
 import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
@@ -3139,12 +3139,154 @@ interface StockReportItem {
     true_balance_amount: number;
     location: string;
 }
+
+const buildCurrentStockReportSql = (
+    whereClause: string,
+    listQueryExtra: string,
+    limitOffsetSql: string
+): string => {
+    const MATCH_RD = sqlTransactionMatchesNacCodeRef('rd', 'f.nac_code');
+    const MATCH_ID = sqlTransactionMatchesNacCodeRef('id', 'f.nac_code');
+
+    return `
+            SELECT
+                f.nac_code,
+                f.item_name,
+                f.part_numbers,
+                f.applicable_equipments,
+                f.location,
+                f.open_quantity,
+                f.open_amount,
+                (
+                    SELECT COALESCE(SUM(rd.received_quantity), 0)
+                    FROM receive_details rd
+                    WHERE ${MATCH_RD}
+                    AND rd.approval_status = 'APPROVED'
+                    AND rd.receive_date < ?
+                ) as pre_date_receive_qty,
+                (
+                    SELECT COALESCE(SUM(id.issue_quantity), 0)
+                    FROM issue_details id
+                    WHERE ${MATCH_ID}
+                    AND id.approval_status = 'APPROVED'
+                    AND id.issue_date < ?
+                ) as pre_date_issue_qty,
+                (
+                    SELECT COALESCE(SUM(rd.received_quantity), 0)
+                    FROM receive_details rd
+                    WHERE ${MATCH_RD}
+                    AND rd.approval_status = 'APPROVED'
+                    AND rd.receive_date BETWEEN ? AND ?
+                ) as received_quantity,
+                (
+                    SELECT COALESCE(SUM(rd.received_quantity), 0)
+                    FROM receive_details rd
+                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
+                    WHERE ${MATCH_RD}
+                    AND rd.approval_status = 'APPROVED'
+                    AND rd.rrp_fk IS NOT NULL
+                    AND rd.receive_date BETWEEN ? AND ?
+                ) as rrp_quantity,
+                (
+                    SELECT COALESCE(SUM(rrp.total_amount), 0)
+                    FROM receive_details rd
+                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
+                    WHERE ${MATCH_RD}
+                    AND rd.approval_status = 'APPROVED'
+                    AND rd.rrp_fk IS NOT NULL
+                    AND rd.receive_date BETWEEN ? AND ?
+                ) as rrp_amount,
+                (
+                    SELECT COALESCE(SUM(id.issue_quantity), 0)
+                    FROM issue_details id
+                    WHERE ${MATCH_ID}
+                    AND id.approval_status = 'APPROVED'
+                    AND id.issue_date BETWEEN ? AND ?
+                ) as issue_quantity,
+                (
+                    SELECT COALESCE(SUM(id.issue_cost), 0)
+                    FROM issue_details id
+                    WHERE ${MATCH_ID}
+                    AND id.approval_status = 'APPROVED'
+                    AND id.issue_date BETWEEN ? AND ?
+                ) as issue_amount
+            FROM (
+                SELECT
+                    s.nac_code,
+                    SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
+                    MIN(s.part_numbers) as part_numbers,
+                    MIN(s.applicable_equipments) as applicable_equipments,
+                    MIN(s.location) as location,
+                    SUM(s.open_quantity) as open_quantity,
+                    SUM(s.open_amount) as open_amount
+                FROM stock_details s
+                ${whereClause}${listQueryExtra}
+                GROUP BY s.nac_code
+            ) f
+            ORDER BY f.nac_code ASC
+            ${limitOffsetSql}
+        `;
+};
+
+const mapStockReportRows = (results: RowDataPacket[]): StockReportItem[] =>
+    results.map((row: any) => {
+        const openQty = (typeof row.open_quantity === 'string' ? parseFloat(row.open_quantity) : row.open_quantity) || 0;
+        const openAmt = (typeof row.open_amount === 'string' ? parseFloat(row.open_amount) : row.open_amount) || 0;
+        const preDateReceiveQty = Number(row.pre_date_receive_qty) || 0;
+        const preDateIssueQty = Number(row.pre_date_issue_qty) || 0;
+        const calculatedOpenQty = openQty + preDateReceiveQty - preDateIssueQty;
+        const receivedQty = Number(row.received_quantity) || 0;
+        const rrpQty = Number(row.rrp_quantity) || 0;
+        const rrpAmt = Number(row.rrp_amount) || 0;
+        const issueQty = Number(row.issue_quantity) || 0;
+        const issueAmt = Number(row.issue_amount) || 0;
+        const balanceQty = calculatedOpenQty + receivedQty - issueQty;
+        const trueBalanceQty = calculatedOpenQty + rrpQty - issueQty;
+        const trueBalanceAmt = openAmt + rrpAmt - issueAmt;
+        const partNumbers = String(row.part_numbers || '').split(',').map((p: string) => p.trim()).filter((p: string) => p);
+        const primaryPartNumber = partNumbers[0] || '';
+        const alternatePartNumbers = partNumbers.slice(1).join(', ') || '';
+        const equipmentNumbers = String(row.applicable_equipments || '').split(',').map((e: string) => e.trim()).filter((e: string) => e);
+        const primaryEquipmentNumber = equipmentNumbers[0] || '';
+        const alternateEquipmentNumbers = equipmentNumbers.slice(1).join(', ') || '';
+        return {
+            nac_code: row.nac_code || '',
+            item_name: row.item_name || '',
+            part_number: primaryPartNumber,
+            alternate_part_numbers: alternatePartNumbers,
+            equipment_number: primaryEquipmentNumber,
+            alternate_equipment_numbers: alternateEquipmentNumbers,
+            open_quantity: calculatedOpenQty,
+            open_amount: openAmt,
+            received_quantity: receivedQty,
+            rrp_quantity: rrpQty,
+            rrp_amount: rrpAmt,
+            issue_quantity: issueQty,
+            issue_amount: issueAmt,
+            balance_quantity: balanceQty,
+            true_balance_quantity: trueBalanceQty,
+            true_balance_amount: trueBalanceAmt,
+            location: row.location || ''
+        };
+    });
+
+const buildCurrentStockReportDateParams = (
+    reportFromDate: string,
+    reportToDate: string
+): (string | number)[] => [
+    reportFromDate,
+    reportFromDate,
+    reportFromDate, reportToDate,
+    reportFromDate, reportToDate,
+    reportFromDate, reportToDate,
+    reportFromDate, reportToDate,
+    reportFromDate, reportToDate,
+];
+
 export const getCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
-    const FAMILY_KEY_RD = sqlFamilyKeyFromNacOnlyExpression('rd');
-    const FAMILY_KEY_ID = sqlFamilyKeyFromNacOnlyExpression('id');
     try {
         await ensureAssetSpareSchema();
         const defaultFromDate = '2025-07-17';
@@ -3167,7 +3309,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
         }
         let countQueryExtra = '';
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            countQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', params);
+            countQueryExtra = appendVariantEquipmentFilter('s', String(equipmentNumber), '', params);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3178,7 +3320,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             params.push(String(createdDateTo));
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        const countQuery = `SELECT COUNT(DISTINCT ${FAMILY_KEY_S}) as total FROM stock_details s ${whereClause}${countQueryExtra}`;
+        const countQuery = `SELECT COUNT(DISTINCT s.nac_code) as total FROM stock_details s ${whereClause}${countQueryExtra}`;
         const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, params);
         const totalCount = countResult[0]?.total || 0;
         const currentPage = parseInt(String(page)) || 1;
@@ -3187,84 +3329,15 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
         let listQueryExtra = '';
         const listParams = [...params];
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            listQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', listParams);
+            listQueryExtra = appendVariantEquipmentFilter('s', String(equipmentNumber), '', listParams);
         }
-        const query = `
-            SELECT 
-                ${FAMILY_KEY_S} as nac_code,
-                SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
-                GROUP_CONCAT(DISTINCT s.part_numbers ORDER BY s.nac_code SEPARATOR ', ') as part_numbers,
-                MAX(s.applicable_equipments) as applicable_equipments,
-                MAX(s.location) as location,
-                SUM(s.open_quantity) as open_quantity,
-                SUM(s.open_amount) as open_amount,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date < ?
-                ) as pre_date_receive_qty,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date < ?
-                ) as pre_date_issue_qty,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as received_quantity,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_quantity,
-                (
-                    SELECT COALESCE(SUM(rrp.total_amount), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_amount,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_quantity,
-                (
-                    SELECT COALESCE(SUM(id.issue_cost), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_amount
-            FROM stock_details s
-            ${whereClause}${listQueryExtra}
-            GROUP BY ${FAMILY_KEY_S}
-            ORDER BY nac_code ASC
-            LIMIT ${limitNum} OFFSET ${offsetNum}
-        `;
+        const query = buildCurrentStockReportSql(
+            whereClause,
+            listQueryExtra,
+            `LIMIT ${limitNum} OFFSET ${offsetNum}`
+        );
         const queryParams: (string | number)[] = [
-            reportFromDate,
-            reportFromDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
+            ...buildCurrentStockReportDateParams(reportFromDate, reportToDate),
             ...listParams
         ];
         logEvents(`Executing stock report query with ${queryParams.length} parameters: ${JSON.stringify(queryParams.slice(0, 10))}...`, 'reportLog.log');
@@ -3276,46 +3349,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
              ${whereClause}${countQueryExtra}`, params);
         const sumOpenQuantity = Number(openSumRows[0]?.sum_open_quantity || 0);
         const sumOpenAmount = Number(openSumRows[0]?.sum_open_amount || 0);
-        const reportItems: StockReportItem[] = results.map((row: any) => {
-            const openQty = (typeof row.open_quantity === 'string' ? parseFloat(row.open_quantity) : row.open_quantity) || 0;
-            const openAmt = (typeof row.open_amount === 'string' ? parseFloat(row.open_amount) : row.open_amount) || 0;
-            const preDateReceiveQty = Number(row.pre_date_receive_qty) || 0;
-            const preDateIssueQty = Number(row.pre_date_issue_qty) || 0;
-            const calculatedOpenQty = openQty + preDateReceiveQty - preDateIssueQty;
-            const receivedQty = Number(row.received_quantity) || 0;
-            const rrpQty = Number(row.rrp_quantity) || 0;
-            const rrpAmt = Number(row.rrp_amount) || 0;
-            const issueQty = Number(row.issue_quantity) || 0;
-            const issueAmt = Number(row.issue_amount) || 0;
-            const balanceQty = calculatedOpenQty + receivedQty - issueQty;
-            const trueBalanceQty = calculatedOpenQty + rrpQty - issueQty;
-            const trueBalanceAmt = openAmt + rrpAmt - issueAmt;
-            const partNumbers = String(row.part_numbers || '').split(',').map((p: string) => p.trim()).filter((p: string) => p);
-            const primaryPartNumber = partNumbers[0] || '';
-            const alternatePartNumbers = partNumbers.slice(1).join(', ') || '';
-            const equipmentNumbers = String(row.applicable_equipments || '').split(',').map((e: string) => e.trim()).filter((e: string) => e);
-            const primaryEquipmentNumber = equipmentNumbers[0] || '';
-            const alternateEquipmentNumbers = equipmentNumbers.slice(1).join(', ') || '';
-            return {
-                nac_code: row.nac_code || '',
-                item_name: row.item_name || '',
-                part_number: primaryPartNumber,
-                alternate_part_numbers: alternatePartNumbers,
-                equipment_number: primaryEquipmentNumber,
-                alternate_equipment_numbers: alternateEquipmentNumbers,
-                open_quantity: calculatedOpenQty,
-                open_amount: openAmt,
-                received_quantity: receivedQty,
-                rrp_quantity: rrpQty,
-                rrp_amount: rrpAmt,
-                issue_quantity: issueQty,
-                issue_amount: issueAmt,
-                balance_quantity: balanceQty,
-                true_balance_quantity: trueBalanceQty,
-                true_balance_amount: trueBalanceAmt,
-                location: row.location || ''
-            };
-        });
+        const reportItems = mapStockReportRows(results);
         const totals = {
             open_quantity: sumOpenQuantity,
             open_amount: sumOpenAmount
@@ -3348,8 +3382,6 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
     const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
-    const FAMILY_KEY_RD = sqlFamilyKeyFromNacOnlyExpression('rd');
-    const FAMILY_KEY_ID = sqlFamilyKeyFromNacOnlyExpression('id');
     try {
         await ensureAssetSpareSchema();
         const ExcelJS = require('exceljs');
@@ -3385,7 +3417,7 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
         }
         let listQueryExtra = '';
         if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            listQueryExtra = appendFamilyEquipmentFilter(FAMILY_KEY_S, String(equipmentNumber), '', params);
+            listQueryExtra = appendVariantEquipmentFilter('s', String(equipmentNumber), '', params);
         }
         if (createdDateFrom && String(createdDateFrom).trim() !== '') {
             whereConditions.push('DATE(s.created_at) >= ?');
@@ -3396,124 +3428,17 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             params.push(String(createdDateTo));
         }
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        const query = `
-            SELECT 
-                ${FAMILY_KEY_S} as nac_code,
-                SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
-                GROUP_CONCAT(DISTINCT s.part_numbers ORDER BY s.nac_code SEPARATOR ', ') as part_numbers,
-                MAX(s.applicable_equipments) as applicable_equipments,
-                MAX(s.location) as location,
-                SUM(s.open_quantity) as open_quantity,
-                SUM(s.open_amount) as open_amount,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date < ?
-                ) as pre_date_receive_qty,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date < ?
-                ) as pre_date_issue_qty,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as received_quantity,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_quantity,
-                (
-                    SELECT COALESCE(SUM(rrp.total_amount), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${FAMILY_KEY_RD} = ${FAMILY_KEY_S}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_amount,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_quantity,
-                (
-                    SELECT COALESCE(SUM(id.issue_cost), 0)
-                    FROM issue_details id
-                    WHERE ${FAMILY_KEY_ID} = ${FAMILY_KEY_S}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_amount
-            FROM stock_details s
-            ${whereClause}${listQueryExtra}
-            GROUP BY ${FAMILY_KEY_S}
-            ORDER BY nac_code ASC
-            LIMIT ${exportLimit} OFFSET ${exportOffset}
-        `;
+        const query = buildCurrentStockReportSql(
+            whereClause,
+            listQueryExtra,
+            `LIMIT ${exportLimit} OFFSET ${exportOffset}`
+        );
         const queryParams: (string | number)[] = [
-            reportFromDate, reportFromDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
-            reportFromDate, reportToDate,
+            ...buildCurrentStockReportDateParams(reportFromDate, reportToDate),
             ...params
         ];
         const [results] = await connection.execute<RowDataPacket[]>(query, queryParams);
-        const excelData: StockReportItem[] = results.map((row: any) => {
-            const openQty = (typeof row.open_quantity === 'string' ? parseFloat(row.open_quantity) : row.open_quantity) || 0;
-            const openAmt = (typeof row.open_amount === 'string' ? parseFloat(row.open_amount) : row.open_amount) || 0;
-            const preDateReceiveQty = Number(row.pre_date_receive_qty) || 0;
-            const preDateIssueQty = Number(row.pre_date_issue_qty) || 0;
-            const calculatedOpenQty = openQty + preDateReceiveQty - preDateIssueQty;
-            const receivedQty = Number(row.received_quantity) || 0;
-            const rrpQty = Number(row.rrp_quantity) || 0;
-            const rrpAmt = Number(row.rrp_amount) || 0;
-            const issueQty = Number(row.issue_quantity) || 0;
-            const issueAmt = Number(row.issue_amount) || 0;
-            const balanceQty = calculatedOpenQty + receivedQty - issueQty;
-            const trueBalanceQty = calculatedOpenQty + rrpQty - issueQty;
-            const trueBalanceAmt = openAmt + rrpAmt - issueAmt;
-            const partNumbers = String(row.part_numbers || '').split(',').map((p: string) => p.trim()).filter((p: string) => p);
-            const primaryPartNumber = partNumbers[0] || '';
-            const alternatePartNumbers = partNumbers.slice(1).join(', ') || '';
-            const equipmentNumbers = String(row.applicable_equipments || '').split(',').map((e: string) => e.trim()).filter((e: string) => e);
-            const primaryEquipmentNumber = equipmentNumbers[0] || '';
-            const alternateEquipmentNumbers = equipmentNumbers.slice(1).join(', ') || '';
-            return {
-                nac_code: row.nac_code || '',
-                item_name: row.item_name || '',
-                part_number: primaryPartNumber,
-                alternate_part_numbers: alternatePartNumbers,
-                equipment_number: primaryEquipmentNumber,
-                alternate_equipment_numbers: alternateEquipmentNumbers,
-                open_quantity: calculatedOpenQty,
-                open_amount: openAmt,
-                received_quantity: receivedQty,
-                rrp_quantity: rrpQty,
-                rrp_amount: rrpAmt,
-                issue_quantity: issueQty,
-                issue_amount: issueAmt,
-                balance_quantity: balanceQty,
-                true_balance_quantity: trueBalanceQty,
-                true_balance_amount: trueBalanceAmt,
-                location: row.location || ''
-            };
-        });
+        const excelData = mapStockReportRows(results);
         worksheet.addRow([
             'NAC Code',
             'Item Name',

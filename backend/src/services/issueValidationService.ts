@@ -10,21 +10,24 @@ export const FUEL_NAC_CODES = new Set(['GT 07986', 'GT 00000']);
 
 const FUEL_NAC_COMPACT = new Set(['GT07986', 'GT00000']);
 
+/** Compact fuel family bases (diesel / petrol) without spaces. */
+const FUEL_NAC_FAMILY_REGEXP = '^(GT07986|GT00000)[A-Z]?$';
+
 /** NAC without spaces — matches DB values stored as `GT 07986` or `GT07986`. */
 export const compactNacCode = (nac: string): string => String(nac || '').trim().replace(/\s+/g, '');
 
 export const isFuelNacCode = (nac: string): boolean => {
-    const trimmed = String(nac || '').trim();
-    return FUEL_NAC_CODES.has(trimmed) || FUEL_NAC_COMPACT.has(compactNacCode(nac));
+    const base = stripSuffixFromNac(String(nac || '').trim());
+    return FUEL_NAC_CODES.has(base) || FUEL_NAC_COMPACT.has(compactNacCode(base));
 };
 
 /** SQL predicate: spare / non-fuel issue rows only. */
 export const sqlExcludeFuelNac = (alias = 'i'): string =>
-    `REPLACE(TRIM(${alias}.nac_code), ' ', '') NOT IN ('GT07986', 'GT00000')`;
+    `REPLACE(TRIM(${alias}.nac_code), ' ', '') NOT REGEXP '${FUEL_NAC_FAMILY_REGEXP}'`;
 
-/** SQL predicate: fuel issue rows only. */
+/** SQL predicate: fuel issue rows only (base NAC and family subcodes such as GT 07986A). */
 export const sqlIncludeFuelNacOnly = (alias = 'i'): string =>
-    `REPLACE(TRIM(${alias}.nac_code), ' ', '') IN ('GT07986', 'GT00000')`;
+    `REPLACE(TRIM(${alias}.nac_code), ' ', '') REGEXP '${FUEL_NAC_FAMILY_REGEXP}'`;
 
 const INTERNAL_ISSUED_FOR_PREFIXES = ['code_transfer_to_'];
 

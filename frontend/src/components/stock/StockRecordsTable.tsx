@@ -278,12 +278,12 @@ export function StockRecordsTable({
                                                 <TableCell className="py-2 text-right">
                                                     <div className="flex justify-end gap-1">
                                                         {canEdit && (
-                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onEdit({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, currentBalance: Number(v.currentBalance), openQuantity: Number(v.openQuantity ?? 0), openAmount: Number(v.openAmount ?? 0), location: v.location || r.location })}>
+                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onEdit({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, trueBalance: Number(v.trueBalance ?? 0), openQuantity: Number(v.openQuantity ?? 0), openAmount: Number(v.openAmount ?? 0), location: v.location || r.location })}>
                                                                 <Pencil className="h-4 w-4" />
                                                             </Button>
                                                         )}
                                                         {canDelete && (
-                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-red-600" onClick={() => onDelete({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, currentBalance: Number(v.currentBalance) })}>
+                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-red-600" onClick={() => onDelete({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, trueBalance: Number(v.trueBalance ?? 0) })}>
                                                                 <Trash2 className="h-4 w-4" />
                                                             </Button>
                                                         )}
