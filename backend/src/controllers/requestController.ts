@@ -11,6 +11,9 @@ import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
 import {
+    buildNewRequestIdentity,
+    getRequestPartNumberValidationError,
+    normalizeRequestIdentityValue,
     prepareRequestItemForSave,
     REQUEST_ITEM_NAME_SQL,
     REQUEST_STOCK_JOIN,
@@ -125,6 +128,72 @@ interface SearchRequestResult extends RowDataPacket {
 }
 
 const MAX_REFERENCE_SKIP_HOURS = 4;
+
+const REQUEST_NORMALIZED_PART_SQL = `REGEXP_REPLACE(UPPER(COALESCE(part_number, '')), '[^A-Z0-9]', '')`;
+const REQUEST_NORMALIZED_NAME_SQL = `REGEXP_REPLACE(UPPER(COALESCE(item_name, '')), '[^A-Z0-9]', '')`;
+
+const buildDuplicateRequestMessage = (
+    identity: { type: 'partNumber' | 'itemName' | 'none'; key: string },
+    itemName: string,
+    partNumber: string
+): string => {
+    if (identity.type === 'partNumber') {
+        return `A pending new-item request already exists for part number ${partNumber || identity.key}`;
+    }
+    return `A pending new-item request already exists for item ${itemName || identity.key}`;
+};
+
+const assertNoDuplicateNewItemRequests = async (
+    connection: PoolConnection,
+    items: Array<{ nacCode: string; partNumber: string; itemName: string }>,
+    opts: { excludeIds?: number[] } = {}
+): Promise<void> => {
+    const localKeys = new Set<string>();
+    const excludeIds = opts.excludeIds ?? [];
+
+    for (const item of items) {
+        if (String(item.nacCode || '').trim() !== 'N/A') {
+            continue;
+        }
+
+        const partNumberError = getRequestPartNumberValidationError(item.partNumber);
+        if (partNumberError) {
+            throw new Error(partNumberError);
+        }
+
+        const identity = buildNewRequestIdentity(item.partNumber, item.itemName);
+        if (identity.type === 'none') {
+            throw new Error('New item requests require a part number or item name');
+        }
+
+        const localKey = `${identity.type}:${identity.key}`;
+        if (localKeys.has(localKey)) {
+            throw new Error(buildDuplicateRequestMessage(identity, item.itemName, item.partNumber));
+        }
+        localKeys.add(localKey);
+
+        const excludeClause = excludeIds.length
+            ? ` AND id NOT IN (${excludeIds.map(() => '?').join(', ')})`
+            : '';
+        const identitySql = identity.type === 'partNumber'
+            ? REQUEST_NORMALIZED_PART_SQL
+            : REQUEST_NORMALIZED_NAME_SQL;
+        const [rows] = await connection.query<RowDataPacket[]>(
+            `SELECT id
+             FROM request_details
+             WHERE approval_status NOT IN ('CLOSED', 'REJECTED')
+               AND IFNULL(is_received, 0) = 0
+               AND (nac_code IS NULL OR TRIM(nac_code) = '' OR nac_code = 'N/A')
+               AND ${identitySql} = ?
+               ${excludeClause}
+             LIMIT 1`,
+            excludeIds.length ? [identity.key, ...excludeIds] : [identity.key]
+        );
+        if (rows.length > 0) {
+            throw new Error(buildDuplicateRequestMessage(identity, item.itemName, item.partNumber));
+        }
+    }
+};
 
 const ensureRequestReferenceSkipColumns = async () => {
     const [columnRows] = await pool.query<RowDataPacket[]>(
@@ -743,6 +812,15 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
             return;
         }
 
+        await assertNoDuplicateNewItemRequests(
+            connection,
+            requestData.items.map((item) => ({
+                nacCode: item.nacCode,
+                partNumber: item.partNumber,
+                itemName: item.itemName,
+            }))
+        );
+
         const validationCaches: IssueValidationCaches = {};
         const compatibilityErrors: Array<{ nacCode: string; message: string; originalIndex: number }> = [];
         for (let i = 0; i < requestData.items.length; i++) {
@@ -821,6 +899,18 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
         await connection.rollback();
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         logEvents(`Error creating request: ${errorMessage} by user: ${req.body.requestedBy}`, "requestLog.log");
+        if (
+            errorMessage.includes('already exists for part number') ||
+            errorMessage.includes('already exists for item') ||
+            errorMessage.includes('Part number can only contain letters and numbers') ||
+            errorMessage.includes('New item requests require a part number or item name')
+        ) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: errorMessage
+            });
+            return;
+        }
         res.status(500).json({ 
             error: 'Internal Server Error',
             message: error instanceof Error ? error.message : 'An error occurred while creating the request'
@@ -1005,6 +1095,18 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
         } else {
             logEvents(`Date validation skipped for user with approval permission: ${req.user || 'unknown'} (permissions: ${userPermissions.join(', ')})`, "requestLog.log");
         }
+
+        await assertNoDuplicateNewItemRequests(
+            connection,
+            items.map((item) => ({
+                nacCode: item.nacCode,
+                partNumber: item.partNumber,
+                itemName: item.itemName,
+            })),
+            {
+                excludeIds: items.filter((item) => item.id).map((item) => Number(item.id)),
+            }
+        );
 
         const [existingItems] = await connection.query<RowDataPacket[]>(
             'SELECT id FROM request_details WHERE request_number = ?',
@@ -1217,6 +1319,18 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
         await connection.rollback();
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         logEvents(`Error updating request ${req.params.requestNumber}: ${errorMessage}`, "requestLog.log");
+        if (
+            errorMessage.includes('already exists for part number') ||
+            errorMessage.includes('already exists for item') ||
+            errorMessage.includes('Part number can only contain letters and numbers') ||
+            errorMessage.includes('New item requests require a part number or item name')
+        ) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: errorMessage
+            });
+            return;
+        }
         res.status(500).json({ 
             error: 'Internal Server Error',
             message: error instanceof Error ? error.message : 'An error occurred while updating the request'
@@ -2092,38 +2206,73 @@ export const getNextRequestNumber = async (req: Request, res: Response): Promise
 
 export const checkDuplicateRequest = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { nacCode } = req.query;
+        const nacCode = String(req.query.nacCode || '').trim();
+        const partNumber = String(req.query.partNumber || '').trim();
+        const itemName = String(req.query.itemName || '').trim();
 
-        if (!nacCode) {
-            logEvents(`Failed to check duplicate request - Missing NAC code parameter`, "requestLog.log");
+        if (!nacCode && !partNumber && !itemName) {
+            logEvents(`Failed to check duplicate request - Missing identifier parameters`, "requestLog.log");
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'NAC code is required'
+                message: 'nacCode, partNumber, or itemName is required'
             });
             return;
         }
 
-        
-        const [existingRequests] = await pool.query<RowDataPacket[]>(
-            `SELECT COUNT(*) as count 
-             FROM request_details 
-             WHERE nac_code = ? 
-             AND is_received = 0
-             AND approval_status NOT IN ('CLOSED', 'REJECTED')`,
-            [nacCode]
-        );
+        let isDuplicate = false;
+        let message = 'Item is available for request';
 
-        const isDuplicate = existingRequests[0].count > 0;
+        if (nacCode && nacCode !== 'N/A') {
+            const [existingRequests] = await pool.query<RowDataPacket[]>(
+                `SELECT COUNT(*) as count
+                 FROM request_details
+                 WHERE nac_code = ?
+                   AND IFNULL(is_received, 0) = 0
+                   AND approval_status NOT IN ('CLOSED', 'REJECTED')`,
+                [nacCode]
+            );
+            isDuplicate = Number(existingRequests[0]?.count || 0) > 0;
+            message = isDuplicate
+                ? 'This item is already requested and pending approval'
+                : message;
+        } else {
+            const identity = buildNewRequestIdentity(partNumber, itemName);
+            if (identity.type === 'none') {
+                res.status(400).json({
+                    error: 'Bad Request',
+                    message: 'partNumber or itemName is required for new item duplicate check'
+                });
+                return;
+            }
 
-        logEvents(`Duplicate check for NAC code ${nacCode}: ${isDuplicate ? 'Duplicate found' : 'No duplicate'}`, "requestLog.log");
-        
+            const identitySql = identity.type === 'partNumber'
+                ? REQUEST_NORMALIZED_PART_SQL
+                : REQUEST_NORMALIZED_NAME_SQL;
+            const [rows] = await pool.query<RowDataPacket[]>(
+                `SELECT id
+                 FROM request_details
+                 WHERE approval_status NOT IN ('CLOSED', 'REJECTED')
+                   AND IFNULL(is_received, 0) = 0
+                   AND (nac_code IS NULL OR TRIM(nac_code) = '' OR nac_code = 'N/A')
+                   AND ${identitySql} = ?
+                 LIMIT 1`,
+                [identity.key]
+            );
+            isDuplicate = rows.length > 0;
+            message = isDuplicate
+                ? buildDuplicateRequestMessage(identity, itemName, normalizeRequestIdentityValue(partNumber))
+                : message;
+        }
+
+        logEvents(`Duplicate check for request item ${nacCode || partNumber || itemName}: ${isDuplicate ? 'Duplicate found' : 'No duplicate'}`, "requestLog.log");
+
         res.status(200).json({
             isDuplicate,
-            message: isDuplicate ? 'This item is already requested and pending approval' : 'Item is available for request'
+            message
         });
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        logEvents(`Error checking duplicate request for NAC code ${req.query.nacCode}: ${errorMessage}`, "requestLog.log");
+        logEvents(`Error checking duplicate request: ${errorMessage}`, "requestLog.log");
         res.status(500).json({
             error: 'Internal Server Error',
             message: 'An error occurred while checking for duplicate requests'

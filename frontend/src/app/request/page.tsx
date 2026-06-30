@@ -15,6 +15,10 @@ import { SearchResult } from '@/types/search';
 import { usePrediction } from '@/hooks/usePrediction';
 import { PredictionSummaryCard } from '@/components/prediction/PredictionSummaryCard';
 import { Spinner } from '@/components/ui/spinner';
+import {
+    buildNewRequestIdentity,
+    sanitizeRequestPartNumberInput,
+} from '@/utils/partNumberUtils';
 const SearchResults = lazy(() => import('@/components/search/SearchResults').then(module => ({ default: module.SearchResults })));
 const RequestCart = lazy(() => import('@/components/request/RequestCart').then(module => ({ default: module.RequestCart })));
 const RequestItemForm = lazy(() => import('@/components/request/RequestItemForm').then(module => ({ default: module.RequestItemForm })));
@@ -220,6 +224,22 @@ export default function RequestPage() {
         setIsManualEntry(true);
         setIsItemFormOpen(true);
     };
+    const hasDuplicateNewItemInCart = useCallback((item: RequestCartItem) => {
+        if (item.nacCode !== 'N/A') {
+            return false;
+        }
+        const identity = buildNewRequestIdentity(item.partNumber, item.itemName);
+        if (identity.type === 'none') {
+            return false;
+        }
+        return cart.some((cartItem) => {
+            if (cartItem.nacCode !== 'N/A') {
+                return false;
+            }
+            const cartIdentity = buildNewRequestIdentity(cartItem.partNumber, cartItem.itemName);
+            return cartIdentity.type === identity.type && cartIdentity.key === identity.key;
+        });
+    }, [cart]);
     const handleAddToCart = async (item: RequestCartItem) => {
         if (cart.length >= 3) {
             showErrorToast({
@@ -229,15 +249,30 @@ export default function RequestPage() {
             });
             return;
         }
-        if (item.nacCode && item.nacCode !== 'N/A') {
+        if (hasDuplicateNewItemInCart(item)) {
+            showErrorToast({
+                title: 'Error',
+                message: 'This new item is already in the request slip.',
+                duration: 4000,
+            });
+            return;
+        }
+        const duplicateParams = item.nacCode && item.nacCode !== 'N/A'
+            ? { nacCode: item.nacCode }
+            : {
+                nacCode: 'N/A',
+                partNumber: sanitizeRequestPartNumberInput(item.partNumber),
+                itemName: item.itemName,
+            };
+        if ((item.nacCode && item.nacCode !== 'N/A') || item.itemName.trim()) {
             try {
                 const response = await API.get('/api/request/duplicate', {
-                    params: { nacCode: item.nacCode }
+                    params: duplicateParams
                 });
                 if (response.status === 200 && response.data.isDuplicate) {
                     showErrorToast({
                         title: 'Error',
-                        message: "This item is already requested and pending receive. Please wait for the current request to be processed.",
+                        message: String(response.data.message || 'This item is already requested and pending receive.'),
                         duration: 5000,
                     });
                     return;
@@ -379,7 +414,7 @@ export default function RequestPage() {
                 requestedBy: user.UserInfo.username,
                 items: cart.map((item, index) => ({
                     nacCode: item.nacCode,
-                    partNumber: item.partNumber || 'NA',
+                    partNumber: sanitizeRequestPartNumberInput(item.partNumber) || 'NA',
                     itemName: item.itemName,
                     requestQuantity: item.requestQuantity,
                     equipmentNumber: item.equipmentNumber,
