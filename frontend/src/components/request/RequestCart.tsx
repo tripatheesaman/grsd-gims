@@ -13,6 +13,7 @@ import Image from 'next/image';
 import { useAuthContext } from '@/context/AuthContext';
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { sanitizeRequestPartNumberInput } from '@/utils/partNumberUtils';
 interface RequestCartProps {
     items: RequestCartItem[];
     onUpdateItem: (itemId: string, updates: Partial<RequestCartItem>) => void;
@@ -120,7 +121,7 @@ export function RequestCart({ items, onUpdateItem, onDeleteItem, onSubmit, isSub
 
                 <div>
                   <Label htmlFor="editPartNumber" className="text-sm font-medium text-[#003594]">Part Number</Label>
-                  <PartNumberSelect partNumberList={editingItem?.partNumber || ""} value={editFormData.partNumber || ""} onChange={(value) => setEditFormData(prev => ({ ...prev, partNumber: value }))}/>
+                  <PartNumberSelect partNumberList={editingItem?.partNumber || ""} value={editFormData.partNumber || ""} onChange={(value) => setEditFormData(prev => ({ ...prev, partNumber: sanitizeRequestPartNumberInput(value) }))}/>
                 </div>
 
                 <div>

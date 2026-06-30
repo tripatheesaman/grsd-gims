@@ -1,6 +1,7 @@
 import type { StockVariant } from '@/types/search';
 
 export const ABSENT_PART_NUMBER = 'N/A';
+export const REQUEST_PART_NUMBER_REGEX = /^[A-Z0-9]+$/;
 
 export function normalizePartNumber(partNumber: string): string {
     return String(partNumber || '').trim().toUpperCase();
@@ -16,6 +17,47 @@ export function resolveReceivePartNumber(partNumber: string | null | undefined):
         return ABSENT_PART_NUMBER;
     }
     return normalizePartNumber(String(partNumber ?? ''));
+}
+
+export function sanitizeRequestPartNumberInput(partNumber: string | null | undefined): string {
+    return normalizePartNumber(String(partNumber ?? '')).replace(/[^A-Z0-9]/g, '');
+}
+
+export function getRequestPartNumberValidationError(
+    partNumber: string | null | undefined,
+    opts: { allowEmpty?: boolean } = {}
+): string | null {
+    const normalized = normalizePartNumber(String(partNumber ?? ''));
+    if (!normalized) {
+        return opts.allowEmpty === false ? 'Part number is required' : null;
+    }
+    if (!REQUEST_PART_NUMBER_REGEX.test(normalized)) {
+        return 'Part number can only contain letters and numbers';
+    }
+    return null;
+}
+
+export function normalizeRequestIdentityValue(value: string | null | undefined): string {
+    return String(value || '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+}
+
+export function buildNewRequestIdentity(
+    partNumber: string | null | undefined,
+    itemName: string | null | undefined
+): { type: 'partNumber' | 'itemName' | 'none'; key: string } {
+    const normalizedPart = normalizeRequestIdentityValue(partNumber);
+    if (normalizedPart) {
+        return { type: 'partNumber', key: normalizedPart };
+    }
+
+    const normalizedName = normalizeRequestIdentityValue(itemName);
+    if (normalizedName) {
+        return { type: 'itemName', key: normalizedName };
+    }
+
+    return { type: 'none', key: '' };
 }
 
 export function partNumbersMatch(a: string, b: string): boolean {

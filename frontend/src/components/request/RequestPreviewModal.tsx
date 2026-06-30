@@ -10,6 +10,7 @@ import { EquipmentSelect } from '../issue/EquipmentSelect';
 import { RequestEquipmentSelect } from './RequestEquipmentSelect';
 import { useAuthContext } from '@/context/AuthContext';
 import Image from 'next/image';
+import { sanitizeRequestPartNumberInput } from '@/utils/partNumberUtils';
 interface RequestPreviewModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -67,7 +68,7 @@ function EditableRow({ item, onUpdate, onDelete }: EditableRowProps) {
           <Input value={editedItem.unit || ''} onChange={(e) => setEditedItem({ ...editedItem, unit: e.target.value })} disabled={!canEditUnit} className={`w-20 ${!canEditUnit ? "bg-gray-50 cursor-not-allowed" : ""}`} placeholder="Unit"/>
         </td>
         <td className="px-4 py-2">
-          {hasPartNumber ? (<EquipmentSelect equipmentList={item.partNumber || ''} value={editedItem.partNumber || ''} onChange={(value) => setEditedItem({ ...editedItem, partNumber: value })}/>) : (<Input value={editedItem.partNumber || ''} onChange={(e) => setEditedItem({ ...editedItem, partNumber: e.target.value })} placeholder="Enter part number" className="w-32"/>)}
+          {hasPartNumber ? (<EquipmentSelect equipmentList={item.partNumber || ''} value={editedItem.partNumber || ''} onChange={(value) => setEditedItem({ ...editedItem, partNumber: sanitizeRequestPartNumberInput(value) })}/>) : (<Input value={editedItem.partNumber || ''} onChange={(e) => setEditedItem({ ...editedItem, partNumber: sanitizeRequestPartNumberInput(e.target.value) })} placeholder="Enter part number" className="w-32"/>)}
         </td>
         <td className="px-4 py-2">
           <div className="flex items-center gap-2">

@@ -29,6 +29,10 @@ import { useAuthContext } from '@/context/AuthContext';
 import { API } from '@/lib/api';
 import { resolveImageUrl } from '@/lib/urls';
 import { useRequestingAuthorities } from '@/app/request/useRequestingAuthorities';
+import {
+    getRequestPartNumberValidationError,
+    sanitizeRequestPartNumberInput,
+} from '@/utils/partNumberUtils';
 
 interface RequestItemFormProps {
     isOpen: boolean;
@@ -177,6 +181,12 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
         if (isManualEntry && !itemName.trim()) {
             newErrors.itemName = 'Item name is required';
         }
+        if (isManualEntry) {
+            const partNumberError = getRequestPartNumberValidationError(partNumber);
+            if (partNumberError) {
+                newErrors.partNumber = partNumberError;
+            }
+        }
         if (!isManualEntry && partNumberList && !partNumber.trim()) {
             newErrors.partNumber = 'Part number is required';
         }
@@ -208,7 +218,9 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
                 nacCode: isManualEntry ? 'N/A' : (resolvedNacCode || item?.nacCode || 'N/A'),
                 itemName: isManualEntry ? itemName : processItemName(itemName || item?.itemName || ''),
                 requestQuantity,
-                partNumber: partNumber || 'N/A',
+                partNumber: isManualEntry
+                    ? (sanitizeRequestPartNumberInput(partNumber) || 'N/A')
+                    : (partNumber || 'N/A'),
                 equipmentNumber: collapseEquipmentSelectionValue(equipmentNumber.trim()),
                 specifications: specifications || '',
                 image: image || undefined,
@@ -357,10 +369,13 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
                                     <Label className="text-sm font-medium text-[#003594]">Part Number</Label>
                                     <Input
                                         value={partNumber}
-                                        onChange={(e) => setPartNumber(e.target.value)}
-                                        placeholder="Optional"
-                                        className="border-[#002a6e]/15"
+                                        onChange={(e) => setPartNumber(sanitizeRequestPartNumberInput(e.target.value))}
+                                        placeholder="Optional, letters and numbers only"
+                                        className={errors.partNumber ? 'border-red-500' : 'border-[#002a6e]/15'}
                                     />
+                                    {errors.partNumber && (
+                                        <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-3 w-3" />{errors.partNumber}</p>
+                                    )}
                                 </div>
                             )}
                             <div className="space-y-2">
