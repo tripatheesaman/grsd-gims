@@ -284,7 +284,14 @@ export const createIssue = async (req: Request, res: Response): Promise<void> =>
 export const approveIssue = async (req: Request, res: Response): Promise<void> => {
     const { itemIds, approvedBy } = req.body;
     const connection = await pool.getConnection();
-    const issueIds = Array.isArray(itemIds) ? itemIds : [itemIds];
+    const rawIssueIds = Array.isArray(itemIds) ? itemIds : [itemIds];
+    const issueIds = Array.from(
+        new Set(
+            rawIssueIds
+                .map((id) => Number(id))
+                .filter((id) => Number.isInteger(id) && id > 0)
+        )
+    );
     try {
         await connection.beginTransaction();
         await ensureAssetSpareSchema();
@@ -498,9 +505,13 @@ export const getPendingIssues = async (req: Request, res: Response): Promise<voi
         i.issued_by,
         i.issued_for,
         i.extends_applicable_equipment,
-        SUBSTRING_INDEX(s.item_name, ',', 1) as item_name
+        (
+          SELECT SUBSTRING_INDEX(s.item_name, ',', 1)
+          FROM stock_details s
+          WHERE s.nac_code COLLATE utf8mb4_unicode_ci = i.nac_code COLLATE utf8mb4_unicode_ci
+          LIMIT 1
+        ) as item_name
       FROM issue_details i
-      LEFT JOIN stock_details s ON i.nac_code COLLATE utf8mb4_unicode_ci = s.nac_code COLLATE utf8mb4_unicode_ci
       WHERE i.approval_status = 'PENDING'
       AND ${sqlExcludeFuelNac('i')}
       ORDER BY i.issue_date DESC`);

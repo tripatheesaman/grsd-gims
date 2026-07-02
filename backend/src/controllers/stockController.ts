@@ -17,73 +17,45 @@ import {
     compactFamilySuffixesAfterDelete,
     purgeStockNacAuxiliaryData,
 } from '../services/inventoryVariantService';
-import { rebuildNacInventoryState } from '../services/issueInventoryService';
+import { rebuildNacInventoryState, reconcileAllStockBalances, readComputedVirtualBalance, syncStockCurrentBalance } from '../services/issueInventoryService';
 import { buildStockSearchKey } from '../services/searchRelevanceService';
 import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 import { PoolConnection } from 'mysql2/promise';
 
-const BALANCE_EPSILON = 0.0001;
-
-async function readVariantTrueBalance(connection: PoolConnection, nacCode: string): Promise<number> {
-    const [rows] = await connection.execute<RowDataPacket[]>(
-        `SELECT ${VARIANT_TRUE_BALANCE_SQL} AS trueBalance
-         FROM stock_details sd
-         WHERE sd.nac_code = ?`,
-        [nacCode]
-    );
-    return Number(rows[0]?.trueBalance ?? 0);
-}
-
-async function applyTrueBalanceTarget(
-    connection: PoolConnection,
-    nacCode: string,
-    targetTrueBalance: number
-): Promise<void> {
-    const currentTrueBalance = await readVariantTrueBalance(connection, nacCode);
-    const delta = targetTrueBalance - currentTrueBalance;
-    if (Math.abs(delta) <= BALANCE_EPSILON) {
-        return;
-    }
-
-    const [stockRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COALESCE(open_quantity, 0) AS open_quantity
-         FROM stock_details
-         WHERE nac_code = ?`,
-        [nacCode]
-    );
-    if (!stockRows.length) {
-        throw new Error(`Stock item not found for NAC ${nacCode}`);
-    }
-
-    const openQuantity = Number(stockRows[0].open_quantity ?? 0);
-    const nextOpenQuantity = openQuantity + delta;
-    if (nextOpenQuantity < -BALANCE_EPSILON) {
-        const minimumTrueBalance = currentTrueBalance - openQuantity;
-        throw new Error(
-            `Cannot set true balance to ${targetTrueBalance}. ` +
-            `Minimum achievable true balance is ${minimumTrueBalance.toFixed(4)} based on receives and issues.`
+export const reconcileStockBalances = async (req: Request, res: Response): Promise<void> => {
+    const connection = await pool.getConnection();
+    let started = false;
+    try {
+        await ensureAssetSpareSchema();
+        await connection.beginTransaction();
+        started = true;
+        const result = await reconcileAllStockBalances(connection);
+        await connection.commit();
+        started = false;
+        logEvents(
+            `Stock balance reconciliation: ${result.variantsProcessed} variant(s), ${result.balanceFixes} balance fix(es)`,
+            'stockLog.log'
         );
+        res.status(200).json({
+            message: 'Stock balances reconciled successfully',
+            ...result,
+        });
     }
-
-    await connection.execute(
-        `UPDATE stock_details
-         SET open_quantity = ?, current_balance = ?
-         WHERE nac_code = ?`,
-        [Math.max(0, nextOpenQuantity), targetTrueBalance, nacCode]
-    );
-}
-
-const resolveTargetTrueBalance = (body: {
-    trueBalance?: unknown;
-    currentBalance?: unknown;
-}): number | null => {
-    const raw = body.trueBalance ?? body.currentBalance;
-    if (raw === undefined || raw === null || raw === '') {
-        return null;
+    catch (error) {
+        if (started) {
+            await connection.rollback();
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in reconcileStockBalances: ${errorMessage}`, 'stockLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
+        });
     }
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) ? parsed : null;
+    finally {
+        connection.release();
+    }
 };
 
 const expandEquipmentTokens = (input: string): string[] => {
@@ -269,7 +241,6 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         itemName,
         partNumber,
         equipmentNumber,
-        currentBalance,
         openQuantity = 0,
         openAmount = 0,
         location,
@@ -278,10 +249,17 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
     let started = false;
     try {
         await ensureAssetSpareSchema();
-        if (!nacCode || !itemName || !partNumber || !equipmentNumber || currentBalance === undefined || !location) {
+        if (!nacCode || !itemName || !partNumber || !equipmentNumber || !location) {
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'All fields are required'
+                message: 'NAC code, item name, part number, equipment number, and location are required'
+            });
+            return;
+        }
+        if (Number(openQuantity) < 0 || Number(openAmount) < 0) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Open quantity and open amount cannot be negative'
             });
             return;
         }
@@ -311,9 +289,8 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         await connection.beginTransaction();
         started = true;
         const processedName = processItemName(itemName);
-        const resolvedOpenQuantity = Number(openQuantity) > 0
-            ? Number(openQuantity)
-            : Number(currentBalance) || 0;
+        const resolvedOpenQuantity = Number(openQuantity) || 0;
+        const resolvedOpenAmount = Number(openAmount) || 0;
         const searchKey = buildStockSearchKey({
             nac_code: nacCode,
             part_numbers: partNumber.trim(),
@@ -337,19 +314,15 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
             processedName,
             partNumber.trim(),
             equipmentNumber,
-            Number(currentBalance) || 0,
+            0,
             location,
             resolvedOpenQuantity,
-            Number(openAmount) || 0,
+            resolvedOpenAmount,
             searchKey,
         ]);
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await rebuildNacInventoryState(connection, nacCode);
-        const finalTrueBalance = await readVariantTrueBalance(connection, nacCode);
-        await connection.execute(
-            `UPDATE stock_details SET current_balance = ? WHERE nac_code = ?`,
-            [finalTrueBalance, nacCode]
-        );
+        await syncStockCurrentBalance(connection, nacCode);
         await connection.commit();
         res.status(201).json({
             message: 'Stock item created successfully',
@@ -378,8 +351,6 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         itemName,
         partNumber,
         equipmentNumber,
-        currentBalance,
-        trueBalance,
         openQuantity = 0,
         openAmount = 0,
         location,
@@ -388,25 +359,23 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
     let started = false;
     try {
         await ensureAssetSpareSchema();
-        const targetTrueBalance = resolveTargetTrueBalance({ trueBalance, currentBalance });
         if (
             !nacCode
             || !itemName
             || !partNumber
             || !equipmentNumber
-            || targetTrueBalance === null
             || !location
         ) {
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'All fields are required'
+                message: 'NAC code, item name, part number, equipment number, and location are required'
             });
             return;
         }
-        if (targetTrueBalance < 0) {
+        if (Number(openQuantity) < 0 || Number(openAmount) < 0) {
             res.status(400).json({
                 error: 'Bad Request',
-                message: 'True balance cannot be negative'
+                message: 'Open quantity and open amount cannot be negative'
             });
             return;
         }
@@ -475,22 +444,18 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
             searchKey,
             id,
         ]);
-        await applyTrueBalanceTarget(connection, nacCode, targetTrueBalance);
         await syncFamilyLocation(connection, baseNacCode, location);
         if (oldNacCode !== nacCode) {
             await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [oldNacCode]);
         }
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await rebuildNacInventoryState(connection, nacCode);
-        const finalTrueBalance = await readVariantTrueBalance(connection, nacCode);
-        await connection.execute(
-            `UPDATE stock_details SET current_balance = ? WHERE nac_code = ?`,
-            [finalTrueBalance, nacCode]
-        );
+        await syncStockCurrentBalance(connection, nacCode);
+        const virtualBalance = await readComputedVirtualBalance(connection, nacCode);
         await connection.commit();
         res.status(200).json({
             message: 'Stock item updated successfully',
-            trueBalance: finalTrueBalance,
+            virtualBalance,
         });
     }
     catch (error) {

@@ -129,6 +129,8 @@ export interface FuelConsumptionStats {
     totalLiters: number;
 }
 
+export type ConsumptionDeviationDirection = 'above' | 'below' | null;
+
 export interface FuelConsumptionAnalysis {
     equipment: string;
     nacCode: string;
@@ -140,10 +142,16 @@ export interface FuelConsumptionAnalysis {
     avgLitersPerKm: number;
     expectedKmForQuantity: number;
     exceedsAverage: boolean;
+    belowAverage: boolean;
+    deviatesFromAverage: boolean;
+    deviationDirection: ConsumptionDeviationDirection;
     hasEnoughHistory: boolean;
     validTripCount: number;
     warningMessage: string | null;
 }
+
+/** Distance below this fraction of expected km flags an abnormally-low reading (possible over-fuelling / odometer under-read). */
+const BELOW_AVERAGE_TOLERANCE = 0.25;
 
 export const fuelTypeToNacCode = (fuelType: string): string => {
     const nac = FUEL_NAC_BY_TYPE[String(fuelType || '').toLowerCase()];
@@ -292,7 +300,8 @@ export async function getLatestOdometerReading(
         `SELECT f.kilometers, f.is_kilometer_reset
          FROM fuel_records f
          INNER JOIN issue_details i ON f.issue_fk = i.id
-         WHERE ${nacMatchSql('i')}
+         WHERE i.approval_status = 'APPROVED'
+           AND ${nacMatchSql('i')}
            AND ${equipmentMatch.sql}
            ${dateClause}
          ORDER BY i.issue_date DESC, f.id DESC
@@ -329,8 +338,16 @@ export function buildConsumptionAnalysis(
     const hasEnoughHistory = stats.validTripCount >= MIN_VALID_TRIPS;
     const expectedKmForQuantity =
         hasEnoughHistory && stats.avgKmPerLiter > 0 ? quantityLiters * stats.avgKmPerLiter : 0;
-    const exceedsAverage =
-        hasEnoughHistory && expectedKmForQuantity > 0 && kmDelta > expectedKmForQuantity;
+    const canCompare = hasEnoughHistory && expectedKmForQuantity > 0 && kmDelta > 0;
+    const exceedsAverage = canCompare && kmDelta > expectedKmForQuantity;
+    const belowAverage =
+        canCompare && kmDelta < expectedKmForQuantity * (1 - BELOW_AVERAGE_TOLERANCE);
+    const deviationDirection: ConsumptionDeviationDirection = exceedsAverage
+        ? 'above'
+        : belowAverage
+            ? 'below'
+            : null;
+    const deviatesFromAverage = exceedsAverage || belowAverage;
 
     let warningMessage: string | null = null;
     if (exceedsAverage) {
@@ -338,6 +355,12 @@ export function buildConsumptionAnalysis(
             `Distance traveled (${kmDelta.toLocaleString()} km) exceeds the historical average ` +
             `(${expectedKmForQuantity.toFixed(1)} km expected for ${quantityLiters} L at ` +
             `${stats.avgKmPerLiter.toFixed(2)} km/L based on ${stats.validTripCount} prior issues).`;
+    } else if (belowAverage) {
+        warningMessage =
+            `Distance traveled (${kmDelta.toLocaleString()} km) is well below the historical average ` +
+            `(${expectedKmForQuantity.toFixed(1)} km expected for ${quantityLiters} L at ` +
+            `${stats.avgKmPerLiter.toFixed(2)} km/L based on ${stats.validTripCount} prior issues). ` +
+            `Verify the odometer reading and quantity.`;
     }
 
     return {
@@ -351,6 +374,9 @@ export function buildConsumptionAnalysis(
         avgLitersPerKm: stats.avgLitersPerKm,
         expectedKmForQuantity,
         exceedsAverage,
+        belowAverage,
+        deviatesFromAverage,
+        deviationDirection,
         hasEnoughHistory,
         validTripCount: stats.validTripCount,
         warningMessage,

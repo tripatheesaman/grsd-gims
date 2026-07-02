@@ -3,7 +3,7 @@
 import { useAuthContext } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Wrench } from 'lucide-react';
+import { Plus, Wrench, RefreshCw } from 'lucide-react';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { API } from '@/lib/api';
 import { getNacCodeValidationError } from '@/utils/nacCodeUtils';
@@ -26,15 +26,14 @@ interface StockFormData {
     itemName: string;
     partNumber: string;
     equipmentNumber: string;
-    trueBalance: number;
     openQuantity: number;
     openAmount: number;
     location: string;
 }
 
-interface EditBaseline {
+interface DisplayBalances {
+    virtualBalance: number;
     trueBalance: number;
-    openQuantity: number;
 }
 export default function StockRecordsPage() {
     const { user, permissions } = useAuthContext();
@@ -69,20 +68,20 @@ export default function StockRecordsPage() {
     const [showEditModal, setShowEditModal] = useState<boolean>(false);
     const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
     const [editingItem, setEditingItem] = useState<StockRow | null>(null);
-    const [editBaseline, setEditBaseline] = useState<EditBaseline | null>(null);
+    const [displayBalances, setDisplayBalances] = useState<DisplayBalances | null>(null);
     const [deletingItem, setDeletingItem] = useState<StockRow | null>(null);
     const [formData, setFormData] = useState<StockFormData>({
         nacCode: '',
         itemName: '',
         partNumber: '',
         equipmentNumber: '',
-        trueBalance: 0,
         openQuantity: 0,
         openAmount: 0,
         location: ''
     });
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
+    const [reconciling, setReconciling] = useState<boolean>(false);
     const [migrating, setMigrating] = useState<boolean>(false);
     const [showMigrateModal, setShowMigrateModal] = useState<boolean>(false);
     const [migrateDryRun, setMigrateDryRun] = useState<boolean>(true);
@@ -120,11 +119,11 @@ export default function StockRecordsPage() {
             itemName: '',
             partNumber: '',
             equipmentNumber: '',
-            trueBalance: 0,
             openQuantity: 0,
             openAmount: 0,
             location: ''
         });
+        setDisplayBalances(null);
         setFormErrors({});
     };
     const validateForm = (): boolean => {
@@ -152,9 +151,6 @@ export default function StockRecordsPage() {
         if (!formData.equipmentNumber.trim()) {
             errors.equipmentNumber = 'Equipment Number is required';
         }
-        if (formData.trueBalance < 0) {
-            errors.trueBalance = 'True balance cannot be negative';
-        }
         if (formData.openQuantity < 0) {
             errors.openQuantity = 'Open Quantity cannot be negative';
         }
@@ -172,10 +168,7 @@ export default function StockRecordsPage() {
             return;
         setSubmitting(true);
         try {
-            await API.post('/api/stock/create', {
-                ...formData,
-                currentBalance: formData.trueBalance,
-            });
+            await API.post('/api/stock/create', formData);
             setShowCreateModal(false);
             resetForm();
             fetchData();
@@ -195,20 +188,14 @@ export default function StockRecordsPage() {
         }
     };
     const handleEdit = async () => {
-        if (!editingItem || !validateForm() || !editBaseline)
+        if (!editingItem || !validateForm())
             return;
         setSubmitting(true);
-        const openQuantityDelta = formData.openQuantity - editBaseline.openQuantity;
-        const effectiveTrueBalance = formData.trueBalance + openQuantityDelta;
         try {
-            await API.put(`/api/stock/update/${editingItem.id}`, {
-                ...formData,
-                trueBalance: effectiveTrueBalance,
-                currentBalance: effectiveTrueBalance,
-            });
+            await API.put(`/api/stock/update/${editingItem.id}`, formData);
             setShowEditModal(false);
             setEditingItem(null);
-            setEditBaseline(null);
+            setDisplayBalances(null);
             resetForm();
             fetchData();
             showSuccessToast({ title: 'Updated', message: 'Stock item updated successfully.', duration: 3000 });
@@ -258,18 +245,20 @@ export default function StockRecordsPage() {
         }
     };
     const openEditModal = (item: StockRow) => {
-        const trueBalance = Number(item.trueBalance ?? item.currentBalance) || 0;
         const openQuantity = Number(item.openQuantity) || 0;
+        const openAmount = Number(item.openAmount) || 0;
         setEditingItem(item);
-        setEditBaseline({ trueBalance, openQuantity });
+        setDisplayBalances({
+            virtualBalance: Number(item.virtualBalance ?? 0),
+            trueBalance: Number(item.trueBalance ?? item.currentBalance ?? 0),
+        });
         setFormData({
             nacCode: item.nacCode,
             itemName: item.itemName,
             partNumber: item.partNumber,
             equipmentNumber: item.equipmentNumber,
-            trueBalance,
             openQuantity,
-            openAmount: Number(item.openAmount) || 0,
+            openAmount,
             location: item.location
         });
         setFormErrors({});
@@ -283,6 +272,28 @@ export default function StockRecordsPage() {
     const openCreateModal = () => {
         resetForm();
         setShowCreateModal(true);
+    };
+
+    const handleReconcileBalances = async () => {
+        setReconciling(true);
+        try {
+            const res = await API.post('/api/stock/reconcile-balances');
+            const data = res.data as { variantsProcessed?: number; balanceFixes?: number; message?: string };
+            showSuccessToast({
+                title: 'Balances reconciled',
+                message: data.message
+                    || `Rebuilt ${data.variantsProcessed ?? 0} variant(s), fixed ${data.balanceFixes ?? 0} stored balance(s).`,
+                duration: 8000,
+            });
+            fetchData();
+        } catch (error: unknown) {
+            const msg = error && typeof error === 'object' && 'response' in error
+                ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Reconciliation failed')
+                : 'Reconciliation failed';
+            showErrorToast({ title: 'Reconciliation failed', message: msg, duration: 6000 });
+        } finally {
+            setReconciling(false);
+        }
     };
 
     const handleMigratePartVariants = async () => {
@@ -346,6 +357,18 @@ export default function StockRecordsPage() {
                     badge="Administration"
                     actions={
                         <div className="flex flex-wrap gap-2">
+                            {canEdit && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleReconcileBalances}
+                                    disabled={reconciling}
+                                    className="border-[#003594]/30 text-[#003594] hover:bg-[#003594]/10"
+                                >
+                                    <RefreshCw className={`mr-2 h-4 w-4 ${reconciling ? 'animate-spin' : ''}`} />
+                                    {reconciling ? 'Reconciling…' : 'Reconcile balances'}
+                                </Button>
+                            )}
                             {isSuperAdmin && (
                                 <Button
                                     type="button"
@@ -432,12 +455,6 @@ export default function StockRecordsPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-1">True balance *</label>
-                <input type="number" value={formData.trueBalance} onChange={(e) => setFormData({ ...formData, trueBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.trueBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter true balance" min="0" step="any"/>
-                {formErrors.trueBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.trueBalance}</p>)}
-              </div>
-              
-              <div>
                 <label className="block text-sm font-medium mb-1">Open Quantity</label>
                 <input type="number" value={formData.openQuantity} onChange={(e) => setFormData({ ...formData, openQuantity: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.openQuantity ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Open Quantity" min="0"/>
                 {formErrors.openQuantity && (<p className="text-red-500 text-xs mt-1">{formErrors.openQuantity}</p>)}
@@ -499,12 +516,24 @@ export default function StockRecordsPage() {
                 <input type="text" value={formData.equipmentNumber} onChange={(e) => setFormData({ ...formData, equipmentNumber: e.target.value })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.equipmentNumber ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter Equipment Number"/>
                 {formErrors.equipmentNumber && (<p className="text-red-500 text-xs mt-1">{formErrors.equipmentNumber}</p>)}
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-1">True balance *</label>
-                <input type="number" value={formData.trueBalance} onChange={(e) => setFormData({ ...formData, trueBalance: Number(e.target.value) || 0 })} className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.trueBalance ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`} placeholder="Enter true balance" min="0" step="any"/>
-                {formErrors.trueBalance && (<p className="text-red-500 text-xs mt-1">{formErrors.trueBalance}</p>)}
-              </div>
+
+              {displayBalances && (
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Computed balances (read-only)</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <span className="text-slate-500">Current (virtual)</span>
+                      <p className="font-semibold text-sky-800 tabular-nums">{displayBalances.virtualBalance.toLocaleString()}</p>
+                      <p className="text-[10px] text-slate-400">Open + received − issued</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">True balance</span>
+                      <p className="font-semibold text-emerald-800 tabular-nums">{displayBalances.trueBalance.toLocaleString()}</p>
+                      <p className="text-[10px] text-slate-400">Open + RRP received − issued</p>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               <div>
                 <label className="block text-sm font-medium mb-1">Open Quantity</label>
@@ -529,7 +558,7 @@ export default function StockRecordsPage() {
             
             <div className="p-6 border-t border-gray-200">
               <div className="flex gap-3">
-                <button onClick={() => { setShowEditModal(false); setEditingItem(null); setEditBaseline(null); }} className="flex-1 px-4 py-2 border border-[#002a6e]/20 rounded-md hover:bg-[#003594]/5" disabled={submitting}>
+                <button onClick={() => { setShowEditModal(false); setEditingItem(null); setDisplayBalances(null); }} className="flex-1 px-4 py-2 border border-[#002a6e]/20 rounded-md hover:bg-[#003594]/5" disabled={submitting}>
                   Cancel
                 </button>
                 <button onClick={handleEdit} disabled={submitting} className="flex-1 bg-[#003594] text-white px-4 py-2 rounded-md hover:bg-[#002a6e] transition-colors disabled:opacity-50">

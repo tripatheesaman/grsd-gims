@@ -1,3 +1,5 @@
+export type ConsumptionDeviationDirection = 'above' | 'below' | null;
+
 export interface FuelConsumptionAnalysis {
     equipment: string;
     nacCode: string;
@@ -9,6 +11,9 @@ export interface FuelConsumptionAnalysis {
     avgLitersPerKm: number;
     expectedKmForQuantity: number;
     exceedsAverage: boolean;
+    belowAverage: boolean;
+    deviatesFromAverage: boolean;
+    deviationDirection: ConsumptionDeviationDirection;
     hasEnoughHistory: boolean;
     validTripCount: number;
     warningMessage: string | null;
