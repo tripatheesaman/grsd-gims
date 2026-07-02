@@ -25,7 +25,7 @@ import {
 } from '@/components/records';
 import { RequestRecordFormBody } from '@/components/records/forms/RequestRecordFormBody';
 import { API } from '@/lib/api';
-import { withBasePath } from '@/lib/urls';
+import { resolveImageUrl, withBasePath } from '@/lib/urls';
 import { useCustomToast } from '@/components/ui/custom-toast';
 interface RequestRecord {
     id: number;
@@ -484,7 +484,7 @@ export default function RequestRecordsPage() {
         };
         setFormData(formDataToSet);
         setSelectedImage(null);
-        setImagePreview(record.image_path || null);
+        setImagePreview(record.image_path ? resolveImageUrl(record.image_path, record.image_path) : null);
         setShowEditModal(true);
         setError(null);
     };

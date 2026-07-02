@@ -15,7 +15,7 @@ import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpRepo
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { appendVariantEquipmentFilter } from '../services/spareEquipmentDisplay';
-import { sqlFamilyKeyExpression, sqlTransactionMatchesFamilyKey, sqlTransactionMatchesNacCodeRef } from '../utils/nacCodeUtils';
+import { sqlFamilyKeyExpression, sqlTransactionMatchesFamilyKey, sqlTransactionMatchesNacCodeRef, stripSuffixFromNac } from '../utils/nacCodeUtils';
 import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
@@ -341,10 +341,42 @@ const sanitizeNacCodes = (codes: (string | null | undefined)[]): string[] => Arr
     .filter((code): code is string => typeof code === 'string')
     .map((code) => code.trim())
     .filter((code) => code.length > 0)));
+/**
+ * Expand a set of requested NAC codes (which may be family/base codes coming from the
+ * grouped stock search) into every actual stock_details.nac_code that belongs to the same
+ * family. This ensures each sub-code (e.g. GT 12345A, GT 12345B) produces its own stock card
+ * and that families made up entirely of sub-codes still resolve to real rows.
+ */
+const expandFamiliesToMembers = async (connection: PoolConnection, codes: (string | null | undefined)[]): Promise<string[]> => {
+    const cleaned = sanitizeNacCodes(codes);
+    if (!cleaned.length) {
+        return [];
+    }
+    const familyKeys = sanitizeNacCodes(cleaned.map((code) => stripSuffixFromNac(code)));
+    const exactPlaceholders = cleaned.map(() => '?').join(',');
+    const familyPlaceholders = familyKeys.map(() => '?').join(',');
+    const clauses: string[] = [`s.nac_code COLLATE utf8mb4_unicode_ci IN (${exactPlaceholders})`];
+    const params: string[] = [...cleaned];
+    if (familyKeys.length) {
+        clauses.push(`${sqlFamilyKeyExpression('s')} IN (${familyPlaceholders})`);
+        params.push(...familyKeys);
+        clauses.push(`s.base_nac_code COLLATE utf8mb4_unicode_ci IN (${familyPlaceholders})`);
+        params.push(...familyKeys);
+    }
+    const [rows] = await connection.execute<RowDataPacket[]>(`
+      SELECT DISTINCT s.nac_code
+      FROM stock_details s
+      WHERE ${clauses.join(' OR ')}
+      ORDER BY s.nac_code ASC
+    `, params);
+    const members = sanitizeNacCodes(rows.map((row) => row.nac_code));
+    return members.length ? members : cleaned;
+};
 const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccodes: string[], filters: StockCardRequest): Promise<(StockCardData & {
     created_at?: Date | string | null;
 })[]> => {
-    if (!targetNaccodes.length) {
+    const codes = sanitizeNacCodes(targetNaccodes);
+    if (!codes.length) {
         return [];
     }
     await ensureAssetSpareSchema();
@@ -359,29 +391,7 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
         dateParams.push(String(filters.createdDateTo));
     }
     const dateClause = dateConditions.length ? ` AND ${dateConditions.join(' AND ')}` : '';
-    if (targetNaccodes.length === 1) {
-        const searchPattern = `%${targetNaccodes[0].replace(/\s+/g, '%')}%`;
-        const [results] = await connection.execute<(StockCardData & {
-            created_at?: Date | string | null;
-        })[]>(`
-      SELECT 
-        s.nac_code,
-        s.item_name,
-        s.part_numbers as part_number,
-        COALESCE(GROUP_CONCAT(DISTINCT sc.equipment_code ORDER BY sc.equipment_code SEPARATOR ','), s.applicable_equipments) as equipment_number,
-        s.location,
-        s.open_quantity,
-        s.open_amount,
-        s.created_at
-      FROM stock_details s
-      LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
-      WHERE s.nac_code LIKE ?
-      ${dateClause}
-      GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
-    `, [searchPattern, ...dateParams]);
-        return results;
-    }
-    const placeholders = targetNaccodes.map(() => '?').join(',');
+    const placeholders = codes.map(() => '?').join(',');
     const [results] = await connection.execute<(StockCardData & {
         created_at?: Date | string | null;
     })[]>(`
@@ -396,15 +406,16 @@ const fetchStockDetailsByCodes = async (connection: PoolConnection, targetNaccod
       s.created_at
     FROM stock_details s
     LEFT JOIN spare_compatibility sc ON sc.nac_code = s.nac_code
-    WHERE s.nac_code IN (${placeholders})
+    WHERE s.nac_code COLLATE utf8mb4_unicode_ci IN (${placeholders})
     ${dateClause}
     GROUP BY s.nac_code, s.item_name, s.part_numbers, s.location, s.open_quantity, s.open_amount, s.created_at, s.applicable_equipments
-  `, [...targetNaccodes, ...dateParams]);
+    ORDER BY s.nac_code ASC
+  `, [...codes, ...dateParams]);
     return results;
 };
 const resolveTargetNaccodes = async (connection: PoolConnection, payload: StockCardRequest): Promise<string[]> => {
     const { fromDate, toDate, naccodes, generateByIssueDate, generateAll = false, equipmentNumber, equipmentNumberFrom, equipmentNumberTo, createdDateFrom, createdDateTo, nacCode, } = payload;
-    let targetNaccodes: string[] = nacCode ? [nacCode] : [];
+    let targetNaccodes: string[] = nacCode ? await expandFamiliesToMembers(connection, [nacCode]) : [];
     if (!targetNaccodes.length) {
         if (generateAll) {
             targetNaccodes = await fetchAllNacCodes(connection, payload);
@@ -424,7 +435,7 @@ const resolveTargetNaccodes = async (connection: PoolConnection, payload: StockC
                 .filter((code): code is string => typeof code === 'string' && code.trim().length > 0);
         }
         else if (naccodes && naccodes.length > 0) {
-            targetNaccodes = naccodes;
+            targetNaccodes = await expandFamiliesToMembers(connection, naccodes);
         }
     }
     const filterOptionsProvided = hasEquipmentNumberFilter(payload) ||
@@ -722,11 +733,12 @@ export const previewStockCard = async (req: Request, res: Response): Promise<voi
             });
             return;
         }
-        const stockDetails = await prepareStockCardData(connection, filters, [targetNac]);
+        const memberCodes = await expandFamiliesToMembers(connection, [targetNac]);
+        const stockDetails = await prepareStockCardData(connection, filters, memberCodes.length ? memberCodes : [targetNac]);
         if (!stockDetails.length) {
             throw new Error('No stock details found for preview');
         }
-        const stock = stockDetails[0];
+        const stock = stockDetails.find((detail) => String(detail.nac_code) === String(targetNac)) ?? stockDetails[0];
         const movements = ((stock as any).movements as StockMovement[]).map((movement) => ({
             ...movement,
             date: movement.date instanceof Date ? movement.date.toISOString() : movement.date,
