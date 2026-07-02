@@ -243,8 +243,12 @@ export class ExcelService {
                 else if (!urlPath.startsWith('/api/')) {
                     urlPath = `/api/images/${urlPath.startsWith('/') ? urlPath.slice(1) : urlPath}`;
                 }
-                const dockerFrontendUrl = 'http://frontend:3000';
-                const dockerImageUrl = `${dockerFrontendUrl}${urlPath}`;
+                const rawBasePath = process.env.FRONTEND_BASE_PATH ?? '/inventory';
+                const normalizedBasePath = rawBasePath && rawBasePath !== '/'
+                    ? `/${rawBasePath.replace(/^\/+|\/+$/g, '')}`
+                    : '';
+                const dockerFrontendUrl = (process.env.FRONTEND_INTERNAL_URL || 'http://frontend:3000').replace(/\/+$/, '');
+                const dockerImageUrl = `${dockerFrontendUrl}${normalizedBasePath}${urlPath}`;
                 logEvents(`Fetching image from Docker frontend service: ${dockerImageUrl}`, "excelServiceLog.log");
                 try {
                     const controller = new AbortController();
@@ -266,8 +270,8 @@ export class ExcelService {
                 catch (dockerFetchError) {
                     const dockerErrMsg = dockerFetchError instanceof Error ? dockerFetchError.message : 'Unknown error';
                     logEvents(`✗ Failed to fetch from Docker frontend service: ${dockerErrMsg}`, "excelServiceLog.log");
-                    const frontendUrl = process.env.CORS_ORIGIN || process.env.FRONTEND_URL || 'http://localhost:3000';
-                    const externalImageUrl = `${frontendUrl}${urlPath}`;
+                    const frontendUrl = (process.env.CORS_ORIGIN || process.env.FRONTEND_URL || process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+                    const externalImageUrl = `${frontendUrl}${normalizedBasePath}${urlPath}`;
                     logEvents(`Trying external frontend URL: ${externalImageUrl}`, "excelServiceLog.log");
                     try {
                         const controller = new AbortController();

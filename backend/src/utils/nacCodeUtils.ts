@@ -170,9 +170,37 @@ export function sqlFamilyKeyFromNacOnlyExpression(alias = 't'): string {
     ) COLLATE utf8mb4_unicode_ci`;
 }
 
-/** Match a transaction row to an inventory family key passed as a query parameter. */
+/**
+ * Match a transaction row to an inventory family key passed as a query parameter.
+ *
+ * The bound parameter is referenced EXACTLY ONCE so callers only need to bind the
+ * family key a single time. This is logically equivalent to `sqlTransactionMatchesFamilyKeyRef`
+ * (the family key is a member of the transaction row's candidate family keys), but avoids the
+ * multiple placeholder expansion that would otherwise require callers to bind the value repeatedly.
+ */
 export function sqlTransactionMatchesFamilyKey(alias: string, familyKeyParam = '?'): string {
-    return sqlTransactionMatchesFamilyKeyRef(alias, `${familyKeyParam} COLLATE utf8mb4_unicode_ci`);
+    const nac = `${alias}.nac_code COLLATE utf8mb4_unicode_ci`;
+    const familyFromNac = sqlFamilyKeyFromNacOnlyExpression(alias);
+    const familyFromMatch = sqlFamilyKeyExpression('sd_match');
+    return `(
+        ${familyKeyParam} COLLATE utf8mb4_unicode_ci IN (
+            SELECT ${nac}
+            UNION
+            SELECT ${familyFromNac}
+            UNION
+            SELECT sd_match.nac_code COLLATE utf8mb4_unicode_ci
+                FROM stock_details sd_match
+                WHERE sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${nac}
+            UNION
+            SELECT sd_match.base_nac_code COLLATE utf8mb4_unicode_ci
+                FROM stock_details sd_match
+                WHERE sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${nac}
+            UNION
+            SELECT ${familyFromMatch}
+                FROM stock_details sd_match
+                WHERE sd_match.nac_code COLLATE utf8mb4_unicode_ci = ${nac}
+        )
+    )`;
 }
 
 /** Match a transaction row to a family key column from an outer query (e.g. f.family_key). */

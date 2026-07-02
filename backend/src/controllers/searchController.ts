@@ -181,7 +181,7 @@ async function attachFamilyDetails(results: SearchResult[]): Promise<void> {
     }
     for (const result of results) {
         const variants = byFamily.get(result.nacCode) ?? [];
-        if (variants.length > 1) {
+        if (variants.length > 0) {
             result.variants = variants;
         }
         result.virtualBalance = variants.reduce((sum, v) => sum + Number(v.virtualBalance || 0), 0);
@@ -515,8 +515,8 @@ export const searchStockDetails = async (req: Request, res: Response): Promise<v
         ${SPARE_EQUIPMENT_DISPLAY_SQL} as equipmentDisplay,
         MAX(sd.location) as location,
         MAX(sd.unit) as unit,
-        0 as openQuantity,
-        0 as openAmount,
+        SUM(COALESCE(sd.open_quantity, 0)) as openQuantity,
+        SUM(COALESCE(sd.open_amount, 0)) as openAmount,
         COUNT(DISTINCT sd.id) as variantCount
       FROM ${tableName} sd
       ${SPARE_STOCK_JOIN}

@@ -150,7 +150,7 @@ export function StockRecordsTable({
                                 Applicable for
                             </TableHead>
                             <TableHead className="w-[90px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
-                                Virtual bal.
+                                Current bal.
                             </TableHead>
                             <TableHead className="w-[90px] text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
                                 True bal.
@@ -278,7 +278,7 @@ export function StockRecordsTable({
                                                 <TableCell className="py-2 text-right">
                                                     <div className="flex justify-end gap-1">
                                                         {canEdit && (
-                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onEdit({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, trueBalance: Number(v.trueBalance ?? 0), openQuantity: Number(v.openQuantity ?? 0), openAmount: Number(v.openAmount ?? 0), location: v.location || r.location })}>
+                                                            <Button type="button" variant="ghost" size="sm" className="h-8 px-2" onClick={() => onEdit({ ...r, id: v.id, nacCode: v.nacCode, partNumber: v.partNumber, virtualBalance: Number(v.virtualBalance ?? 0), trueBalance: Number(v.trueBalance ?? 0), openQuantity: Number(v.openQuantity ?? 0), openAmount: Number(v.openAmount ?? 0), location: v.location || r.location })}>
                                                                 <Pencil className="h-4 w-4" />
                                                             </Button>
                                                         )}

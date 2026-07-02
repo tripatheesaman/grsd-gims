@@ -9,8 +9,14 @@ export async function GET(_req: NextRequest) {
   const prefix = '/api/images/';
   const relative = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname.replace(/^\/+/, '');
   const segments = relative ? relative.split('/') : [];
-  const filePath = path.join(process.cwd(), 'public', 'images', ...segments);
-  if (!fs.existsSync(filePath)) {
+  const candidateRoots = [
+    process.env.UPLOADS_DIR,
+    path.join(process.cwd(), 'public', 'images'),
+  ].filter((root): root is string => typeof root === 'string' && root.trim().length > 0);
+  const filePath = candidateRoots
+    .map((root) => path.join(root, ...segments))
+    .find((candidate) => fs.existsSync(candidate));
+  if (!filePath) {
     return new NextResponse('Not found', { status: 404 });
   }
   const buffer = fs.readFileSync(filePath);

@@ -270,13 +270,6 @@ export default function FuelIssueFormPage() {
         setIsLoadingPreview(true);
         setConsumptionPreview([]);
         try {
-            const previousKmMap: Record<string, number> = {};
-            records.forEach((record) => {
-                if (record.equipment_number && config) {
-                    previousKmMap[record.equipment_number] =
-                        config.equipment_kilometers[record.equipment_number] ?? 0;
-                }
-            });
             const previewRes = await API.post('/api/fuel/preview-consumption', {
                 fuel_type: type,
                 issue_date: format(date, 'yyyy-MM-dd'),
@@ -285,7 +278,6 @@ export default function FuelIssueFormPage() {
                     kilometers: record.kilometers === '' ? 0 : Number(record.kilometers),
                     quantity: record.quantity === '' ? 0 : Number(record.quantity),
                 })),
-                previous_kilometers_by_equipment: previousKmMap,
             });
             setConsumptionPreview(previewRes.data?.lines || []);
         } catch (error) {

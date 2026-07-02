@@ -65,7 +65,7 @@ function groupFuelIssues(issues: PendingFuelIssue[]): PendingFuelIssue[] {
     return Object.values(groupedIssues).map((items) => ({
         ...items[0],
         items,
-        has_consumption_warning: items.some((item) => item.consumption?.exceedsAverage),
+        has_consumption_warning: items.some((item) => item.consumption?.deviatesFromAverage),
     }));
 }
 
@@ -140,11 +140,11 @@ const fuelIssueTableColumns: ApprovalTableColumn<PendingFuelIssue>[] = [
         id: 'consumption',
         header: 'Consumption',
         cell: (item) =>
-            item.consumption?.exceedsAverage ? (
+            item.consumption?.deviatesFromAverage ? (
                 <div className="space-y-1">
                     <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800 text-[10px]">
                         <AlertTriangle className="h-3 w-3 mr-1" />
-                        Above average
+                        {item.consumption.deviationDirection === 'below' ? 'Below average' : 'Above average'}
                     </Badge>
                     <p className="text-xs text-amber-800">
                         {item.consumption.kmDelta.toLocaleString()} km vs{' '}
@@ -477,7 +477,7 @@ export function PendingFuelIssues() {
                                     className="border-amber-300 bg-amber-50 text-amber-800 shrink-0"
                                 >
                                     <AlertTriangle className="h-3.5 w-3.5 mr-1" />
-                                    High KM vs avg
+                                    KM vs avg anomaly
                                 </Badge>
                             ) : undefined
                         }
@@ -505,8 +505,8 @@ export function PendingFuelIssues() {
                 alert={
                     selectedIssue?.has_consumption_warning ? (
                         <ApprovalAlertBanner>
-                            One or more lines show kilometers traveled above the historical average for
-                            the fuel quantity issued.
+                            One or more lines show kilometers traveled that deviate (higher or lower) from the
+                            historical average for the fuel quantity issued.
                         </ApprovalAlertBanner>
                     ) : undefined
                 }

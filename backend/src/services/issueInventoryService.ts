@@ -1,6 +1,7 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { logEvents } from '../middlewares/logger';
 import { isFuelNacCode } from './issueValidationService';
+import { VARIANT_TRUE_BALANCE_SQL, VARIANT_VIRTUAL_BALANCE_SQL } from './spareEquipmentDisplay';
 interface ReceiveLot {
     id: number;
     totalQuantity: number;
@@ -175,4 +176,80 @@ export const rebuildAllNacInventoryStates = async (connection: PoolConnection): 
         processed += 1;
     }
     return processed;
+};
+
+const BALANCE_SYNC_EPSILON = 0.0001;
+
+export async function readComputedVirtualBalance(
+    connection: PoolConnection,
+    nacCode: string
+): Promise<number> {
+    const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT ${VARIANT_VIRTUAL_BALANCE_SQL} AS virtualBalance
+         FROM stock_details sd
+         WHERE sd.nac_code = ?`,
+        [nacCode]
+    );
+    return Number(rows[0]?.virtualBalance ?? 0);
+}
+
+export async function readComputedTrueBalance(
+    connection: PoolConnection,
+    nacCode: string
+): Promise<number> {
+    const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT ${VARIANT_TRUE_BALANCE_SQL} AS trueBalance
+         FROM stock_details sd
+         WHERE sd.nac_code = ?`,
+        [nacCode]
+    );
+    return Number(rows[0]?.trueBalance ?? 0);
+}
+
+/** Sync stored current_balance to computed virtual balance (open + receives − issues). */
+export async function syncStockCurrentBalance(
+    connection: PoolConnection,
+    nacCode: string
+): Promise<boolean> {
+    const [stockRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT current_balance FROM stock_details WHERE nac_code = ?`,
+        [nacCode]
+    );
+    if (!stockRows.length) {
+        return false;
+    }
+    const expected = await readComputedVirtualBalance(connection, nacCode);
+    const stored = Number(stockRows[0].current_balance ?? 0);
+    if (Math.abs(stored - expected) <= BALANCE_SYNC_EPSILON) {
+        return false;
+    }
+    await connection.execute(
+        `UPDATE stock_details SET current_balance = ? WHERE nac_code = ?`,
+        [expected, nacCode]
+    );
+    return true;
+}
+
+export type ReconcileAllBalancesResult = {
+    variantsProcessed: number;
+    balanceFixes: number;
+};
+
+/** Rebuild FIFO/issue costs for every variant and sync current_balance to virtual balance. */
+export async function reconcileAllStockBalances(
+    connection: PoolConnection
+): Promise<ReconcileAllBalancesResult> {
+    const variantsProcessed = await rebuildAllNacInventoryStates(connection);
+    const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT nac_code FROM stock_details WHERE nac_code IS NOT NULL AND TRIM(nac_code) != '' ORDER BY nac_code ASC`
+    );
+    let balanceFixes = 0;
+    for (const row of rows) {
+        const nacCode = String(row.nac_code);
+        const fixed = await syncStockCurrentBalance(connection, nacCode);
+        if (fixed) {
+            balanceFixes += 1;
+        }
+    }
+    return { variantsProcessed, balanceFixes };
 };

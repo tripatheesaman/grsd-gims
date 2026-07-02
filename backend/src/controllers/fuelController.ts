@@ -673,11 +673,10 @@ export const getLastReceive = async (req: Request, res: Response): Promise<void>
 };
 
 export const previewFuelConsumption = async (req: Request, res: Response): Promise<void> => {
-    const { fuel_type, issue_date, records, previous_kilometers_by_equipment } = req.body as {
+    const { fuel_type, issue_date, records } = req.body as {
         fuel_type?: string;
         issue_date?: string;
         records?: Array<{ equipment_number: string; kilometers: number; quantity: number }>;
-        previous_kilometers_by_equipment?: Record<string, number>;
     };
 
     if (!fuel_type || !Array.isArray(records) || records.length === 0) {
@@ -701,13 +700,12 @@ export const previewFuelConsumption = async (req: Request, res: Response): Promi
             connection,
             fuel_type,
             issue_date,
-            records,
-            { previousKilometersByEquipment: previous_kilometers_by_equipment }
+            records
         );
 
         res.status(200).json({
             lines: analyses,
-            hasWarnings: analyses.some((line) => line.exceedsAverage),
+            hasWarnings: analyses.some((line) => line.deviatesFromAverage),
         });
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

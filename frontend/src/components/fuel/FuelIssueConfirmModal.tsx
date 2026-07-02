@@ -44,8 +44,8 @@ export function FuelIssueConfirmModal({
     lines,
     records,
 }: FuelIssueConfirmModalProps) {
-    const hasWarnings = lines.some((line) => line.exceedsAverage);
-    const warningCount = lines.filter((line) => line.exceedsAverage).length;
+    const hasWarnings = lines.some((line) => line.deviatesFromAverage);
+    const warningCount = lines.filter((line) => line.deviatesFromAverage).length;
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && !isSubmitting && onClose()}>
@@ -87,11 +87,11 @@ export function FuelIssueConfirmModal({
                                 <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
                                 <div>
                                     <p className="font-semibold">
-                                        {warningCount} line{warningCount !== 1 ? 's' : ''} exceed average consumption
+                                        {warningCount} line{warningCount !== 1 ? 's' : ''} deviate from average consumption
                                     </p>
                                     <p className="mt-1 text-amber-800">
-                                        Kilometers traveled are higher than the historical average for the fuel quantity issued.
-                                        Please verify odometer readings before confirming.
+                                        Kilometers traveled are higher or lower than the historical average for the fuel quantity issued.
+                                        Please verify odometer readings and quantities before confirming.
                                     </p>
                                 </div>
                             </div>
@@ -110,7 +110,7 @@ export function FuelIssueConfirmModal({
                                         key={index}
                                         className={cn(
                                             'rounded-xl border p-4',
-                                            analysis?.exceedsAverage
+                                            analysis?.deviatesFromAverage
                                                 ? 'border-amber-300 bg-amber-50/50'
                                                 : 'border-[#002a6e]/10 bg-white'
                                         )}
@@ -122,13 +122,13 @@ export function FuelIssueConfirmModal({
                                                     {record.equipment_number}
                                                 </p>
                                             </div>
-                                            {analysis?.exceedsAverage && (
+                                            {analysis?.deviatesFromAverage && (
                                                 <Badge
                                                     variant="outline"
                                                     className="border-amber-400 bg-amber-100 text-amber-900"
                                                 >
                                                     <AlertTriangle className="h-3 w-3 mr-1" />
-                                                    Above average
+                                                    {analysis.deviationDirection === 'below' ? 'Below average' : 'Above average'}
                                                 </Badge>
                                             )}
                                         </div>

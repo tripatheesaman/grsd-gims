@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Search, ChevronLeft, ChevronRight, Loader2, Download, X } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Loader2, Download, X, Eye } from 'lucide-react';
+import Link from 'next/link';
 import { useCustomToast } from '@/components/ui/custom-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -191,6 +192,20 @@ export default function ReceiveRRPReportPage() {
             setExporting(false);
         }
     };
+    const formatUnitPrice = (item: ReceiveRRPReportItem): string => {
+        if (item.item_price != null && Number.isFinite(Number(item.item_price))) {
+            const currency = item.currency?.trim() || 'NPR';
+            return `${currency} ${Number(item.item_price).toFixed(2)}`;
+        }
+        const qty = Number(item.received_quantity);
+        const total = Number(item.total_amount);
+        if (qty > 0 && Number.isFinite(total)) {
+            const currency = item.currency?.trim() || 'NPR';
+            return `${currency} ${(total / qty).toFixed(2)}`;
+        }
+        return '—';
+    };
+
     if (!canAccessReport) {
         return (<div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 bg-[#f6f8fc]/80 p-6 text-center">
         <h1 className="text-lg font-semibold text-[#003594]">Access Denied</h1>
@@ -324,8 +339,10 @@ export default function ReceiveRRPReportPage() {
                         <TableHead>Part Number</TableHead>
                         <TableHead>NAC Code</TableHead>
                         <TableHead>Quantity</TableHead>
+                        <TableHead>Unit Price</TableHead>
                         <TableHead>Request #</TableHead>
                         <TableHead>RRP Number</TableHead>
+                        <TableHead className="text-center">View RRP</TableHead>
                         <TableHead>RRP Date</TableHead>
                         <TableHead>Supplier</TableHead>
                         <TableHead>Total Amount</TableHead>
@@ -343,9 +360,22 @@ export default function ReceiveRRPReportPage() {
                           <TableCell>
                             {item.received_quantity} {item.unit || ''}
                           </TableCell>
+                          <TableCell>{formatUnitPrice(item)}</TableCell>
                           <TableCell>{item.request_number || 'N/A'}</TableCell>
                           <TableCell>
                             {item.rrp_number || (<span className="text-gray-400 italic">Not created</span>)}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            {item.rrp_id ? (
+                              <Button asChild variant="outline" size="sm" className="h-8 border-[#003594]/30 text-[#003594] hover:bg-[#003594]/10">
+                                <Link href={`/rrp/${item.rrp_id}`} target="_blank" rel="noopener noreferrer">
+                                  <Eye className="mr-1.5 h-3.5 w-3.5" />
+                                  View
+                                </Link>
+                              </Button>
+                            ) : (
+                              <span className="text-gray-400 italic">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             {item.rrp_date ? (format(new Date(item.rrp_date), 'MMM dd, yyyy')) : (<span className="text-gray-400 italic">-</span>)}
