@@ -230,15 +230,77 @@ export async function syncStockCurrentBalance(
     return true;
 }
 
+/**
+ * Merge duplicate stock_details rows that share the same nac_code.
+ *
+ * Two rows with an identical NAC code double-count in family totals because every balance
+ * query keys off nac_code (both rows resolve to the same transactions). Transactions are
+ * keyed by nac_code — not by stock_details.id — so collapsing the duplicates onto a single
+ * survivor row never loses any issue / receive / RRP history. The survivor keeps the largest
+ * opening figures found across the duplicate set (handles both true duplicates and
+ * consolidation leftovers where the opening lives on one row and 0 on the others).
+ */
+export async function mergeDuplicateStockNacCodes(
+    connection: PoolConnection
+): Promise<number> {
+    const [dupRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT nac_code, COUNT(*) AS cnt, MIN(id) AS keep_id
+         FROM stock_details
+         WHERE nac_code IS NOT NULL AND TRIM(nac_code) != ''
+         GROUP BY nac_code
+         HAVING COUNT(*) > 1`
+    );
+    let removed = 0;
+    for (const row of dupRows) {
+        const nacCode = String(row.nac_code);
+        const keepId = Number(row.keep_id);
+        const [aggRows] = await connection.execute<RowDataPacket[]>(
+            `SELECT
+                MAX(COALESCE(open_quantity, 0)) AS open_quantity,
+                MAX(COALESCE(open_amount, 0)) AS open_amount,
+                MAX(COALESCE(open_remaining_quantity, open_quantity, 0)) AS open_remaining_quantity
+             FROM stock_details
+             WHERE nac_code = ?`,
+            [nacCode]
+        );
+        const agg = aggRows[0] || {};
+        await connection.execute(
+            `UPDATE stock_details
+             SET open_quantity = ?, open_amount = ?, open_remaining_quantity = ?
+             WHERE id = ?`,
+            [
+                Number(agg.open_quantity || 0),
+                Number(agg.open_amount || 0),
+                Number(agg.open_remaining_quantity || 0),
+                keepId,
+            ]
+        );
+        const [del] = await connection.execute(
+            `DELETE FROM stock_details WHERE nac_code = ? AND id <> ?`,
+            [nacCode, keepId]
+        );
+        removed += Number((del as { affectedRows?: number }).affectedRows || 0);
+        if (removed) {
+            logEvents(
+                `Merged duplicate stock row(s) for NAC ${nacCode} (kept id=${keepId})`,
+                'stockLog.log'
+            );
+        }
+    }
+    return removed;
+}
+
 export type ReconcileAllBalancesResult = {
     variantsProcessed: number;
     balanceFixes: number;
+    duplicatesRemoved: number;
 };
 
 /** Rebuild FIFO/issue costs for every variant and sync current_balance to virtual balance. */
 export async function reconcileAllStockBalances(
     connection: PoolConnection
 ): Promise<ReconcileAllBalancesResult> {
+    const duplicatesRemoved = await mergeDuplicateStockNacCodes(connection);
     const variantsProcessed = await rebuildAllNacInventoryStates(connection);
     const [rows] = await connection.execute<RowDataPacket[]>(
         `SELECT nac_code FROM stock_details WHERE nac_code IS NOT NULL AND TRIM(nac_code) != '' ORDER BY nac_code ASC`
@@ -251,5 +313,5 @@ export async function reconcileAllStockBalances(
             balanceFixes += 1;
         }
     }
-    return { variantsProcessed, balanceFixes };
+    return { variantsProcessed, balanceFixes, duplicatesRemoved };
 };

@@ -26,7 +26,7 @@ export type PreparedRequestItem = {
     partNumber: string;
     itemName: string;
     unit: string;
-    currentBalance: number | string;
+    currentBalance: number;
 };
 
 export const REQUEST_PART_NUMBER_REGEX = /^[A-Z0-9]+$/;
@@ -113,6 +113,7 @@ export async function prepareRequestItemForSave(
         partNumber: resolved.partNumber || item.partNumber,
         itemName: resolved.itemName,
         unit,
-        currentBalance: balances?.virtualBalance ?? 'N/A',
+        // Decimal column — never write 'N/A'; missing stock → 0
+        currentBalance: Number(balances?.virtualBalance ?? 0) || 0,
     };
 }

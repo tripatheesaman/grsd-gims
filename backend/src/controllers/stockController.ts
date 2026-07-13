@@ -16,10 +16,11 @@ import {
     syncFamilyLocation,
     compactFamilySuffixesAfterDelete,
     purgeStockNacAuxiliaryData,
+    remapNacCodeReferences,
 } from '../services/inventoryVariantService';
 import { rebuildNacInventoryState, reconcileAllStockBalances, readComputedVirtualBalance, syncStockCurrentBalance } from '../services/issueInventoryService';
 import { buildStockSearchKey } from '../services/searchRelevanceService';
-import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE } from '../utils/nacCodeUtils';
+import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE, normalizePartNumber } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 import { PoolConnection } from 'mysql2/promise';
 
@@ -34,7 +35,7 @@ export const reconcileStockBalances = async (req: Request, res: Response): Promi
         await connection.commit();
         started = false;
         logEvents(
-            `Stock balance reconciliation: ${result.variantsProcessed} variant(s), ${result.balanceFixes} balance fix(es)`,
+            `Stock balance reconciliation: ${result.variantsProcessed} variant(s), ${result.balanceFixes} balance fix(es), ${result.duplicatesRemoved} duplicate row(s) merged`,
             'stockLog.log'
         );
         res.status(200).json({
@@ -114,6 +115,30 @@ const chunk = <T,>(arr: T[], size: number): T[][] => {
         out.push(arr.slice(i, i + size));
     }
     return out;
+};
+
+/**
+ * Correct (never delete) the part number stored on every transaction that belongs to a
+ * stock variant. A sub-code represents exactly one part number, so all of its issue /
+ * receive / request rows must carry that part number. This keeps history intact when a
+ * part number is edited and prevents family reconciliation from later remapping the rows
+ * away to a different sub-code.
+ */
+const propagatePartNumberToTransactions = async (
+    connection: PoolConnection,
+    nacCode: string,
+    partNumber: string
+): Promise<void> => {
+    const value = String(partNumber || '').trim();
+    if (!nacCode) {
+        return;
+    }
+    for (const table of ['receive_details', 'issue_details', 'request_details'] as const) {
+        await connection.execute(
+            `UPDATE ${table} SET part_number = ? WHERE nac_code = ?`,
+            [value, nacCode]
+        );
+    }
 };
 
 const backfillCompatForNac = async (connection: any, nacCode: string, equipmentNumber: string): Promise<void> => {
@@ -394,7 +419,7 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
             });
             return;
         }
-        const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id, nac_code, base_nac_code FROM stock_details WHERE id = ?', [id]);
+        const [existingItem] = await connection.execute<RowDataPacket[]>('SELECT id, nac_code, base_nac_code, part_numbers FROM stock_details WHERE id = ?', [id]);
         if (existingItem.length === 0) {
             res.status(404).json({
                 error: 'Not Found',
@@ -403,6 +428,7 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
             return;
         }
         const oldNacCode = String((existingItem as any)[0].nac_code || '');
+        const oldPartNumber = normalizePartNumber(String((existingItem as any)[0].part_numbers || ''));
         const [duplicateNac] = await connection.execute<RowDataPacket[]>('SELECT id FROM stock_details WHERE nac_code = ? AND id != ?', [nacCode, id]);
         if (duplicateNac.length > 0) {
             res.status(409).json({
@@ -446,7 +472,13 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         ]);
         await syncFamilyLocation(connection, baseNacCode, location);
         if (oldNacCode !== nacCode) {
-            await connection.execute(`DELETE FROM spare_compatibility WHERE nac_code = ?`, [oldNacCode]);
+            // Move (not delete) all history — issues, receives, requests, units, compatibility —
+            // from the previous NAC code onto the corrected one so nothing is orphaned.
+            await remapNacCodeReferences(connection, oldNacCode, nacCode);
+        }
+        const newPartNumber = normalizePartNumber(trimmedPart);
+        if (oldPartNumber !== newPartNumber || oldNacCode !== nacCode) {
+            await propagatePartNumberToTransactions(connection, nacCode, trimmedPart);
         }
         await backfillCompatForNac(connection, nacCode, equipmentNumber);
         await rebuildNacInventoryState(connection, nacCode);

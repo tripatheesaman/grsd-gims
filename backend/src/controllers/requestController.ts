@@ -271,7 +271,7 @@ const validateRequestDate = async (requestDate: string, excludeRequestNumber?: s
     }
 };
 
-const getPreviousRate = async (nacCode: string): Promise<string | number> => {
+const getPreviousRate = async (nacCode: string): Promise<number> => {
     try {
         const [rows] = await pool.query<ReceiveDetail[]>(
             `SELECT rd.received_quantity, rrp.total_amount
@@ -284,9 +284,13 @@ const getPreviousRate = async (nacCode: string): Promise<string | number> => {
             [nacCode]
         );
         if (rows[0]) {
-            return Number((Number(rows[0].total_amount) / Number(rows[0].received_quantity)).toFixed(2));
+            const qty = Number(rows[0].received_quantity);
+            const amount = Number(rows[0].total_amount);
+            if (qty > 0 && Number.isFinite(amount)) {
+                return Number((amount / qty).toFixed(2));
+            }
         }
-        return 'N/A';
+        return 0;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
         logEvents(`Error fetching previous rate for NAC code ${nacCode}: ${errorMessage}`, "requestLog.log");

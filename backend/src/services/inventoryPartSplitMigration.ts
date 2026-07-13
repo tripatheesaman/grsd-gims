@@ -183,6 +183,19 @@ async function processStockRow(
         return { split: true, singleFixed: false };
     }
 
+    // Guard: never rename the primary onto a NAC code another row already owns — that would
+    // create a duplicate sub-code that double-counts in family totals.
+    if (primary.nacCode !== row.nac_code) {
+        const [primaryDup] = await connection.execute<RowDataPacket[]>(
+            `SELECT id FROM stock_details WHERE nac_code = ? AND id <> ?`,
+            [primary.nacCode, row.id]
+        );
+        if (primaryDup.length) {
+            errors.push(`Primary variant ${primary.nacCode} already exists; skipping split for row ${row.id} (${row.nac_code})`);
+            return { split: false, singleFixed: false };
+        }
+    }
+
     const primaryImage = await getImageForPart(connection, row.nac_code, primary.partNumber, row.image_url);
 
     await connection.execute(
