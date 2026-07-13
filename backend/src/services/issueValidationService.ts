@@ -40,6 +40,13 @@ export interface IssueValidationCaches {
 export interface ValidateIssuedForOptions {
     /** When true, also accept registered assets (e.g. 345 matches asset 345T14). Used for request/receive. */
     allowRegisteredAssets?: boolean;
+    /**
+     * When true, also accept equipment listed on spare_compatibility / applicable_equipments
+     * for the item family (even when not present in assets).
+     */
+    allowCompatibleEquipment?: boolean;
+    /** When true, fail if no stock_details row exists for the NAC/family. */
+    requireStockRow?: boolean;
 }
 
 const normalizeCode = (value: string): string => String(value || '').trim();
@@ -324,7 +331,11 @@ export const validateRequestTarget = async (
     if (formatError) {
         return { valid: false, message: formatError };
     }
-    return validateIssuedFor(connection, code, equipmentNumber, caches, { allowRegisteredAssets: true });
+    return validateIssuedFor(connection, code, equipmentNumber, caches, {
+        allowRegisteredAssets: true,
+        allowCompatibleEquipment: true,
+        requireStockRow: true,
+    });
 };
 
 export const validateIssuedFor = async (
@@ -381,21 +392,87 @@ export const validateIssuedFor = async (
         return { valid: true };
     }
 
+    const baseNac = stripSuffixFromNac(normalizedNac);
     const [stockResults] = await connection.query<RowDataPacket[]>(
-        `SELECT applicable_equipments FROM stock_details WHERE nac_code = ?`,
-        [normalizedNac]
+        `SELECT nac_code, applicable_equipments FROM stock_details
+         WHERE nac_code = ? OR base_nac_code = ? OR nac_code = ?
+         LIMIT 1`,
+        [normalizedNac, baseNac, baseNac]
     );
     if (stockResults.length === 0) {
-        return { valid: false, message: `Item with NAC code ${normalizedNac} not found` };
+        if (options.requireStockRow !== false) {
+            return { valid: false, message: `Item with NAC code ${normalizedNac} not found` };
+        }
     }
 
-    // All non-fuel spares: allow any registered asset or issue section (same as consumables).
-    return validateAssetOrSectionTarget(
-        connection,
-        equipmentNumber,
-        caches,
-        'Equipment "{token}" is not a registered asset and is not a defined section'
-    );
+    const applicableEquipments = String(stockResults[0]?.applicable_equipments || '');
+    if (isConsumableStock(applicableEquipments)) {
+        return validateAssetOrSectionTarget(
+            connection,
+            equipmentNumber,
+            caches,
+            'Equipment "{token}" is not a registered asset and is not a defined section'
+        );
+    }
+
+    const assetCodes = await loadAssetEquipmentCodes(connection, tokens, caches);
+    let compatCodes: string[] = [];
+    let applicableTokens: string[] = [];
+
+    if (options.allowCompatibleEquipment) {
+        const [compatRows] = await connection.query<RowDataPacket[]>(
+            `SELECT DISTINCT sc.equipment_code
+             FROM spare_compatibility sc
+             INNER JOIN stock_details sd ON sd.nac_code = sc.nac_code
+             WHERE sd.base_nac_code = ? OR sd.nac_code = ? OR sd.nac_code = ?`,
+            [baseNac, baseNac, normalizedNac]
+        );
+        compatCodes = compatRows
+            .map((row) => normalizeCode(String(row.equipment_code)))
+            .filter(Boolean);
+
+        const [familyApplicableRows] = await connection.query<RowDataPacket[]>(
+            `SELECT applicable_equipments FROM stock_details
+             WHERE base_nac_code = ? OR nac_code = ? OR nac_code = ?`,
+            [baseNac, baseNac, normalizedNac]
+        );
+        applicableTokens = expandEquipmentTokens(
+            familyApplicableRows
+                .map((row) => String(row.applicable_equipments || '').trim())
+                .filter(Boolean)
+                .join(',')
+        );
+    }
+
+    const matchesCompatible = (token: string): boolean => {
+        if (!options.allowCompatibleEquipment) {
+            return false;
+        }
+        if (applicableTokens.some((applicable) => equipmentCodesEquivalent(token, applicable))) {
+            return true;
+        }
+        return compatCodes.some((compat) => equipmentCodesEquivalent(token, compat));
+    };
+
+    for (const token of tokens) {
+        if (isConsumableEquipmentMarker(token)) {
+            continue;
+        }
+        if (sectionCodes.has(token.toUpperCase())) {
+            continue;
+        }
+        if (options.allowRegisteredAssets !== false && isResolvedAssetToken(token, assetCodes)) {
+            continue;
+        }
+        if (matchesCompatible(token)) {
+            continue;
+        }
+        return {
+            valid: false,
+            message: `Equipment "${token}" is not a registered asset and is not a defined section`,
+        };
+    }
+    return { valid: true };
 };
 
 /**

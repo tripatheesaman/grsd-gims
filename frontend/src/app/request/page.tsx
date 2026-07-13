@@ -427,7 +427,9 @@ export default function RequestPage() {
                 requestedBy: user.UserInfo.username,
                 items: cart.map((item, index) => ({
                     nacCode: item.nacCode,
-                    partNumber: sanitizeRequestPartNumberInput(item.partNumber) || 'NA',
+                    partNumber: item.nacCode && item.nacCode !== 'N/A'
+                        ? String(item.partNumber || '').trim()
+                        : (sanitizeRequestPartNumberInput(item.partNumber) || 'N/A'),
                     itemName: item.itemName,
                     requestQuantity: item.requestQuantity,
                     equipmentNumber: item.equipmentNumber,
@@ -483,19 +485,24 @@ export default function RequestPage() {
                             throw new Error('This request number has already been used. Please use a different request number.');
                         }
                         else if (status === 400) {
-                            if (typeof data === 'object' &&
-                                data !== null &&
-                                'message' in data &&
-                                typeof (data as {
+                            if (typeof data === 'object' && data !== null) {
+                                const payload = data as {
                                     message?: unknown;
-                                }).message === 'string') {
-                                throw new Error((data as {
-                                    message: string;
-                                }).message);
+                                    validationErrors?: Array<{ message?: string }>;
+                                };
+                                const detailMessages = Array.isArray(payload.validationErrors)
+                                    ? payload.validationErrors
+                                        .map((entry) => String(entry?.message || '').trim())
+                                        .filter(Boolean)
+                                    : [];
+                                if (detailMessages.length > 0) {
+                                    throw new Error(detailMessages.join(' · '));
+                                }
+                                if (typeof payload.message === 'string' && payload.message.trim()) {
+                                    throw new Error(payload.message);
+                                }
                             }
-                            else {
-                                throw new Error('Invalid request data. Please check your input.');
-                            }
+                            throw new Error('Invalid request data. Please check your input.');
                         }
                         else if (typeof data === 'object' &&
                             data !== null &&
