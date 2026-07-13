@@ -68,8 +68,21 @@ export async function findVariantByPartNumber(
     if (!normalized || normalized === 'NA' || normalized === 'N/A') {
         return null;
     }
+    const compact = normalized.replace(/[^A-Z0-9]/g, '');
     const variants = await getFamilyVariants(connection, baseNacCode);
-    return variants.find(v => normalizePartNumber(v.part_numbers) === normalized) ?? null;
+    const exact = variants.find((v) => normalizePartNumber(v.part_numbers) === normalized);
+    if (exact) {
+        return exact;
+    }
+    if (!compact) {
+        return null;
+    }
+    return (
+        variants.find((v) => {
+            const stored = normalizePartNumber(v.part_numbers).replace(/[^A-Z0-9]/g, '');
+            return Boolean(stored) && stored === compact;
+        }) ?? null
+    );
 }
 
 export type LatestReceivedPartTarget = {
@@ -412,16 +425,31 @@ export async function resolveRequestVariantTarget(
     const base = stripSuffixFromNac(rawNac);
     let resolvedNac = rawNac;
 
+    // Requests must target an existing stock row — never invent a new family suffix.
     if (rawPart) {
         const byPart = await findVariantByPartNumber(connection, base, rawPart);
         if (byPart) {
             resolvedNac = byPart.nac_code;
+            rawPart = normalizePartNumber(byPart.part_numbers) || rawPart;
         } else {
-            const preview = await previewReceiveTarget(connection, {
-                baseNacCode: base,
-                partNumber: rawPart,
-            });
-            resolvedNac = preview.nacCode;
+            const [direct] = await connection.execute<StockVariantRow[]>(
+                `SELECT * FROM stock_details WHERE nac_code = ? LIMIT 1`,
+                [rawNac]
+            );
+            if (direct.length) {
+                resolvedNac = direct[0].nac_code;
+                if (!rawPart) {
+                    rawPart = normalizePartNumber(direct[0].part_numbers);
+                }
+            } else {
+                const resolved = await resolveTransactionVariantTarget(connection, {
+                    nacCode: rawNac,
+                    partNumber: rawPart,
+                    preferLatestReceived: false,
+                });
+                resolvedNac = resolved.nacCode;
+                rawPart = resolved.partNumber || rawPart;
+            }
         }
     } else {
         const resolved = await resolveTransactionVariantTarget(connection, {

@@ -9,7 +9,7 @@ import {
     formatEquipmentDisplayGroup,
     groupEquipmentEntries,
 } from './spareEquipmentGrouping';
-import { FUEL_NAC_CODES, isConsumableStock } from './issueValidationService';
+import { isConsumableStock, isFuelNacCode } from './issueValidationService';
 import { stripSuffixFromNac } from '../utils/nacCodeUtils';
 
 export type RequestEquipmentOption = {
@@ -339,8 +339,9 @@ export async function getRequestEquipmentOptions(
         };
     }
 
-    if (FUEL_NAC_CODES.has(code)) {
-        const fuelCodes = await loadFuelValidCodes(connection, code);
+    if (isFuelNacCode(code)) {
+        const fuelBase = stripSuffixFromNac(code);
+        const fuelCodes = await loadFuelValidCodes(connection, fuelBase);
         const filteredEntries = allAssetEntries.filter((entry) =>
             entryMatchesFuelList(entry, fuelCodes)
         );
