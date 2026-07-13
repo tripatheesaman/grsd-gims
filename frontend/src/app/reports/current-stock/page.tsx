@@ -134,6 +134,7 @@ interface ExportPayload {
     equipmentNumber?: string;
     createdDateFrom?: string;
     createdDateTo?: string;
+    negativeTrueBalance?: boolean;
 }
 type ChartPoint = {
     date: string;
@@ -155,6 +156,7 @@ export default function CurrentStockReportPage() {
     const [itemName, setItemName] = useState('');
     const [partNumber, setPartNumber] = useState('');
     const [equipmentNumber, setEquipmentNumber] = useState('');
+    const [negativeTrueBalance, setNegativeTrueBalance] = useState(false);
     const [fromDate, setFromDate] = useState<Date | undefined>(defaultFromDate);
     const [toDate, setToDate] = useState<Date | undefined>(defaultToDate);
     const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined);
@@ -323,6 +325,7 @@ export default function CurrentStockReportPage() {
                     itemName: itemName || undefined,
                     partNumber: partNumber || undefined,
                     equipmentNumber: equipmentNumber || undefined,
+                    negativeTrueBalance: negativeTrueBalance || undefined,
                     createdDateFrom: createdDateFrom ? format(startOfDay(createdDateFrom), 'yyyy-MM-dd') : undefined,
                     createdDateTo: createdDateTo ? format(startOfDay(createdDateTo), 'yyyy-MM-dd') : undefined,
                     page,
@@ -346,7 +349,7 @@ export default function CurrentStockReportPage() {
         finally {
             setIsLoading(false);
         }
-    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page, showErrorToast]);
+    }, [canAccessReport, fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, negativeTrueBalance, createdDateFrom, createdDateTo, page, showErrorToast]);
     useEffect(() => {
         if (fromDate && toDate) {
             fetchReport();
@@ -362,6 +365,7 @@ export default function CurrentStockReportPage() {
         setItemName('');
         setPartNumber('');
         setEquipmentNumber('');
+        setNegativeTrueBalance(false);
         setFromDate(defaultFromDate);
         setToDate(defaultToDate);
         setCreatedDateFrom(undefined);
@@ -400,6 +404,8 @@ export default function CurrentStockReportPage() {
                 exportPayload.partNumber = partNumber;
             if (equipmentNumber)
                 exportPayload.equipmentNumber = equipmentNumber;
+            if (negativeTrueBalance)
+                exportPayload.negativeTrueBalance = true;
             if (fromDate)
                 exportPayload.fromDate = format(startOfDay(fromDate), 'yyyy-MM-dd');
             if (toDate)
@@ -729,6 +735,22 @@ export default function CurrentStockReportPage() {
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-[#003594]">Equipment Number</Label>
                     <EquipmentAssetAutocomplete value={equipmentNumber} onChange={setEquipmentNumber} placeholder="Search by equipment code or name" className="w-full"/>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-[#003594]">Balance Status</Label>
+                    <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md border border-[#002a6e]/20 bg-white px-3 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={negativeTrueBalance}
+                        onChange={(e) => {
+                            setNegativeTrueBalance(e.target.checked);
+                            setPage(1);
+                        }}
+                        className="h-4 w-4 accent-[#003594]"
+                      />
+                      <span>True balance below 0</span>
+                    </label>
                   </div>
 
                   <div className="space-y-2">

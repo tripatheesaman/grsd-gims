@@ -328,7 +328,11 @@ export async function getRequestEquipmentOptions(
     limit = 500
 ): Promise<{ options: RequestEquipmentOption[]; filteredByCompatibility: boolean }> {
     const sections = await loadActiveSections(connection);
-    const allAssetEntries = await loadAssetEntries(connection, search);
+    const allAssetEntries = await loadAssetEntries(
+        connection,
+        search,
+        search ? 2000 : Math.max(limit, 2000)
+    );
     const code = String(nacCode || '').trim();
 
     if (!code || code === 'N/A') {
@@ -388,4 +392,44 @@ export async function getRequestEquipmentOptions(
         options: filterBySearch(dedupeOptions([...sections, ...series]), search).slice(0, limit),
         filteredByCompatibility: true,
     };
+}
+
+/**
+ * Validate an existing-item request against the same option source shown by the
+ * request equipment selector. This prevents the UI and submit validation from
+ * disagreeing about family compatibility, grouped ranges, or section codes.
+ */
+export async function validateExistingRequestEquipmentSelection(
+    connection: PoolConnection,
+    nacCode: string,
+    equipmentNumber: string
+): Promise<{ valid: boolean; message?: string }> {
+    const selectedTokens = expandEquipmentTokens(equipmentNumber);
+    if (!selectedTokens.length) {
+        return { valid: false, message: 'Equipment number is required' };
+    }
+
+    const { options } = await getRequestEquipmentOptions(
+        connection,
+        nacCode,
+        undefined,
+        10000
+    );
+    const allowedTokens = options.flatMap((option) =>
+        expandEquipmentTokens(option.equipmentCode)
+    );
+
+    for (const selected of selectedTokens) {
+        const allowed = allowedTokens.some((candidate) =>
+            equipmentCodesEquivalent(selected, candidate)
+        );
+        if (!allowed) {
+            return {
+                valid: false,
+                message: `Equipment "${selected}" is not applicable to item ${nacCode}`,
+            };
+        }
+    }
+
+    return { valid: true };
 }

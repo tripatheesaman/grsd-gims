@@ -15,7 +15,7 @@ import { ReceiveRRPReportItem, ReceiveRRPReportResponse } from '../types/rrpRepo
 import archiver from 'archiver';
 import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { appendVariantEquipmentFilter } from '../services/spareEquipmentDisplay';
-import { sqlFamilyKeyExpression, sqlTransactionMatchesFamilyKey, sqlTransactionMatchesNacCodeRef, stripSuffixFromNac } from '../utils/nacCodeUtils';
+import { sqlFamilyKeyExpression, sqlTransactionMatchesFamilyKey, stripSuffixFromNac } from '../utils/nacCodeUtils';
 import { computeDashboardValuationTotals } from '../services/dashboardValuationService';
 export const getDailyIssueReport = async (req: Request, res: Response): Promise<void> => {
     const { fromDate, toDate, equipmentNumber, partNumber, nacCode, page = 1, limit = 10 } = req.query;
@@ -3157,87 +3157,102 @@ const buildCurrentStockReportSql = (
     listQueryExtra: string,
     limitOffsetSql: string
 ): string => {
-    const MATCH_RD = sqlTransactionMatchesNacCodeRef('rd', 'f.nac_code');
-    const MATCH_ID = sqlTransactionMatchesNacCodeRef('id', 'f.nac_code');
-
     return `
+        WITH
+        pre_receives AS (
+            SELECT nac_code, SUM(received_quantity) AS quantity
+            FROM receive_details
+            WHERE approval_status = 'APPROVED' AND receive_date < ?
+            GROUP BY nac_code
+        ),
+        pre_issues AS (
+            SELECT nac_code, SUM(issue_quantity) AS quantity
+            FROM issue_details
+            WHERE approval_status = 'APPROVED' AND issue_date < ?
+            GROUP BY nac_code
+        ),
+        period_receives AS (
+            SELECT nac_code, SUM(received_quantity) AS quantity
+            FROM receive_details
+            WHERE approval_status = 'APPROVED' AND receive_date BETWEEN ? AND ?
+            GROUP BY nac_code
+        ),
+        period_rrp_quantity AS (
+            SELECT rd.nac_code, SUM(rd.received_quantity) AS quantity
+            FROM receive_details rd
+            INNER JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
+            WHERE rd.approval_status = 'APPROVED'
+              AND rd.rrp_fk IS NOT NULL
+              AND rd.receive_date BETWEEN ? AND ?
+            GROUP BY rd.nac_code
+        ),
+        period_rrp_amount AS (
+            SELECT rd.nac_code, SUM(rrp.total_amount) AS amount
+            FROM receive_details rd
+            INNER JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
+            WHERE rd.approval_status = 'APPROVED'
+              AND rd.rrp_fk IS NOT NULL
+              AND rd.receive_date BETWEEN ? AND ?
+            GROUP BY rd.nac_code
+        ),
+        period_issue_quantity AS (
+            SELECT nac_code, SUM(issue_quantity) AS quantity
+            FROM issue_details
+            WHERE approval_status = 'APPROVED' AND issue_date BETWEEN ? AND ?
+            GROUP BY nac_code
+        ),
+        period_issue_amount AS (
+            SELECT nac_code, SUM(issue_cost) AS amount
+            FROM issue_details
+            WHERE approval_status = 'APPROVED' AND issue_date BETWEEN ? AND ?
+            GROUP BY nac_code
+        ),
+        filtered_stock AS (
             SELECT
-                f.nac_code,
-                f.item_name,
-                f.part_numbers,
-                f.applicable_equipments,
-                f.location,
-                f.open_quantity,
-                f.open_amount,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${MATCH_RD}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date < ?
-                ) as pre_date_receive_qty,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${MATCH_ID}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date < ?
-                ) as pre_date_issue_qty,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    WHERE ${MATCH_RD}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as received_quantity,
-                (
-                    SELECT COALESCE(SUM(rd.received_quantity), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${MATCH_RD}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_quantity,
-                (
-                    SELECT COALESCE(SUM(rrp.total_amount), 0)
-                    FROM receive_details rd
-                    JOIN rrp_details rrp ON rd.rrp_fk = rrp.id
-                    WHERE ${MATCH_RD}
-                    AND rd.approval_status = 'APPROVED'
-                    AND rd.rrp_fk IS NOT NULL
-                    AND rd.receive_date BETWEEN ? AND ?
-                ) as rrp_amount,
-                (
-                    SELECT COALESCE(SUM(id.issue_quantity), 0)
-                    FROM issue_details id
-                    WHERE ${MATCH_ID}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_quantity,
-                (
-                    SELECT COALESCE(SUM(id.issue_cost), 0)
-                    FROM issue_details id
-                    WHERE ${MATCH_ID}
-                    AND id.approval_status = 'APPROVED'
-                    AND id.issue_date BETWEEN ? AND ?
-                ) as issue_amount
-            FROM (
-                SELECT
-                    s.nac_code,
-                    SUBSTRING_INDEX(MIN(s.item_name), ',', 1) as item_name,
-                    MIN(s.part_numbers) as part_numbers,
-                    MIN(s.applicable_equipments) as applicable_equipments,
-                    MIN(s.location) as location,
-                    SUM(s.open_quantity) as open_quantity,
-                    SUM(s.open_amount) as open_amount
-                FROM stock_details s
-                ${whereClause}${listQueryExtra}
-                GROUP BY s.nac_code
-            ) f
-            ORDER BY f.nac_code ASC
-            ${limitOffsetSql}
-        `;
+                s.nac_code,
+                SUBSTRING_INDEX(MIN(s.item_name), ',', 1) AS item_name,
+                MIN(s.part_numbers) AS part_numbers,
+                MIN(s.applicable_equipments) AS applicable_equipments,
+                MIN(s.location) AS location,
+                SUM(s.open_quantity) AS open_quantity,
+                SUM(s.open_amount) AS open_amount
+            FROM stock_details s
+            ${whereClause}${listQueryExtra}
+            GROUP BY s.nac_code
+        )
+        SELECT
+            f.nac_code,
+            f.item_name,
+            f.part_numbers,
+            f.applicable_equipments,
+            f.location,
+            f.open_quantity,
+            f.open_amount,
+            COALESCE(pre_r.quantity, 0) AS pre_date_receive_qty,
+            COALESCE(pre_i.quantity, 0) AS pre_date_issue_qty,
+            COALESCE(period_r.quantity, 0) AS received_quantity,
+            COALESCE(rrp_q.quantity, 0) AS rrp_quantity,
+            COALESCE(rrp_a.amount, 0) AS rrp_amount,
+            COALESCE(issue_q.quantity, 0) AS issue_quantity,
+            COALESCE(issue_a.amount, 0) AS issue_amount
+        FROM filtered_stock f
+        LEFT JOIN pre_receives pre_r
+          ON pre_r.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN pre_issues pre_i
+          ON pre_i.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN period_receives period_r
+          ON period_r.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN period_rrp_quantity rrp_q
+          ON rrp_q.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN period_rrp_amount rrp_a
+          ON rrp_a.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN period_issue_quantity issue_q
+          ON issue_q.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN period_issue_amount issue_a
+          ON issue_a.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        ORDER BY f.nac_code ASC
+        ${limitOffsetSql}
+    `;
 };
 
 const mapStockReportRows = (results: RowDataPacket[]): StockReportItem[] =>
@@ -3295,8 +3310,79 @@ const buildCurrentStockReportDateParams = (
     reportFromDate, reportToDate,
 ];
 
+const getNegativeTrueBalanceNacCodes = async (
+    connection: PoolConnection,
+    whereClause: string,
+    listQueryExtra: string,
+    filterParams: (string | number)[],
+    reportFromDate: string,
+    reportToDate: string
+): Promise<string[]> => {
+    const query = `
+        SELECT f.nac_code
+        FROM (
+            SELECT
+                s.nac_code,
+                SUM(COALESCE(s.open_quantity, 0)) AS open_quantity
+            FROM stock_details s
+            ${whereClause}${listQueryExtra}
+            GROUP BY s.nac_code
+        ) f
+        LEFT JOIN (
+            SELECT
+                rd.nac_code,
+                SUM(CASE
+                    WHEN rd.approval_status = 'APPROVED' AND rd.receive_date < ?
+                    THEN rd.received_quantity ELSE 0
+                END) AS pre_date_receive_qty,
+                SUM(CASE
+                    WHEN rd.approval_status = 'APPROVED'
+                      AND rd.rrp_fk IS NOT NULL
+                      AND rd.receive_date BETWEEN ? AND ?
+                    THEN rd.received_quantity ELSE 0
+                END) AS rrp_quantity
+            FROM receive_details rd
+            GROUP BY rd.nac_code
+        ) receives ON receives.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        LEFT JOIN (
+            SELECT
+                id.nac_code,
+                SUM(CASE
+                    WHEN id.approval_status = 'APPROVED' AND id.issue_date < ?
+                    THEN id.issue_quantity ELSE 0
+                END) AS pre_date_issue_qty,
+                SUM(CASE
+                    WHEN id.approval_status = 'APPROVED'
+                      AND id.issue_date BETWEEN ? AND ?
+                    THEN id.issue_quantity ELSE 0
+                END) AS issue_quantity
+            FROM issue_details id
+            GROUP BY id.nac_code
+        ) issues ON issues.nac_code COLLATE utf8mb4_unicode_ci = f.nac_code COLLATE utf8mb4_unicode_ci
+        WHERE (
+            f.open_quantity
+            + COALESCE(receives.pre_date_receive_qty, 0)
+            - COALESCE(issues.pre_date_issue_qty, 0)
+            + COALESCE(receives.rrp_quantity, 0)
+            - COALESCE(issues.issue_quantity, 0)
+        ) < 0
+        ORDER BY f.nac_code ASC
+    `;
+    const params: (string | number)[] = [
+        ...filterParams,
+        reportFromDate,
+        reportFromDate,
+        reportToDate,
+        reportFromDate,
+        reportFromDate,
+        reportToDate,
+    ];
+    const [rows] = await connection.execute<RowDataPacket[]>(query, params);
+    return rows.map((row) => String(row.nac_code || '')).filter(Boolean);
+};
+
 export const getCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
-    const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, page = 1, pageSize = 20 } = req.query;
+    const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, negativeTrueBalance, page = 1, pageSize = 20 } = req.query;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
     try {
@@ -3331,18 +3417,79 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
             whereConditions.push('DATE(s.created_at) <= ?');
             params.push(String(createdDateTo));
         }
-        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-        const countQuery = `SELECT COUNT(DISTINCT s.nac_code) as total FROM stock_details s ${whereClause}${countQueryExtra}`;
-        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, params);
-        const totalCount = countResult[0]?.total || 0;
+        const whereClause = whereConditions.length > 0
+            ? `WHERE ${whereConditions.join(' AND ')}`
+            : 'WHERE 1 = 1';
         const currentPage = parseInt(String(page)) || 1;
         const limitNum = parseInt(String(pageSize)) || 20;
         const offsetNum = (currentPage - 1) * limitNum;
-        let listQueryExtra = '';
-        const listParams = [...params];
-        if (equipmentNumber && String(equipmentNumber).trim() !== '') {
-            listQueryExtra = appendVariantEquipmentFilter('s', String(equipmentNumber), '', listParams);
+        const showNegativeTrueBalance = String(negativeTrueBalance || '').toLowerCase() === 'true';
+
+        if (showNegativeTrueBalance) {
+            const negativeNacCodes = await getNegativeTrueBalanceNacCodes(
+                connection,
+                whereClause,
+                countQueryExtra,
+                params,
+                reportFromDate,
+                reportToDate
+            );
+            const totalCount = negativeNacCodes.length;
+            const pageNacCodes = negativeNacCodes.slice(offsetNum, offsetNum + limitNum);
+            if (pageNacCodes.length === 0) {
+                res.status(200).json({
+                    data: [],
+                    pagination: {
+                        currentPage,
+                        pageSize: limitNum,
+                        totalCount,
+                        totalPages: Math.ceil(totalCount / limitNum)
+                    },
+                    totals: { open_quantity: 0, open_amount: 0 }
+                });
+                return;
+            }
+
+            const placeholders = pageNacCodes.map(() => '?').join(', ');
+            const pageQueryExtra = `${countQueryExtra} AND s.nac_code IN (${placeholders})`;
+            const negativeQuery = buildCurrentStockReportSql(
+                whereClause,
+                pageQueryExtra,
+                ''
+            );
+            const negativeQueryParams: (string | number)[] = [
+                ...buildCurrentStockReportDateParams(reportFromDate, reportToDate),
+                ...params,
+                ...pageNacCodes,
+            ];
+            const [negativeResults] = await connection.execute<RowDataPacket[]>(
+                negativeQuery,
+                negativeQueryParams
+            );
+            const reportItems = mapStockReportRows(negativeResults)
+                .filter((item) => item.true_balance_quantity < 0);
+            const totals = {
+                open_quantity: reportItems.reduce((sum, item) => sum + item.open_quantity, 0),
+                open_amount: reportItems.reduce((sum, item) => sum + item.open_amount, 0)
+            };
+            res.status(200).json({
+                data: reportItems,
+                pagination: {
+                    currentPage,
+                    pageSize: limitNum,
+                    totalCount,
+                    totalPages: Math.ceil(totalCount / limitNum)
+                },
+                totals
+            });
+            return;
         }
+
+        const countQuery = `SELECT COUNT(DISTINCT s.nac_code) as total FROM stock_details s ${whereClause}${countQueryExtra}`;
+        const [countResult] = await connection.execute<RowDataPacket[]>(countQuery, params);
+        const totalCount = countResult[0]?.total || 0;
+        const listQueryExtra = countQueryExtra;
+        const listParams = [...params];
         const query = buildCurrentStockReportSql(
             whereClause,
             listQueryExtra,
@@ -3391,7 +3538,7 @@ export const getCurrentStockReport = async (req: Request, res: Response): Promis
     }
 };
 export const exportCurrentStockReport = async (req: Request, res: Response): Promise<void> => {
-    const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, exportType, page, pageSize } = req.body;
+    const { fromDate, toDate, nacCode, itemName, partNumber, equipmentNumber, createdDateFrom, createdDateTo, negativeTrueBalance, exportType, page, pageSize } = req.body;
     const connection = await pool.getConnection();
     const FAMILY_KEY_S = sqlFamilyKeyExpression('s');
     try {
@@ -3412,6 +3559,14 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
         else if (exportType === 'dateRange' && fromDate && toDate) {
             reportFromDate = fromDate;
             reportToDate = toDate;
+        }
+        const requestedExportPage = parseInt(String(page || 1));
+        const requestedExportPageSize = parseInt(String(pageSize || 20));
+        if (negativeTrueBalance) {
+            // Filter before applying current-page slicing so exported pagination
+            // matches the filtered report shown in the UI.
+            exportLimit = 10000;
+            exportOffset = 0;
         }
         let whereConditions: string[] = [];
         const params: (string | number)[] = [];
@@ -3439,7 +3594,26 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             whereConditions.push('DATE(s.created_at) <= ?');
             params.push(String(createdDateTo));
         }
-        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        const whereClause = whereConditions.length > 0
+            ? `WHERE ${whereConditions.join(' AND ')}`
+            : 'WHERE 1 = 1';
+        if (negativeTrueBalance) {
+            const negativeNacCodes = await getNegativeTrueBalanceNacCodes(
+                connection,
+                whereClause,
+                listQueryExtra,
+                params,
+                reportFromDate,
+                reportToDate
+            );
+            if (negativeNacCodes.length > 0) {
+                const placeholders = negativeNacCodes.map(() => '?').join(', ');
+                listQueryExtra += ` AND s.nac_code IN (${placeholders})`;
+                params.push(...negativeNacCodes);
+            } else {
+                listQueryExtra += ' AND 1 = 0';
+            }
+        }
         const query = buildCurrentStockReportSql(
             whereClause,
             listQueryExtra,
@@ -3450,7 +3624,13 @@ export const exportCurrentStockReport = async (req: Request, res: Response): Pro
             ...params
         ];
         const [results] = await connection.execute<RowDataPacket[]>(query, queryParams);
-        const excelData = mapStockReportRows(results);
+        let excelData = mapStockReportRows(results).filter(
+            (item) => !negativeTrueBalance || item.true_balance_quantity < 0
+        );
+        if (negativeTrueBalance && exportType === 'currentPage') {
+            const start = (requestedExportPage - 1) * requestedExportPageSize;
+            excelData = excelData.slice(start, start + requestedExportPageSize);
+        }
         worksheet.addRow([
             'NAC Code',
             'Item Name',

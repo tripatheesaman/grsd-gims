@@ -19,7 +19,10 @@ import {
     REQUEST_STOCK_JOIN,
 } from '../services/requestItemService';
 import { resolveRequestVariantTarget } from '../services/inventoryVariantService';
-import { getRequestEquipmentOptions } from '../services/requestEquipmentService';
+import {
+    getRequestEquipmentOptions,
+    validateExistingRequestEquipmentSelection,
+} from '../services/requestEquipmentService';
 import { collapseEquipmentSelectionValue } from '../services/spareEquipmentGrouping';
 import { PoolConnection } from 'mysql2/promise';
 import { resolveActorPerson } from '../services/personDetailsService';
@@ -800,12 +803,18 @@ export const createRequest = async (req: Request, res: Response): Promise<void> 
                 continue;
             }
             const prepared = await prepareRequestItemForSave(connection, item);
-            const targetCheck = await validateRequestTarget(
-                connection,
-                prepared.nacCode,
-                item.equipmentNumber,
-                validationCaches
-            );
+            const targetCheck = prepared.nacCode === 'N/A'
+                ? await validateRequestTarget(
+                    connection,
+                    prepared.nacCode,
+                    item.equipmentNumber,
+                    validationCaches
+                )
+                : await validateExistingRequestEquipmentSelection(
+                    connection,
+                    prepared.nacCode,
+                    item.equipmentNumber
+                );
             if (!targetCheck.valid) {
                 compatibilityErrors.push({
                     nacCode: prepared.nacCode || 'N/A',
@@ -1104,12 +1113,18 @@ export const updateRequest = async (req: Request, res: Response): Promise<void> 
                 continue;
             }
             const prepared = await prepareRequestItemForSave(connection, item);
-            const targetCheck = await validateRequestTarget(
-                connection,
-                prepared.nacCode,
-                item.equipmentNumber,
-                updateValidationCaches
-            );
+            const targetCheck = prepared.nacCode === 'N/A'
+                ? await validateRequestTarget(
+                    connection,
+                    prepared.nacCode,
+                    item.equipmentNumber,
+                    updateValidationCaches
+                )
+                : await validateExistingRequestEquipmentSelection(
+                    connection,
+                    prepared.nacCode,
+                    item.equipmentNumber
+                );
             if (!targetCheck.valid) {
                 updateCompatibilityErrors.push({
                     nacCode: prepared.nacCode || 'N/A',
