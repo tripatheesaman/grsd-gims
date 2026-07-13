@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RowDataPacket } from 'mysql2';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import pool from '../config/db';
 import { logEvents } from '../middlewares/logger';
 import {
@@ -7,6 +7,8 @@ import {
     appendRecordsRequestUniversalFilter,
 } from '../services/searchSqlBuilder';
 import { rankByRelevance } from '../services/searchRelevanceService';
+import { formatDateForDB } from '../utils/dateUtils';
+import { isAbsentRequestPartNumber } from '../services/requestItemService';
 interface RequestRecord extends RowDataPacket {
     id: number;
     request_number: string;
@@ -235,65 +237,155 @@ export const updateRequestRecord = async (req: Request, res: Response): Promise<
     const connection = await pool.getConnection();
     try {
         const { id } = req.params;
-        const { request_number, nac_code, request_date, part_number, item_name, unit, requested_quantity, current_balance, previous_rate, equipment_number, image_path, specifications, remarks, requested_by, approval_status, reference_doc }: RequestFormData = req.body;
-        if (!request_number || !nac_code || !request_date || !part_number || !item_name ||
-            !unit || !requested_quantity || !equipment_number || !requested_by) {
-            res.status(400).json({
-                error: 'Bad Request',
-                message: 'Required fields are missing'
-            });
-            return;
-        }
-        const [currentRecord] = await connection.execute<RowDataPacket[]>('SELECT is_received, receive_fk, image_path FROM request_details WHERE id = ?', [id]);
-        if (currentRecord.length > 0) {
-            const record = currentRecord[0];
-            if (record.is_received === 1 && record.receive_fk) {
-                const [receiveRecord] = await connection.execute<RowDataPacket[]>('SELECT received_quantity FROM receive_details WHERE id = ?', [record.receive_fk]);
-                if (receiveRecord.length > 0) {
-                    const receivedQuantity = receiveRecord[0].received_quantity;
-                    if (Number(requested_quantity) < Number(receivedQuantity)) {
-                        res.status(400).json({
-                            error: 'Bad Request',
-                            message: `Requested quantity cannot be less than received quantity. Received quantity: ${receivedQuantity}`
-                        });
-                        return;
-                    }
-                }
-            }
-            if (image_path && record.image_path && image_path !== record.image_path) {
-                try {
-                    const fs = require('fs');
-                    const path = require('path');
-                    const publicDir = path.join(process.cwd(), '..', 'frontend', 'public');
-                    const oldImageFullPath = path.join(publicDir, record.image_path.replace(/^\//, ''));
-                    if (fs.existsSync(oldImageFullPath)) {
-                        fs.unlinkSync(oldImageFullPath);
-                        logEvents(`Deleted old image file: ${oldImageFullPath} for request ID: ${id}`, "requestRecordsLog.log");
-                    }
-                }
-                catch (deleteError) {
-                    logEvents(`Warning: Failed to delete old image file: ${record.image_path} for request ID: ${id}. Error: ${deleteError}`, "requestRecordsLog.log");
-                }
-            }
-        }
-        const [result] = await connection.execute(`UPDATE request_details SET
-        request_number = ?, nac_code = ?, request_date = ?, part_number = ?, item_name = ?,
-        unit = ?, requested_quantity = ?, current_balance = ?, previous_rate = ?,
-        equipment_number = ?, image_path = ?, specifications = ?, remarks = ?,
-        requested_by = ?, approval_status = ?, reference_doc = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`, [
-            request_number, nac_code, request_date, part_number, item_name, unit,
-            requested_quantity, current_balance, previous_rate, equipment_number,
-            image_path || null, specifications || null, remarks || null, requested_by,
-            approval_status || 'PENDING', reference_doc || null, id
-        ]);
-        if ((result as any).affectedRows === 0) {
+        const formData: Partial<RequestFormData> = req.body || {};
+
+        const [currentRows] = await connection.execute<RowDataPacket[]>(
+            'SELECT * FROM request_details WHERE id = ?',
+            [id]
+        );
+        if (currentRows.length === 0) {
             res.status(404).json({
                 error: 'Not Found',
                 message: 'Request record not found'
             });
             return;
         }
+
+        const current = currentRows[0];
+        const requestNumber = String(formData.request_number ?? current.request_number ?? '').trim();
+        const nacCode = String(formData.nac_code ?? current.nac_code ?? '').trim();
+        const requestDate = formatDateForDB(
+            (formData.request_date ?? current.request_date) as string | Date
+        );
+        const partNumberRaw = String(formData.part_number ?? current.part_number ?? '').trim();
+        const partNumber = isAbsentRequestPartNumber(partNumberRaw) ? 'N/A' : partNumberRaw;
+        const itemName = String(formData.item_name ?? current.item_name ?? '').trim();
+        const unit = String(formData.unit ?? current.unit ?? '').trim();
+        const requestedQuantity = Number(
+            formData.requested_quantity ?? current.requested_quantity ?? 0
+        );
+        const currentBalance = Number(
+            formData.current_balance ?? current.current_balance ?? 0
+        );
+        const previousRate = String(
+            formData.previous_rate ?? current.previous_rate ?? 'N/A'
+        ).trim() || 'N/A';
+        const equipmentNumber = String(
+            formData.equipment_number ?? current.equipment_number ?? ''
+        ).trim();
+        const imagePath = formData.image_path !== undefined
+            ? (formData.image_path || null)
+            : (current.image_path || null);
+        const specifications = formData.specifications !== undefined
+            ? (formData.specifications || null)
+            : (current.specifications || null);
+        const remarks = formData.remarks !== undefined
+            ? (formData.remarks || null)
+            : (current.remarks || null);
+        const requestedBy = String(formData.requested_by ?? current.requested_by ?? '').trim();
+        const approvalStatus = String(
+            formData.approval_status ?? current.approval_status ?? 'PENDING'
+        ).trim() || 'PENDING';
+        const referenceDoc = formData.reference_doc !== undefined
+            ? (formData.reference_doc || null)
+            : (current.reference_doc || null);
+
+        if (
+            !requestNumber ||
+            !nacCode ||
+            !requestDate ||
+            !partNumber ||
+            !itemName ||
+            !unit ||
+            !Number.isFinite(requestedQuantity) ||
+            requestedQuantity <= 0 ||
+            !equipmentNumber ||
+            !requestedBy
+        ) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Required fields are missing or invalid'
+            });
+            return;
+        }
+
+        const [receiveAgg] = await connection.execute<RowDataPacket[]>(
+            `SELECT
+                COALESCE(SUM(CASE WHEN approval_status = 'APPROVED' THEN received_quantity ELSE 0 END), 0) AS total_approved
+             FROM receive_details
+             WHERE request_fk = ?`,
+            [id]
+        );
+        const totalApproved = Number(receiveAgg[0]?.total_approved || 0);
+        if (totalApproved > 0 && requestedQuantity < totalApproved) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: `Requested quantity cannot be less than received quantity. Received quantity: ${totalApproved}`
+            });
+            return;
+        }
+
+        if (imagePath && current.image_path && imagePath !== current.image_path) {
+            try {
+                const fs = require('fs');
+                const path = require('path');
+                const publicDir = path.join(process.cwd(), '..', 'frontend', 'public');
+                const oldImageFullPath = path.join(
+                    publicDir,
+                    String(current.image_path).replace(/^\//, '')
+                );
+                if (fs.existsSync(oldImageFullPath)) {
+                    fs.unlinkSync(oldImageFullPath);
+                    logEvents(
+                        `Deleted old image file: ${oldImageFullPath} for request ID: ${id}`,
+                        "requestRecordsLog.log"
+                    );
+                }
+            }
+            catch (deleteError) {
+                logEvents(
+                    `Warning: Failed to delete old image file: ${current.image_path} for request ID: ${id}. Error: ${deleteError}`,
+                    "requestRecordsLog.log"
+                );
+            }
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+            `UPDATE request_details SET
+                request_number = ?, nac_code = ?, request_date = ?, part_number = ?, item_name = ?,
+                unit = ?, requested_quantity = ?, current_balance = ?, previous_rate = ?,
+                equipment_number = ?, image_path = ?, specifications = ?, remarks = ?,
+                requested_by = ?, approval_status = ?, reference_doc = ?, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [
+                requestNumber,
+                nacCode,
+                requestDate,
+                partNumber,
+                itemName,
+                unit,
+                requestedQuantity,
+                currentBalance,
+                previousRate,
+                equipmentNumber,
+                imagePath,
+                specifications,
+                remarks,
+                requestedBy,
+                approvalStatus,
+                referenceDoc,
+                id,
+            ]
+        );
+
+        if (result.affectedRows === 0) {
+            res.status(404).json({
+                error: 'Not Found',
+                message: 'Request record not found'
+            });
+            return;
+        }
+
         res.status(200).json({
             message: 'Request record updated successfully'
         });

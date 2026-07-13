@@ -1,7 +1,6 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import Image from 'next/image';
 import { Upload, X } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { recordsTheme } from './recordsTheme';
@@ -58,7 +57,7 @@ export function RecordTextInput({
     return (
         <input
             type={type}
-            value={value}
+            value={value ?? ''}
             min={min}
             disabled={disabled}
             placeholder={placeholder}
@@ -138,7 +137,8 @@ export function RecordImageField({
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                 <div className="relative flex h-36 w-36 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-dashed border-slate-300 bg-white">
                     {previewUrl ? (
-                        <Image src={previewUrl} alt="Preview" fill className="object-cover" unoptimized />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={previewUrl} alt="Preview" className="h-full w-full object-cover" />
                     ) : (
                         <Upload className="h-8 w-8 text-slate-300" />
                     )}
@@ -173,4 +173,5 @@ export const APPROVAL_STATUS_OPTIONS = [
     { value: 'PENDING', label: 'Pending' },
     { value: 'APPROVED', label: 'Approved' },
     { value: 'REJECTED', label: 'Rejected' },
+    { value: 'CLOSED', label: 'Closed' },
 ];

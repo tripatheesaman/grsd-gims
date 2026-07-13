@@ -67,7 +67,9 @@ export default function StockRecordsPage() {
     const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
     const [showEditModal, setShowEditModal] = useState<boolean>(false);
     const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+    const [showAddPartModal, setShowAddPartModal] = useState<boolean>(false);
     const [editingItem, setEditingItem] = useState<StockRow | null>(null);
+    const [addPartFamily, setAddPartFamily] = useState<StockRow | null>(null);
     const [displayBalances, setDisplayBalances] = useState<DisplayBalances | null>(null);
     const [deletingItem, setDeletingItem] = useState<StockRow | null>(null);
     const [formData, setFormData] = useState<StockFormData>({
@@ -79,6 +81,12 @@ export default function StockRecordsPage() {
         openAmount: 0,
         location: ''
     });
+    const [addPartForm, setAddPartForm] = useState({
+        partNumber: '',
+        openQuantity: 0,
+        openAmount: 0,
+    });
+    const [addPartErrors, setAddPartErrors] = useState<Record<string, string>>({});
     const [formErrors, setFormErrors] = useState<Record<string, string>>({});
     const [submitting, setSubmitting] = useState<boolean>(false);
     const [reconciling, setReconciling] = useState<boolean>(false);
@@ -273,6 +281,66 @@ export default function StockRecordsPage() {
         resetForm();
         setShowCreateModal(true);
     };
+    const openAddPartModal = (family: StockRow) => {
+        setAddPartFamily(family);
+        setAddPartForm({ partNumber: '', openQuantity: 0, openAmount: 0 });
+        setAddPartErrors({});
+        setShowAddPartModal(true);
+        setError(null);
+    };
+    const handleAddPartNumber = async () => {
+        if (!addPartFamily) return;
+        const errors: Record<string, string> = {};
+        const part = addPartForm.partNumber.trim().toUpperCase();
+        if (!part) {
+            errors.partNumber = 'Part number is required';
+        } else if (part.includes(',')) {
+            errors.partNumber = 'Part number must be a single value (no commas)';
+        }
+        if (addPartForm.openQuantity < 0) {
+            errors.openQuantity = 'Open quantity cannot be negative';
+        }
+        if (addPartForm.openAmount < 0) {
+            errors.openAmount = 'Open amount cannot be negative';
+        }
+        setAddPartErrors(errors);
+        if (Object.keys(errors).length > 0) return;
+
+        setSubmitting(true);
+        try {
+            const res = await API.post('/api/stock/family-variant', {
+                baseNacCode: addPartFamily.nacCode,
+                partNumber: part,
+                openQuantity: addPartForm.openQuantity,
+                openAmount: addPartForm.openAmount,
+                itemName: addPartFamily.itemName,
+                equipmentNumber: addPartFamily.equipmentNumber,
+                location: addPartFamily.location,
+            });
+            const createdNac = (res.data as { nacCode?: string })?.nacCode || '';
+            setShowAddPartModal(false);
+            setAddPartFamily(null);
+            fetchData();
+            showSuccessToast({
+                title: 'Part number added',
+                message: createdNac
+                    ? `Created ${createdNac} with part number ${part}.`
+                    : `Added part number ${part} to family ${addPartFamily.nacCode}.`,
+                duration: 5000,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error && typeof error === 'object' && 'response' in error
+                ? String((error as { response?: { data?: { message?: string } } }).response?.data?.message || 'Failed to add part number')
+                : 'Failed to add part number';
+            if (error && typeof error === 'object' && 'response' in error && (error as { response?: { status?: number } }).response?.status === 409) {
+                setAddPartErrors({ partNumber: errorMessage });
+            } else {
+                showErrorToast({ title: 'Add part failed', message: errorMessage, duration: 6000 });
+            }
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
     const handleReconcileBalances = async () => {
         setReconciling(true);
@@ -409,8 +477,10 @@ export default function StockRecordsPage() {
                         hasActiveFilters={hasActiveFilters}
                         canEdit={canEdit}
                         canDelete={canDelete}
+                        canAdd={canAdd}
                         onEdit={openEditModal}
                         onDelete={openDeleteModal}
+                        onAddPartNumber={openAddPartModal}
                         page={page}
                         pageSize={pageSize}
                         totalCount={totalCount}
@@ -600,6 +670,78 @@ export default function StockRecordsPage() {
             </div>
           </div>
         </div>)}
+
+      {showAddPartModal && addPartFamily && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-bold">Add part number</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Family <span className="font-mono font-semibold text-[#003594]">{addPartFamily.nacCode}</span>
+                {' '}· next free sub-code (e.g. C if A/B exist) is assigned automatically.
+              </p>
+            </div>
+            <div className="p-6 space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Part Number *</label>
+                <input
+                  type="text"
+                  value={addPartForm.partNumber}
+                  onChange={(e) => setAddPartForm({ ...addPartForm, partNumber: e.target.value.toUpperCase() })}
+                  className={`w-full border rounded-md px-3 py-2 text-sm ${addPartErrors.partNumber ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`}
+                  placeholder="Enter new part number"
+                  autoFocus
+                />
+                {addPartErrors.partNumber && <p className="text-red-500 text-xs mt-1">{addPartErrors.partNumber}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Open Quantity</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={addPartForm.openQuantity}
+                  onChange={(e) => setAddPartForm({ ...addPartForm, openQuantity: Number(e.target.value) || 0 })}
+                  className={`w-full border rounded-md px-3 py-2 text-sm ${addPartErrors.openQuantity ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`}
+                />
+                {addPartErrors.openQuantity && <p className="text-red-500 text-xs mt-1">{addPartErrors.openQuantity}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Open Amount</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={addPartForm.openAmount}
+                  onChange={(e) => setAddPartForm({ ...addPartForm, openAmount: Number(e.target.value) || 0 })}
+                  className={`w-full border rounded-md px-3 py-2 text-sm ${addPartErrors.openAmount ? 'border-red-500' : 'border-[#002a6e]/20'} focus:border-[#003594] focus:outline-none`}
+                />
+                {addPartErrors.openAmount && <p className="text-red-500 text-xs mt-1">{addPartErrors.openAmount}</p>}
+              </div>
+              <p className="text-xs text-slate-500">
+                Item name, applicable equipments, and location are copied from the family.
+              </p>
+            </div>
+            <div className="p-6 border-t border-gray-200 flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setShowAddPartModal(false); setAddPartFamily(null); }}
+                className="flex-1 px-4 py-2 border border-[#002a6e]/20 rounded-md hover:bg-[#003594]/5"
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddPartNumber}
+                disabled={submitting}
+                className="flex-1 bg-[#003594] text-white px-4 py-2 rounded-md hover:bg-[#002a6e] transition-colors disabled:opacity-50"
+              >
+                {submitting ? 'Adding…' : 'Add part number'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showMigrateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

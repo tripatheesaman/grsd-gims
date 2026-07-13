@@ -370,7 +370,7 @@ export function RequestItemForm({ isOpen, onClose, item, onSubmit, isManualEntry
                                     <Input
                                         value={partNumber}
                                         onChange={(e) => setPartNumber(sanitizeRequestPartNumberInput(e.target.value))}
-                                        placeholder="Optional, letters and numbers only"
+                                        placeholder="Letters/numbers, or N/A"
                                         className={errors.partNumber ? 'border-red-500' : 'border-[#002a6e]/15'}
                                     />
                                     {errors.partNumber && (
