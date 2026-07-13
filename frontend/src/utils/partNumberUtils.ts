@@ -8,8 +8,10 @@ export function normalizePartNumber(partNumber: string): string {
 }
 
 export function isAbsentPartNumber(partNumber: string | null | undefined): boolean {
-    const normalized = normalizePartNumber(String(partNumber ?? ''));
-    return !normalized || normalized === 'NA' || normalized === 'N/A';
+    const identity = String(partNumber ?? '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+    return !identity || identity === 'NA';
 }
 
 export function resolveReceivePartNumber(partNumber: string | null | undefined): string {
@@ -27,7 +29,10 @@ export function getRequestPartNumberValidationError(
     partNumber: string | null | undefined,
     opts: { allowEmpty?: boolean } = {}
 ): string | null {
-    const normalized = normalizePartNumber(String(partNumber ?? ''));
+    if (isAbsentPartNumber(partNumber)) {
+        return opts.allowEmpty === false ? 'Part number is required' : null;
+    }
+    const normalized = normalizePartNumber(String(partNumber ?? '')).replace(/[^A-Z0-9]/g, '');
     if (!normalized) {
         return opts.allowEmpty === false ? 'Part number is required' : null;
     }
@@ -46,18 +51,73 @@ export function normalizeRequestIdentityValue(value: string | null | undefined):
 export function buildNewRequestIdentity(
     partNumber: string | null | undefined,
     itemName: string | null | undefined
-): { type: 'partNumber' | 'itemName' | 'none'; key: string } {
-    const normalizedPart = normalizeRequestIdentityValue(partNumber);
-    if (normalizedPart) {
-        return { type: 'partNumber', key: normalizedPart };
-    }
+): { type: 'partNumber' | 'itemName' | 'none'; key: string; partKey: string; nameKey: string } {
+    const partKey = isAbsentPartNumber(partNumber)
+        ? ''
+        : normalizeRequestIdentityValue(partNumber);
+    const nameKey = normalizeRequestIdentityValue(itemName);
 
-    const normalizedName = normalizeRequestIdentityValue(itemName);
-    if (normalizedName) {
-        return { type: 'itemName', key: normalizedName };
+    if (partKey) {
+        return { type: 'partNumber', key: partKey, partKey, nameKey };
     }
+    if (nameKey) {
+        return { type: 'itemName', key: nameKey, partKey: '', nameKey };
+    }
+    return { type: 'none', key: '', partKey: '', nameKey: '' };
+}
 
-    return { type: 'none', key: '' };
+/** True when part numbers should be treated as the same for new-item similarity. */
+export function requestPartNumbersAreSimilar(
+    left: string | null | undefined,
+    right: string | null | undefined
+): boolean {
+    const leftAbsent = isAbsentPartNumber(left);
+    const rightAbsent = isAbsentPartNumber(right);
+    if (leftAbsent && rightAbsent) {
+        return true;
+    }
+    if (leftAbsent || rightAbsent) {
+        return false;
+    }
+    return normalizeRequestIdentityValue(left) === normalizeRequestIdentityValue(right);
+}
+
+export function requestNamesAreSimilar(
+    left: string | null | undefined,
+    right: string | null | undefined
+): boolean {
+    const leftKey = normalizeRequestIdentityValue(left);
+    const rightKey = normalizeRequestIdentityValue(right);
+    return Boolean(leftKey) && leftKey === rightKey;
+}
+
+/**
+ * Soft duplicate for new items: part numbers are similar AND names match.
+ * N/A parts only collide when the item name also matches.
+ */
+export function isSimilarNewItemRequest(
+    left: { partNumber?: string | null; itemName?: string | null },
+    right: { partNumber?: string | null; itemName?: string | null }
+): boolean {
+    return (
+        requestPartNumbersAreSimilar(left.partNumber, right.partNumber) &&
+        requestNamesAreSimilar(left.itemName, right.itemName)
+    );
+}
+
+export function buildSimilarNewItemWarningMessage(
+    partNumber: string | null | undefined,
+    itemName: string | null | undefined
+): string {
+    const partLabel = isAbsentPartNumber(partNumber)
+        ? 'N/A'
+        : (normalizePartNumber(String(partNumber ?? '')).replace(/[^A-Z0-9]/g, '') || 'N/A');
+    const nameLabel = String(itemName || '').trim() || 'this item';
+    return (
+        `An item similar to this has already been requested ` +
+        `(part number: ${partLabel}, name: ${nameLabel}). ` +
+        `Are you sure you want to request it again?`
+    );
 }
 
 export function partNumbersMatch(a: string, b: string): boolean {

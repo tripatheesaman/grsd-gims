@@ -14,13 +14,16 @@ import {
     getFamilyVariants,
     previewReceiveTarget,
     syncFamilyLocation,
+    syncFamilyEquipments,
     compactFamilySuffixesAfterDelete,
     purgeStockNacAuxiliaryData,
     remapNacCodeReferences,
+    createVariantRow,
+    nextAvailableLetter,
 } from '../services/inventoryVariantService';
 import { rebuildNacInventoryState, reconcileAllStockBalances, readComputedVirtualBalance, syncStockCurrentBalance } from '../services/issueInventoryService';
 import { buildStockSearchKey } from '../services/searchRelevanceService';
-import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE, normalizePartNumber } from '../utils/nacCodeUtils';
+import { stripSuffixFromNac, validateNacCodeFormat, getNacCodeValidationError, NAC_CODE_VARIANT_FORMAT_MESSAGE, normalizePartNumber, buildSubNacCode, isAbsentPartNumber } from '../utils/nacCodeUtils';
 import { processItemName } from '../utils/utils';
 import { PoolConnection } from 'mysql2/promise';
 
@@ -141,19 +144,50 @@ const propagatePartNumberToTransactions = async (
     }
 };
 
-const backfillCompatForNac = async (connection: any, nacCode: string, equipmentNumber: string): Promise<void> => {
-    const equipmentTokens = expandEquipmentTokens(equipmentNumber);
-    if (equipmentTokens.length === 0) {
-        return;
+/**
+ * Persist applicable equipments for an entire NAC family.
+ * Stock search reads equipment from spare_compatibility (not only stock_details.applicable_equipments),
+ * so we must replace compatibility rows — INSERT IGNORE alone cannot remove codes the user deleted.
+ */
+const replaceFamilyEquipments = async (
+    connection: PoolConnection,
+    baseNacCode: string,
+    equipmentNumber: string
+): Promise<string> => {
+    const base = stripSuffixFromNac(baseNacCode);
+    const tokens = expandEquipmentTokens(equipmentNumber);
+    const normalized = tokens.join(',');
+    await syncFamilyEquipments(connection, base, normalized);
+
+    const variants = await getFamilyVariants(connection, base);
+    const nacCodes = variants.map((v) => v.nac_code).filter(Boolean);
+    if (!nacCodes.length) {
+        nacCodes.push(base);
     }
-    const valuePairs: Array<[string, string]> = equipmentTokens.map(eq => [nacCode, eq]);
-    const tupleChunks = chunk(valuePairs, 10000);
-    for (const c of tupleChunks) {
+
+    const placeholders = nacCodes.map(() => '?').join(', ');
+    await connection.execute(
+        `DELETE FROM spare_compatibility WHERE nac_code IN (${placeholders})`,
+        nacCodes
+    );
+
+    if (!tokens.length) {
+        return normalized;
+    }
+
+    const valuePairs: Array<[string, string]> = [];
+    for (const nac of nacCodes) {
+        for (const token of tokens) {
+            valuePairs.push([nac, token]);
+        }
+    }
+    for (const batch of chunk(valuePairs, 10000)) {
         await connection.query(
             `INSERT IGNORE INTO spare_compatibility (nac_code, equipment_code) VALUES ?`,
-            [c]
+            [batch]
         );
     }
+    return normalized;
 };
 export const migratePartVariants = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -345,7 +379,7 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
             resolvedOpenAmount,
             searchKey,
         ]);
-        await backfillCompatForNac(connection, nacCode, equipmentNumber);
+        await replaceFamilyEquipments(connection, baseNacCode, equipmentNumber);
         await rebuildNacInventoryState(connection, nacCode);
         await syncStockCurrentBalance(connection, nacCode);
         await connection.commit();
@@ -366,6 +400,145 @@ export const createStockItem = async (req: Request, res: Response): Promise<void
         });
     }
     finally {
+        connection.release();
+    }
+};
+export const createFamilyVariant = async (req: Request, res: Response): Promise<void> => {
+    const {
+        baseNacCode,
+        partNumber,
+        openQuantity = 0,
+        openAmount = 0,
+        itemName,
+        equipmentNumber,
+        location,
+    } = req.body;
+    const connection = await pool.getConnection();
+    let started = false;
+    try {
+        await ensureAssetSpareSchema();
+        const base = stripSuffixFromNac(String(baseNacCode || '').trim());
+        const trimmedPart = normalizePartNumber(String(partNumber || ''));
+        if (!base) {
+            res.status(400).json({ error: 'Bad Request', message: 'baseNacCode is required' });
+            return;
+        }
+        if (!trimmedPart || isAbsentPartNumber(trimmedPart)) {
+            res.status(400).json({ error: 'Bad Request', message: 'A valid part number is required' });
+            return;
+        }
+        if (String(trimmedPart).includes(',')) {
+            res.status(400).json({ error: 'Bad Request', message: 'Part number must be a single value (no commas)' });
+            return;
+        }
+        if (Number(openQuantity) < 0 || Number(openAmount) < 0) {
+            res.status(400).json({
+                error: 'Bad Request',
+                message: 'Open quantity and open amount cannot be negative',
+            });
+            return;
+        }
+
+        const variants = await getFamilyVariants(connection, base);
+        if (!variants.length) {
+            res.status(404).json({
+                error: 'Not Found',
+                message: `No stock family found for ${base}`,
+            });
+            return;
+        }
+
+        const existing = await findVariantByPartNumber(connection, base, trimmedPart);
+        if (existing) {
+            res.status(409).json({
+                error: 'Conflict',
+                message: `Part number ${trimmedPart} already exists on ${existing.nac_code}`,
+            });
+            return;
+        }
+
+        const template = variants[0];
+        let targetNac: string;
+        try {
+            targetNac = buildSubNacCode(base, nextAvailableLetter(variants));
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unable to allocate a new sub-code';
+            res.status(400).json({ error: 'Bad Request', message });
+            return;
+        }
+
+        const [dupNac] = await connection.execute<RowDataPacket[]>(
+            `SELECT id FROM stock_details WHERE nac_code = ? LIMIT 1`,
+            [targetNac]
+        );
+        if (dupNac.length) {
+            res.status(409).json({
+                error: 'Conflict',
+                message: `NAC code ${targetNac} already exists`,
+            });
+            return;
+        }
+
+        await connection.beginTransaction();
+        started = true;
+
+        const resolvedItemName = processItemName(String(itemName || template.item_name || ''));
+        const resolvedEquipment = String(equipmentNumber || template.applicable_equipments || '');
+        const resolvedLocation = String(location || template.location || '');
+        const resolvedOpenQty = Number(openQuantity) || 0;
+        const resolvedOpenAmt = Number(openAmount) || 0;
+
+        const insertId = await createVariantRow(connection, {
+            baseNacCode: base,
+            nacCode: targetNac,
+            partNumber: trimmedPart,
+            itemName: resolvedItemName,
+            applicableEquipments: resolvedEquipment,
+            location: resolvedLocation,
+            unit: template.unit || null,
+            imageUrl: null,
+            currentBalance: 0,
+            openQuantity: resolvedOpenQty,
+            openAmount: resolvedOpenAmt,
+        });
+
+        await syncFamilyLocation(connection, base, resolvedLocation);
+        await replaceFamilyEquipments(connection, base, resolvedEquipment);
+
+        const searchKey = buildStockSearchKey({
+            nac_code: targetNac,
+            part_numbers: trimmedPart,
+            item_name: resolvedItemName,
+            applicable_equipments: resolvedEquipment,
+        });
+        await connection.execute(
+            `UPDATE stock_details SET search_key = ? WHERE id = ?`,
+            [searchKey, insertId]
+        );
+
+        await rebuildNacInventoryState(connection, targetNac);
+        await syncStockCurrentBalance(connection, targetNac);
+        await connection.commit();
+        started = false;
+
+        res.status(201).json({
+            message: 'Family part number created successfully',
+            id: insertId,
+            nacCode: targetNac,
+            baseNacCode: base,
+            partNumber: trimmedPart,
+        });
+    } catch (error) {
+        if (started) {
+            await connection.rollback();
+        }
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        logEvents(`Error in createFamilyVariant: ${errorMessage}`, 'stockLog.log');
+        res.status(500).json({
+            error: 'Internal Server Error',
+            message: errorMessage,
+        });
+    } finally {
         connection.release();
     }
 };
@@ -480,7 +653,9 @@ export const updateStockItem = async (req: Request, res: Response): Promise<void
         if (oldPartNumber !== newPartNumber || oldNacCode !== nacCode) {
             await propagatePartNumberToTransactions(connection, nacCode, trimmedPart);
         }
-        await backfillCompatForNac(connection, nacCode, equipmentNumber);
+        // Family-wide replace: stock list reads spare_compatibility, so INSERT-only backfill
+        // would leave removed equipment codes visible after a "successful" update.
+        await replaceFamilyEquipments(connection, baseNacCode, equipmentNumber);
         await rebuildNacInventoryState(connection, nacCode);
         await syncStockCurrentBalance(connection, nacCode);
         const virtualBalance = await readComputedVirtualBalance(connection, nacCode);

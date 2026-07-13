@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, Fragment } from 'react';
-import { Pencil, Trash2, Package } from 'lucide-react';
+import { Pencil, Trash2, Package, Plus } from 'lucide-react';
 import type { StockVariant } from '@/types/search';
 import {
     FamilyNacCell,
@@ -48,8 +48,10 @@ interface StockRecordsTableProps {
     hasActiveFilters: boolean;
     canEdit: boolean;
     canDelete: boolean;
+    canAdd?: boolean;
     onEdit: (row: StockRecordRow) => void;
     onDelete: (row: StockRecordRow) => void;
+    onAddPartNumber?: (row: StockRecordRow) => void;
     page: number;
     pageSize: number;
     totalCount: number;
@@ -77,8 +79,10 @@ export function StockRecordsTable({
     hasActiveFilters,
     canEdit,
     canDelete,
+    canAdd = false,
     onEdit,
     onDelete,
+    onAddPartNumber,
     page,
     pageSize,
     totalCount,
@@ -120,7 +124,7 @@ export function StockRecordsTable({
         );
     }
 
-    const showActions = canEdit || canDelete;
+    const showActions = canEdit || canDelete || (canAdd && !!onAddPartNumber);
 
     return (
         <div className="flex flex-col">
@@ -244,12 +248,24 @@ export function StockRecordsTable({
                                         {showActions && !hasVariants && (
                                             <TableCell className="py-3 text-right">
                                                 <div className="flex justify-end gap-1">
+                                                    {canAdd && onAddPartNumber && (
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            title="Add part number to this family"
+                                                            className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10"
+                                                            onClick={() => onAddPartNumber(r)}
+                                                        >
+                                                            <Plus className="h-4 w-4" />
+                                                        </Button>
+                                                    )}
                                                     {canEdit && (
                                                         <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10" onClick={() => onEdit(r)}>
                                                             <Pencil className="h-4 w-4" />
                                                         </Button>
                                                     )}
-                                                    {canDelete && !hasVariants && (
+                                                    {canDelete && (
                                                         <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-red-600 hover:bg-red-50" onClick={() => onDelete(r)}>
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>
@@ -257,7 +273,25 @@ export function StockRecordsTable({
                                                 </div>
                                             </TableCell>
                                         )}
-                                        {showActions && hasVariants && <TableCell className="py-3" />}
+                                        {showActions && hasVariants && (
+                                            <TableCell className="py-3 text-right">
+                                                {canAdd && onAddPartNumber ? (
+                                                    <div className="flex justify-end">
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            title="Add part number to this family"
+                                                            className="h-8 px-2 text-[#003594] hover:bg-[#003594]/10"
+                                                            onClick={() => onAddPartNumber(r)}
+                                                        >
+                                                            <Plus className="h-4 w-4" />
+                                                            <span className="ml-1 text-xs">Part</span>
+                                                        </Button>
+                                                    </div>
+                                                ) : null}
+                                            </TableCell>
+                                        )}
                                     </TableRow>
                                     {hasVariants && isExpanded && variants.map(v => (
                                         <TableRow key={`v-${v.id}`} className="bg-slate-50/80 border-slate-100">

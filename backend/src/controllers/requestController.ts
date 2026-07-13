@@ -11,9 +11,9 @@ import { ensureAssetSpareSchema } from '../services/assetSpareSchema';
 import { validateRequestTarget, type IssueValidationCaches } from '../services/issueValidationService';
 import { setNoCacheHeaders, sendAlreadyProcessed } from '../utils/approvalResponse';
 import {
-    buildNewRequestIdentity,
+    buildSimilarNewItemWarningMessage,
     getRequestPartNumberValidationError,
-    normalizeRequestIdentityValue,
+    isSimilarNewItemRequest,
     prepareRequestItemForSave,
     REQUEST_ITEM_NAME_SQL,
     REQUEST_STOCK_JOIN,
@@ -129,27 +129,22 @@ interface SearchRequestResult extends RowDataPacket {
 
 const MAX_REFERENCE_SKIP_HOURS = 4;
 
-const REQUEST_NORMALIZED_PART_SQL = `REGEXP_REPLACE(UPPER(COALESCE(part_number, '')), '[^A-Z0-9]', '')`;
-const REQUEST_NORMALIZED_NAME_SQL = `REGEXP_REPLACE(UPPER(COALESCE(item_name, '')), '[^A-Z0-9]', '')`;
-
 const buildDuplicateRequestMessage = (
-    identity: { type: 'partNumber' | 'itemName' | 'none'; key: string },
     itemName: string,
     partNumber: string
-): string => {
-    if (identity.type === 'partNumber') {
-        return `A pending new-item request already exists for part number ${partNumber || identity.key}`;
-    }
-    return `A pending new-item request already exists for item ${itemName || identity.key}`;
-};
+): string => buildSimilarNewItemWarningMessage(partNumber, itemName);
 
+/**
+ * Validate new-item payload fields. Soft similarity (same part + name) is a
+ * frontend confirmation warning — not a hard block on submit.
+ */
 const assertNoDuplicateNewItemRequests = async (
     connection: PoolConnection,
     items: Array<{ nacCode: string; partNumber: string; itemName: string }>,
     opts: { excludeIds?: number[] } = {}
 ): Promise<void> => {
-    const localKeys = new Set<string>();
-    const excludeIds = opts.excludeIds ?? [];
+    void connection;
+    void opts;
 
     for (const item of items) {
         if (String(item.nacCode || '').trim() !== 'N/A') {
@@ -160,37 +155,9 @@ const assertNoDuplicateNewItemRequests = async (
         if (partNumberError) {
             throw new Error(partNumberError);
         }
-
-        const identity = buildNewRequestIdentity(item.partNumber, item.itemName);
-        if (identity.type === 'none') {
-            throw new Error('New item requests require a part number or item name');
-        }
-
-        const localKey = `${identity.type}:${identity.key}`;
-        if (localKeys.has(localKey)) {
-            throw new Error(buildDuplicateRequestMessage(identity, item.itemName, item.partNumber));
-        }
-        localKeys.add(localKey);
-
-        const excludeClause = excludeIds.length
-            ? ` AND id NOT IN (${excludeIds.map(() => '?').join(', ')})`
-            : '';
-        const identitySql = identity.type === 'partNumber'
-            ? REQUEST_NORMALIZED_PART_SQL
-            : REQUEST_NORMALIZED_NAME_SQL;
-        const [rows] = await connection.query<RowDataPacket[]>(
-            `SELECT id
-             FROM request_details
-             WHERE approval_status NOT IN ('CLOSED', 'REJECTED')
-               AND IFNULL(is_received, 0) = 0
-               AND (nac_code IS NULL OR TRIM(nac_code) = '' OR nac_code = 'N/A')
-               AND ${identitySql} = ?
-               ${excludeClause}
-             LIMIT 1`,
-            excludeIds.length ? [identity.key, ...excludeIds] : [identity.key]
-        );
-        if (rows.length > 0) {
-            throw new Error(buildDuplicateRequestMessage(identity, item.itemName, item.partNumber));
+        const itemName = String(item.itemName || '').trim();
+        if (!itemName) {
+            throw new Error('New item requests require an item name');
         }
     }
 };
@@ -2224,6 +2191,7 @@ export const checkDuplicateRequest = async (req: Request, res: Response): Promis
         }
 
         let isDuplicate = false;
+        let requiresConfirmation = false;
         let message = 'Item is available for request';
 
         if (nacCode && nacCode !== 'N/A') {
@@ -2240,38 +2208,46 @@ export const checkDuplicateRequest = async (req: Request, res: Response): Promis
                 ? 'This item is already requested and pending approval'
                 : message;
         } else {
-            const identity = buildNewRequestIdentity(partNumber, itemName);
-            if (identity.type === 'none') {
+            if (!itemName.trim()) {
                 res.status(400).json({
                     error: 'Bad Request',
-                    message: 'partNumber or itemName is required for new item duplicate check'
+                    message: 'itemName is required for new item duplicate check'
                 });
                 return;
             }
 
-            const identitySql = identity.type === 'partNumber'
-                ? REQUEST_NORMALIZED_PART_SQL
-                : REQUEST_NORMALIZED_NAME_SQL;
             const [rows] = await pool.query<RowDataPacket[]>(
-                `SELECT id
+                `SELECT id, part_number, item_name
                  FROM request_details
                  WHERE approval_status NOT IN ('CLOSED', 'REJECTED')
                    AND IFNULL(is_received, 0) = 0
-                   AND (nac_code IS NULL OR TRIM(nac_code) = '' OR nac_code = 'N/A')
-                   AND ${identitySql} = ?
-                 LIMIT 1`,
-                [identity.key]
+                   AND (nac_code IS NULL OR TRIM(nac_code) = '' OR nac_code = 'N/A')`
             );
-            isDuplicate = rows.length > 0;
-            message = isDuplicate
-                ? buildDuplicateRequestMessage(identity, itemName, normalizeRequestIdentityValue(partNumber))
-                : message;
+
+            const match = rows.find((row) =>
+                isSimilarNewItemRequest(
+                    { partNumber, itemName },
+                    { partNumber: String(row.part_number || ''), itemName: String(row.item_name || '') }
+                )
+            );
+
+            if (match) {
+                // Soft warning only: part similar AND name same (incl. N/A + same name)
+                requiresConfirmation = true;
+                isDuplicate = false;
+                message = buildDuplicateRequestMessage(itemName, partNumber);
+            }
         }
 
-        logEvents(`Duplicate check for request item ${nacCode || partNumber || itemName}: ${isDuplicate ? 'Duplicate found' : 'No duplicate'}`, "requestLog.log");
+        logEvents(
+            `Duplicate check for request item ${nacCode || partNumber || itemName}: ` +
+            `${requiresConfirmation ? 'Similar match (confirm)' : isDuplicate ? 'Duplicate found' : 'No duplicate'}`,
+            "requestLog.log"
+        );
 
         res.status(200).json({
             isDuplicate,
+            requiresConfirmation,
             message
         });
     } catch (error) {

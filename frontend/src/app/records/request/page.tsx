@@ -25,8 +25,25 @@ import {
 } from '@/components/records';
 import { RequestRecordFormBody } from '@/components/records/forms/RequestRecordFormBody';
 import { API } from '@/lib/api';
-import { resolveImageUrl, withBasePath } from '@/lib/urls';
+import { withBasePath } from '@/lib/urls';
 import { useCustomToast } from '@/components/ui/custom-toast';
+import { isAbsentPartNumber } from '@/utils/partNumberUtils';
+
+const toDateInputValue = (value: string | null | undefined): string => {
+    if (!value) {
+        return '';
+    }
+    const raw = String(value);
+    const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : '';
+};
+
+const asFormString = (value: unknown): string => {
+    if (value == null) {
+        return '';
+    }
+    return String(value);
+};
 interface RequestRecord {
     id: number;
     request_number: string;
@@ -259,24 +276,30 @@ export default function RequestRecordsPage() {
     };
     const validateForm = (): boolean => {
         const errors: Record<string, string> = {};
-        if (!formData.request_number.trim())
+        if (!asFormString(formData.request_number).trim()) {
             errors.request_number = 'Request number is required';
-        if (!formData.nac_code.trim())
+        }
+        if (!asFormString(formData.nac_code).trim()) {
             errors.nac_code = 'NAC code is required';
-        if (!formData.request_date)
+        }
+        if (!asFormString(formData.request_date).trim()) {
             errors.request_date = 'Request date is required';
-        if (!formData.part_number.trim())
-            errors.part_number = 'Part number is required';
-        if (!formData.item_name.trim())
+        }
+        if (!asFormString(formData.item_name).trim()) {
             errors.item_name = 'Item name is required';
-        if (!formData.unit.trim())
+        }
+        if (!asFormString(formData.unit).trim()) {
             errors.unit = 'Unit is required';
-        if (formData.requested_quantity <= 0)
+        }
+        if (!Number.isFinite(Number(formData.requested_quantity)) || Number(formData.requested_quantity) <= 0) {
             errors.requested_quantity = 'Requested quantity must be greater than 0';
-        if (!formData.equipment_number.trim())
+        }
+        if (!asFormString(formData.equipment_number).trim()) {
             errors.equipment_number = 'Equipment number is required';
-        if (!formData.requested_by.trim())
+        }
+        if (!asFormString(formData.requested_by).trim()) {
             errors.requested_by = 'Requested by is required';
+        }
         setFormErrors(errors);
         return Object.keys(errors).length === 0;
     };
@@ -335,7 +358,15 @@ export default function RequestRecordsPage() {
         }
     };
     const handleUpdate = async () => {
-        if (!validateForm() || !editingRecord) {
+        if (!editingRecord) {
+            return;
+        }
+        if (!validateForm()) {
+            showErrorToast({
+                title: 'Error',
+                message: 'Please fix the highlighted fields before saving.',
+                duration: 3000,
+            });
             return;
         }
         try {
@@ -356,9 +387,22 @@ export default function RequestRecordsPage() {
                 const uploadResult = await uploadResponse.json();
                 imagePath = uploadResult.path;
             }
+            const partNumber = asFormString(formData.part_number).trim();
             const response = await API.put(`/api/request-records/${editingRecord.id}`, {
                 ...formData,
-                image_path: imagePath
+                request_number: asFormString(formData.request_number).trim(),
+                nac_code: asFormString(formData.nac_code).trim(),
+                request_date: toDateInputValue(formData.request_date),
+                part_number: isAbsentPartNumber(partNumber) ? 'N/A' : partNumber,
+                item_name: asFormString(formData.item_name).trim(),
+                unit: asFormString(formData.unit).trim(),
+                requested_quantity: Number(formData.requested_quantity),
+                current_balance: Number(formData.current_balance) || 0,
+                previous_rate: asFormString(formData.previous_rate).trim() || 'N/A',
+                equipment_number: asFormString(formData.equipment_number).trim(),
+                requested_by: asFormString(formData.requested_by).trim(),
+                approval_status: asFormString(formData.approval_status).trim() || 'PENDING',
+                image_path: imagePath || '',
             });
             if (response.status === 200) {
                 showSuccessToast({
@@ -379,7 +423,10 @@ export default function RequestRecordsPage() {
                         message?: string;
                     };
                 };
-            })?.response?.data?.message || 'Failed to update request record';
+                message?: string;
+            })?.response?.data?.message
+                || (error as { message?: string })?.message
+                || 'Failed to update request record';
             showErrorToast({
                 title: 'Error',
                 message: errorMessage,
@@ -465,26 +512,31 @@ export default function RequestRecordsPage() {
     const openEditModal = (record: RequestRecord) => {
         setEditingRecord(record);
         const formDataToSet = {
-            request_number: record.request_number,
-            nac_code: record.nac_code,
-            request_date: record.request_date.split('T')[0],
-            part_number: record.part_number,
-            item_name: record.item_name,
-            unit: record.unit,
-            requested_quantity: record.requested_quantity,
-            current_balance: record.current_balance,
-            previous_rate: record.previous_rate,
-            equipment_number: record.equipment_number,
-            image_path: record.image_path || '',
-            specifications: record.specifications || '',
-            remarks: record.remarks || '',
-            requested_by: record.requested_by,
-            approval_status: record.approval_status,
-            reference_doc: record.reference_doc || ''
+            request_number: asFormString(record.request_number),
+            nac_code: asFormString(record.nac_code),
+            request_date: toDateInputValue(record.request_date),
+            part_number: asFormString(record.part_number) || 'N/A',
+            item_name: asFormString(record.item_name),
+            unit: asFormString(record.unit),
+            requested_quantity: Number(record.requested_quantity) || 0,
+            current_balance: Number(record.current_balance) || 0,
+            previous_rate: asFormString(record.previous_rate) || 'N/A',
+            equipment_number: asFormString(record.equipment_number),
+            image_path: asFormString(record.image_path),
+            specifications: asFormString(record.specifications),
+            remarks: asFormString(record.remarks),
+            requested_by: asFormString(record.requested_by),
+            approval_status: asFormString(record.approval_status) || 'PENDING',
+            reference_doc: asFormString(record.reference_doc),
         };
         setFormData(formDataToSet);
+        setFormErrors({});
         setSelectedImage(null);
-        setImagePreview(record.image_path ? resolveImageUrl(record.image_path, record.image_path) : null);
+        setImagePreview(
+            record.image_path
+                ? withBasePath(record.image_path.startsWith('/') ? record.image_path : `/${record.image_path}`)
+                : null
+        );
         setShowEditModal(true);
         setError(null);
     };

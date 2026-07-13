@@ -41,11 +41,20 @@ export function normalizeRequestIdentityValue(value: string | null | undefined):
         .replace(/[^A-Z0-9]/g, '');
 }
 
+/** N/A, NA, empty, or punctuation-only — item has no real part number. */
+export function isAbsentRequestPartNumber(partNumber: string | null | undefined): boolean {
+    const identity = normalizeRequestIdentityValue(partNumber);
+    return !identity || identity === 'NA';
+}
+
 export function getRequestPartNumberValidationError(
     partNumber: string | null | undefined,
     opts: { allowEmpty?: boolean } = {}
 ): string | null {
-    const normalized = normalizeRequestPartNumber(partNumber);
+    if (isAbsentRequestPartNumber(partNumber)) {
+        return opts.allowEmpty === false ? 'Part number is required' : null;
+    }
+    const normalized = normalizeRequestPartNumber(partNumber).replace(/[^A-Z0-9]/g, '');
     if (!normalized) {
         return opts.allowEmpty === false ? 'Part number is required' : null;
     }
@@ -58,18 +67,73 @@ export function getRequestPartNumberValidationError(
 export function buildNewRequestIdentity(
     partNumber: string | null | undefined,
     itemName: string | null | undefined
-): { type: 'partNumber' | 'itemName' | 'none'; key: string } {
-    const normalizedPartNumber = normalizeRequestIdentityValue(partNumber);
-    if (normalizedPartNumber) {
-        return { type: 'partNumber', key: normalizedPartNumber };
-    }
+): { type: 'partNumber' | 'itemName' | 'none'; key: string; partKey: string; nameKey: string } {
+    const partKey = isAbsentRequestPartNumber(partNumber)
+        ? ''
+        : normalizeRequestIdentityValue(partNumber);
+    const nameKey = normalizeRequestIdentityValue(itemName);
 
-    const normalizedItemName = normalizeRequestIdentityValue(itemName);
-    if (normalizedItemName) {
-        return { type: 'itemName', key: normalizedItemName };
+    if (partKey) {
+        return { type: 'partNumber', key: partKey, partKey, nameKey };
     }
+    if (nameKey) {
+        return { type: 'itemName', key: nameKey, partKey: '', nameKey };
+    }
+    return { type: 'none', key: '', partKey: '', nameKey: '' };
+}
 
-    return { type: 'none', key: '' };
+/** True when part numbers should be treated as the same for new-item similarity. */
+export function requestPartNumbersAreSimilar(
+    left: string | null | undefined,
+    right: string | null | undefined
+): boolean {
+    const leftAbsent = isAbsentRequestPartNumber(left);
+    const rightAbsent = isAbsentRequestPartNumber(right);
+    if (leftAbsent && rightAbsent) {
+        return true;
+    }
+    if (leftAbsent || rightAbsent) {
+        return false;
+    }
+    return normalizeRequestIdentityValue(left) === normalizeRequestIdentityValue(right);
+}
+
+export function requestNamesAreSimilar(
+    left: string | null | undefined,
+    right: string | null | undefined
+): boolean {
+    const leftKey = normalizeRequestIdentityValue(left);
+    const rightKey = normalizeRequestIdentityValue(right);
+    return Boolean(leftKey) && leftKey === rightKey;
+}
+
+/**
+ * Soft duplicate for new items: part numbers are similar AND names match.
+ * N/A parts only collide when the item name also matches.
+ */
+export function isSimilarNewItemRequest(
+    left: { partNumber?: string | null; itemName?: string | null },
+    right: { partNumber?: string | null; itemName?: string | null }
+): boolean {
+    return (
+        requestPartNumbersAreSimilar(left.partNumber, right.partNumber) &&
+        requestNamesAreSimilar(left.itemName, right.itemName)
+    );
+}
+
+export function buildSimilarNewItemWarningMessage(
+    partNumber: string | null | undefined,
+    itemName: string | null | undefined
+): string {
+    const partLabel = isAbsentRequestPartNumber(partNumber)
+        ? 'N/A'
+        : (normalizeRequestPartNumber(partNumber).replace(/[^A-Z0-9]/g, '') || 'N/A');
+    const nameLabel = String(itemName || '').trim() || 'this item';
+    return (
+        `An item similar to this has already been requested ` +
+        `(part number: ${partLabel}, name: ${nameLabel}). ` +
+        `Are you sure you want to request it again?`
+    );
 }
 
 export async function prepareRequestItemForSave(
@@ -83,16 +147,20 @@ export async function prepareRequestItemForSave(
         if (partNumberError) {
             throw new Error(partNumberError);
         }
-        const normalizedPartNumber = normalizeRequestPartNumber(item.partNumber);
         const itemName = String(item.itemName || '').trim();
-        const identity = buildNewRequestIdentity(normalizedPartNumber, itemName);
-        if (identity.type === 'none') {
-            throw new Error('New item requests require a part number or item name');
+        if (!itemName) {
+            throw new Error('New item requests require an item name');
+        }
+        const storedPart = isAbsentRequestPartNumber(item.partNumber)
+            ? 'N/A'
+            : normalizeRequestPartNumber(item.partNumber).replace(/[^A-Z0-9]/g, '');
+        if (!storedPart) {
+            throw new Error('New item requests require a part number or N/A');
         }
 
         return {
             nacCode: 'N/A',
-            partNumber: normalizedPartNumber || 'N/A',
+            partNumber: storedPart,
             itemName,
             unit: String(item.unit || '').trim() || 'N/A',
             currentBalance: 0,

@@ -1,6 +1,8 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Loader2, X } from 'lucide-react';
 import { recordsTheme } from './recordsTheme';
 
@@ -32,10 +34,23 @@ export function RecordsModal({
     size = 'lg',
     submitting,
 }: RecordsModalProps) {
-    if (!open) return null;
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.body.style.overflow = previousOverflow;
+        };
+    }, [open]);
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]">
+    if (!open || typeof document === 'undefined') {
+        return null;
+    }
+
+    return createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-[1px]">
             <div
                 className={`relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-2xl border border-[#002a6e]/10 bg-white shadow-2xl ${SIZE_CLASS[size]}`}
                 role="dialog"
@@ -68,7 +83,8 @@ export function RecordsModal({
                     <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">{footer}</div>
                 )}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 

@@ -16,7 +16,8 @@ import { usePrediction } from '@/hooks/usePrediction';
 import { PredictionSummaryCard } from '@/components/prediction/PredictionSummaryCard';
 import { Spinner } from '@/components/ui/spinner';
 import {
-    buildNewRequestIdentity,
+    buildSimilarNewItemWarningMessage,
+    isSimilarNewItemRequest,
     sanitizeRequestPartNumberInput,
 } from '@/utils/partNumberUtils';
 const SearchResults = lazy(() => import('@/components/search/SearchResults').then(module => ({ default: module.SearchResults })));
@@ -224,20 +225,15 @@ export default function RequestPage() {
         setIsManualEntry(true);
         setIsItemFormOpen(true);
     };
-    const hasDuplicateNewItemInCart = useCallback((item: RequestCartItem) => {
+    const hasSimilarNewItemInCart = useCallback((item: RequestCartItem) => {
         if (item.nacCode !== 'N/A') {
-            return false;
-        }
-        const identity = buildNewRequestIdentity(item.partNumber, item.itemName);
-        if (identity.type === 'none') {
             return false;
         }
         return cart.some((cartItem) => {
             if (cartItem.nacCode !== 'N/A') {
                 return false;
             }
-            const cartIdentity = buildNewRequestIdentity(cartItem.partNumber, cartItem.itemName);
-            return cartIdentity.type === identity.type && cartIdentity.key === identity.key;
+            return isSimilarNewItemRequest(item, cartItem);
         });
     }, [cart]);
     const handleAddToCart = async (item: RequestCartItem) => {
@@ -249,19 +245,21 @@ export default function RequestPage() {
             });
             return;
         }
-        if (hasDuplicateNewItemInCart(item)) {
-            showErrorToast({
-                title: 'Error',
-                message: 'This new item is already in the request slip.',
-                duration: 4000,
-            });
-            return;
+        let similarityConfirmed = false;
+        if (hasSimilarNewItemInCart(item)) {
+            const confirmed = window.confirm(
+                buildSimilarNewItemWarningMessage(item.partNumber, item.itemName)
+            );
+            if (!confirmed) {
+                return;
+            }
+            similarityConfirmed = true;
         }
         const duplicateParams = item.nacCode && item.nacCode !== 'N/A'
             ? { nacCode: item.nacCode }
             : {
                 nacCode: 'N/A',
-                partNumber: sanitizeRequestPartNumberInput(item.partNumber),
+                partNumber: sanitizeRequestPartNumberInput(item.partNumber) || 'N/A',
                 itemName: item.itemName,
             };
         if ((item.nacCode && item.nacCode !== 'N/A') || item.itemName.trim()) {
@@ -276,6 +274,21 @@ export default function RequestPage() {
                         duration: 5000,
                     });
                     return;
+                }
+                if (
+                    response.status === 200 &&
+                    response.data.requiresConfirmation &&
+                    !similarityConfirmed
+                ) {
+                    const confirmed = window.confirm(
+                        String(
+                            response.data.message ||
+                            buildSimilarNewItemWarningMessage(item.partNumber, item.itemName)
+                        )
+                    );
+                    if (!confirmed) {
+                        return;
+                    }
                 }
             }
             catch {
