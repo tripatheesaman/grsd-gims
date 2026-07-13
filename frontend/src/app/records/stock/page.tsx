@@ -278,11 +278,10 @@ export default function StockRecordsPage() {
         setReconciling(true);
         try {
             const res = await API.post('/api/stock/reconcile-balances');
-            const data = res.data as { variantsProcessed?: number; balanceFixes?: number; message?: string };
+            const data = res.data as { variantsProcessed?: number; balanceFixes?: number; duplicatesRemoved?: number; message?: string };
             showSuccessToast({
                 title: 'Balances reconciled',
-                message: data.message
-                    || `Rebuilt ${data.variantsProcessed ?? 0} variant(s), fixed ${data.balanceFixes ?? 0} stored balance(s).`,
+                message: `Rebuilt ${data.variantsProcessed ?? 0} variant(s), fixed ${data.balanceFixes ?? 0} stored balance(s), merged ${data.duplicatesRemoved ?? 0} duplicate row(s).`,
                 duration: 8000,
             });
             fetchData();

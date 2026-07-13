@@ -701,6 +701,21 @@ export async function promoteSinglePartFamily(
     const newNacCode = buildSubNacCode(base, 'A');
     const oldNacCode = stockRow.nac_code;
 
+    // Never promote onto an existing sub-code — that would create a duplicate NAC row.
+    const [collision] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM stock_details WHERE nac_code = ? AND id <> ? LIMIT 1`,
+        [newNacCode, stockRow.id]
+    );
+    if (collision.length) {
+        // Ensure base_nac_code is set and leave the code as-is; the caller will pick the
+        // next free letter for the incoming variant.
+        await connection.execute(
+            `UPDATE stock_details SET base_nac_code = ? WHERE id = ?`,
+            [base, stockRow.id]
+        );
+        return { promotedNacCode: stockRow.nac_code };
+    }
+
     await connection.execute(
         `UPDATE stock_details SET nac_code = ?, base_nac_code = ? WHERE id = ?`,
         [newNacCode, base, stockRow.id]
